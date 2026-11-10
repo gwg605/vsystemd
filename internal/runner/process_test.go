@@ -59,6 +59,14 @@ func TestProcessHelper(t *testing.T) {
 		fmt.Fprint(os.Stdout, args[1])
 		fmt.Fprint(os.Stderr, args[2])
 		os.Exit(0)
+	case "failonce":
+		if _, err := os.Stat(args[1]); err == nil {
+			os.Exit(0)
+		}
+		if err := os.WriteFile(args[1], []byte("failed"), 0o644); err != nil {
+			os.Exit(2)
+		}
+		os.Exit(1)
 	case "sleep":
 		duration, err := time.ParseDuration(args[1])
 		if err != nil {
