@@ -5,6 +5,12 @@ package runner
 import (
 	"errors"
 	"fmt"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strings"
+
+	"golang.org/x/sys/windows/svc"
 
 	"github.com/gwg605/vsystemd/internal/storage"
 	"github.com/gwg605/vsystemd/internal/transport"
@@ -63,7 +69,39 @@ func (r *Runner) handle(sourcePeer string, msg transport.Message) error {
 }
 
 func (r *Runner) Run() error {
-	return Run(r.name, r.handler)
+	serviceName := strings.TrimSuffix(r.name, filepath.Ext(r.name))
+	return Run(serviceName, r.handler)
+}
+
+func (r *Runner) RunConsole() error {
+	requests := make(chan svc.ChangeRequest)
+	changes := make(chan svc.Status)
+	done := make(chan struct{})
+
+	go func() {
+		r.handler.Execute(nil, requests, changes)
+		close(done)
+	}()
+	go func() {
+		for range changes {
+		}
+	}()
+
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt)
+	defer signal.Stop(signals)
+
+	select {
+	case <-signals:
+		select {
+		case requests <- svc.ChangeRequest{Cmd: svc.Stop}:
+		case <-done:
+		}
+		<-done
+	case <-done:
+	}
+	close(changes)
+	return nil
 }
 
 func (r *Runner) Close() error {
