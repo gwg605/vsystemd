@@ -2,3 +2,5 @@ github.com/akamensky/argparse v1.4.0 h1:YGzvsTqCvbEZhL8zZu2AiA5nq805NZh75JNj4ajn
 github.com/akamensky/argparse v1.4.0/go.mod h1:S5kwC7IuDcEr5VeXtGPRVZ5o/FdhcMlQz4IZQuw64xA=
 gitlab.com/allddd/go-systemd-time v1.1.0 h1:eIQU1corJxbOq433Htk6aFN9M3hezAn7n1xU/ehJYp4=
 gitlab.com/allddd/go-systemd-time v1.1.0/go.mod h1:Z61KVy+ve7n5AHCtIl1mlGLhZB4ixJnoyEQf6dK/Jpc=
+golang.org/x/sys v0.50.0 h1:dkKZEFTEKaLr1sjhs0WiKqoi8Jj5nHbS3Njmx1UoMJs=
+golang.org/x/sys v0.50.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=
