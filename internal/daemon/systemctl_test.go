@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/runner"
 	"github.com/gwg605/vsystemd/internal/scm"
 	scmfake "github.com/gwg605/vsystemd/internal/scm/fake"
@@ -61,19 +62,19 @@ func TestStatusResponse(t *testing.T) {
 		Timestamp:    time.Now(),
 	})
 
-	response := controlRequest(t, client, runner.MessageStatusRequest, statusRequest{Unit: "app.service"})
-	if response.Type != messageStatusResponse || response.RequestID == "" {
+	response := controlRequest(t, client, protocol.TypeStatusRequest, protocol.StatusRequest{Unit: "app.service"})
+	if response.Type != protocol.TypeStatusResponse || response.RequestID == "" {
 		t.Fatalf("response = %+v", response)
 	}
 
-	var status statusResponse
+	var status protocol.StatusResponse
 	if err := json.Unmarshal(response.Payload, &status); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
 	if status.Unit != "app.service" {
 		t.Errorf("Unit = %q", status.Unit)
 	}
-	if status.SystemdState != SystemdActiveRunning {
+	if status.SystemdState != string(SystemdActiveRunning) {
 		t.Errorf("SystemdState = %q", status.SystemdState)
 	}
 	if status.SCMState != scm.StateRunning {
@@ -92,12 +93,12 @@ func TestStatusUnknownUnit(t *testing.T) {
 	store := storagefake.New()
 	_, client := newControlClient(t, manager, store)
 
-	response := controlRequest(t, client, runner.MessageStatusRequest, statusRequest{Unit: "missing.service"})
-	if response.Type != messageErrorResponse {
+	response := controlRequest(t, client, protocol.TypeStatusRequest, protocol.StatusRequest{Unit: "missing.service"})
+	if response.Type != protocol.TypeErrorResponse {
 		t.Fatalf("response type = %q", response.Type)
 	}
 
-	var failure errorResponse
+	var failure protocol.ErrorResponse
 	if err := json.Unmarshal(response.Payload, &failure); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
@@ -132,17 +133,17 @@ func TestListUnits(t *testing.T) {
 	}
 
 	_, client := newControlClient(t, manager, store)
-	response := controlRequest(t, client, messageListUnits, nil)
-	if response.Type != messageListUnitsResponse || response.RequestID == "" {
+	response := controlRequest(t, client, protocol.TypeListUnits, nil)
+	if response.Type != protocol.TypeListUnitsResponse || response.RequestID == "" {
 		t.Fatalf("response = %+v", response)
 	}
 
-	var list listUnitsResponse
+	var list protocol.ListUnitsResponse
 	if err := json.Unmarshal(response.Payload, &list); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
 
-	units := make(map[string]unitStatus, len(list.Units))
+	units := make(map[string]protocol.UnitStatus, len(list.Units))
 	for _, entry := range list.Units {
 		units[entry.Unit] = entry
 	}
@@ -151,7 +152,7 @@ func TestListUnits(t *testing.T) {
 	if !ok {
 		t.Fatal("app.service missing")
 	}
-	if app.Type != "service" || app.SystemdState != SystemdActiveRunning || app.SCMState != scm.StateRunning {
+	if app.Type != "service" || app.SystemdState != string(SystemdActiveRunning) || app.SCMState != scm.StateRunning {
 		t.Errorf("app = %+v", app)
 	}
 	if app.Description != "App" {
@@ -193,12 +194,12 @@ func TestDaemonReloadRequest(t *testing.T) {
 	}
 
 	_, client := newControlClient(t, manager, store)
-	response := controlRequest(t, client, messageDaemonReload, nil)
-	if response.Type != messageReloadResult || response.RequestID == "" {
+	response := controlRequest(t, client, protocol.TypeDaemonReload, nil)
+	if response.Type != protocol.TypeReloadResult || response.RequestID == "" {
 		t.Fatalf("response = %+v", response)
 	}
 
-	var result reloadResult
+	var result protocol.ReloadResult
 	if err := json.Unmarshal(response.Payload, &result); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}

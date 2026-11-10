@@ -55,6 +55,32 @@ func (windowsManager) UpdateService(cfg ServiceConfig) error {
 	return nil
 }
 
+func (windowsManager) SetStartType(name string, startType StartType) error {
+	m, err := mgr.Connect()
+	if err != nil {
+		return fmt.Errorf("connect to SCM: %w", err)
+	}
+	defer m.Disconnect()
+
+	service, err := m.OpenService(name)
+	if err != nil {
+		return fmt.Errorf("open service %s: %w", name, err)
+	}
+	defer service.Close()
+
+	err = windows.ChangeServiceConfig(
+		service.Handle,
+		windows.SERVICE_NO_CHANGE,
+		windowsStartType(startType),
+		windows.SERVICE_NO_CHANGE,
+		nil, nil, nil, nil, nil, nil, nil,
+	)
+	if err != nil {
+		return fmt.Errorf("set start type for %s: %w", name, err)
+	}
+	return nil
+}
+
 func (windowsManager) DeleteService(name string) error {
 	m, err := mgr.Connect()
 	if err != nil {
