@@ -5,25 +5,10 @@ import (
 	"strings"
 
 	"github.com/gwg605/vsystemd/internal/scm"
-	"github.com/gwg605/vsystemd/internal/storage"
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
-type Daemon struct {
-	manager    scm.Manager
-	store      storage.Storage
-	binaryPath string
-}
-
-func New(manager scm.Manager, store storage.Storage, binaryPath string) *Daemon {
-	return &Daemon{
-		manager:    manager,
-		store:      store,
-		binaryPath: binaryPath,
-	}
-}
-
-func (d *Daemon) Reload() error {
+func (d *Daemon) reload() error {
 	desired, err := d.desiredServices()
 	if err != nil {
 		return err
