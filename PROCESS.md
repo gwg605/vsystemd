@@ -1,0 +1,66 @@
+# vsystemd Development Process
+
+---
+
+## Branching
+
+- `master` — stable, reviewed code only
+- Every task gets its own branch: `feature/phase-X.Y-description`, `fix/description`
+- Each branch requires user review before merge
+- Merge to master with `--no-ff` only after explicit user approval
+
+---
+
+## Code Style
+
+- Minimal comments in code and tests — code should be self-explanatory
+- In interfaces: prefer custom types over primitives
+- In implementations: use types that naturally fit the logic of the package; avoid unnecessary casts
+- No dead code, no commented-out code
+
+---
+
+## Tests
+
+- Unit tests cover happy path and minimal error logic
+- No boundary/edge case tests — code may change significantly and we don't want tests tightly coupled to current logic
+- Tests are written alongside the code, not after
+- Windows-specific tests (SCM, named pipes) use `//go:build windows` build tag
+- Fake implementations live in `fake/` subdirectory of their respective package
+
+---
+
+## CI
+
+- GitHub Actions with `windows-latest` runner
+- CI runs all tests except those requiring real Windows SCM (`//go:build windows` and additional tag `//go:build integration`)
+- Real SCM integration tests are run manually on local Windows machine
+- CI must pass before merge
+
+---
+
+## Conflict Resolution
+
+- If a logical conflict or ambiguity is discovered during implementation that was not visible at planning stage — stop, report to user, wait for decision
+- Do not resolve design conflicts unilaterally
+- Do not add complexity without user confirmation
+
+---
+
+## Dependencies
+
+- Prefer minimal, well-maintained dependencies
+- CLI: `github.com/akamensky/argparse`
+- Calendar parsing: `gitlab.com/allddd/go-systemd-time`
+- No CGO
+
+---
+
+## Workflow per Task
+
+1. Create branch `feature/phase-X.Y-description`
+2. Implement + tests
+3. Verify build and tests pass
+4. Present to user for review
+5. After approval: merge to master with `--no-ff`
+6. Delete feature branch

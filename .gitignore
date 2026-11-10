@@ -1,0 +1,23 @@
+# Binaries
+/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test output
+*.test
+*.out
+coverage.*
+
+# Go workspace
+go.work
+go.work.sum
+
+# Editor / OS
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+.DS_Store
