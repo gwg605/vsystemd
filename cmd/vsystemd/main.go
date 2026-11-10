@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 
 	"github.com/akamensky/argparse"
@@ -37,6 +38,9 @@ func run(args []string) error {
 	unitName := parser.String("u", "unit", &argparse.Options{
 		Help: "unit name for run mode",
 	})
+	console := parser.Flag("c", "console", &argparse.Options{
+		Help: "run daemon in the foreground",
+	})
 
 	if err := parser.Parse(args); err != nil {
 		return errors.New(parser.Usage(err))
@@ -44,7 +48,7 @@ func run(args []string) error {
 
 	switch *mode {
 	case "daemon":
-		return runDaemon()
+		return runDaemon(*console)
 	case "run":
 		if *unitName == "" {
 			return errors.New(parser.Usage("--unit is required for run mode"))
@@ -55,7 +59,7 @@ func run(args []string) error {
 	}
 }
 
-func runDaemon() error {
+func runDaemon(console bool) error {
 	executable, err := os.Executable()
 	if err != nil {
 		return err
@@ -65,7 +69,7 @@ func runDaemon() error {
 	if err != nil {
 		return err
 	}
-	if !isService {
+	if !isService && !console {
 		return startDaemonService(executable)
 	}
 
@@ -84,7 +88,22 @@ func runDaemon() error {
 	}
 	defer service.Close()
 
-	return daemon.RunService(daemonServiceName, service)
+	if isService {
+		return daemon.RunService(daemonServiceName, service)
+	}
+	return runDaemonConsole(service)
+}
+
+func runDaemonConsole(service *daemon.Daemon) error {
+	if err := service.Start(); err != nil {
+		return err
+	}
+
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt)
+	defer signal.Stop(signals)
+	<-signals
+	return nil
 }
 
 func runUnit(name string) error {
