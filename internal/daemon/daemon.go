@@ -22,6 +22,9 @@ type Daemon struct {
 
 	mu     sync.Mutex
 	states map[string]ServiceState
+
+	timerMu sync.Mutex
+	timers  map[string]*timerRuntime
 }
 
 func New(manager scm.Manager, store storage.Storage, binaryPath string, newTransport TransportFactory) (*Daemon, error) {
@@ -34,6 +37,7 @@ func New(manager scm.Manager, store storage.Storage, binaryPath string, newTrans
 		store:      store,
 		binaryPath: binaryPath,
 		states:     make(map[string]ServiceState),
+		timers:     make(map[string]*timerRuntime),
 	}
 	tr, err := newTransport(daemonPeer, daemon.handle)
 	if err != nil {
@@ -44,6 +48,13 @@ func New(manager scm.Manager, store storage.Storage, binaryPath string, newTrans
 	}
 	daemon.transport = tr
 	return daemon, nil
+}
+
+func (d *Daemon) Start() error {
+	if err := d.startTimers(); err != nil {
+		return err
+	}
+	return d.requestRunnerStates()
 }
 
 func (d *Daemon) Close() error {
