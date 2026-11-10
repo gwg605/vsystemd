@@ -55,6 +55,10 @@ func TestProcessHelper(t *testing.T) {
 			os.Exit(2)
 		}
 		os.Exit(0)
+	case "output":
+		fmt.Fprint(os.Stdout, args[1])
+		fmt.Fprint(os.Stderr, args[2])
+		os.Exit(0)
 	case "sleep":
 		duration, err := time.ParseDuration(args[1])
 		if err != nil {

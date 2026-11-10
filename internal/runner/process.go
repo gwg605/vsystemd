@@ -3,6 +3,7 @@ package runner
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -14,12 +15,19 @@ import (
 type ProcessManager struct {
 	service *unit.ServiceUnit
 
-	mu  sync.Mutex
-	cmd *exec.Cmd
+	mu       sync.Mutex
+	cmd      *exec.Cmd
+	streamer *LogStreamer
 }
 
 func NewProcessManager(service *unit.ServiceUnit) *ProcessManager {
 	return &ProcessManager{service: service}
+}
+
+func (p *ProcessManager) SetLogStreamer(streamer *LogStreamer) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.streamer = streamer
 }
 
 func (p *ProcessManager) Start() error {
@@ -44,8 +52,17 @@ func (p *ProcessManager) Start() error {
 		return fmt.Errorf("parse ExecStartPost: %w", err)
 	}
 
+	p.mu.Lock()
+	streamer := p.streamer
+	p.mu.Unlock()
+	var stdout, stderr io.Writer
+	if streamer != nil {
+		stdout = streamer.Stdout()
+		stderr = streamer.Stderr()
+	}
+
 	for _, cmd := range pre {
-		if err := runCommand(cmd, env, p.service.WorkingDirectory); err != nil && !cmd.ignoreFailure {
+		if err := runCommand(cmd, env, p.service.WorkingDirectory, stdout, stderr); err != nil && !cmd.ignoreFailure {
 			return fmt.Errorf("ExecStartPre failed: %w", err)
 		}
 	}
@@ -53,6 +70,8 @@ func (p *ProcessManager) Start() error {
 	cmd := exec.Command(start.path, start.args...)
 	cmd.Dir = p.service.WorkingDirectory
 	cmd.Env = env
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start ExecStart: %w", err)
 	}
@@ -62,7 +81,7 @@ func (p *ProcessManager) Start() error {
 	p.mu.Unlock()
 
 	for _, cmd := range post {
-		if err := runCommand(cmd, env, p.service.WorkingDirectory); err != nil && !cmd.ignoreFailure {
+		if err := runCommand(cmd, env, p.service.WorkingDirectory, stdout, stderr); err != nil && !cmd.ignoreFailure {
 			p.terminate()
 			return fmt.Errorf("ExecStartPost failed: %w", err)
 		}
@@ -117,10 +136,12 @@ func (p *ProcessManager) terminate() {
 	cmd.Wait()
 }
 
-func runCommand(cmd command, env []string, dir string) error {
+func runCommand(cmd command, env []string, dir string, stdout, stderr io.Writer) error {
 	c := exec.Command(cmd.path, cmd.args...)
 	c.Dir = dir
 	c.Env = env
+	c.Stdout = stdout
+	c.Stderr = stderr
 	return c.Run()
 }
 
