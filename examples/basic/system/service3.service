@@ -1,0 +1,7 @@
+[Unit]
+Description=Basic example service 3 (writes time to file3 and exits)
+
+[Service]
+ExecStart=cmd.exe /c "C:\vsystemd-example\scripts\service3.cmd"
+WorkingDirectory=C:\vsystemd-example
+User=LocalSystem

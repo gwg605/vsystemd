@@ -1,0 +1,9 @@
+[Unit]
+Description=Basic example service 1 (writes time to file1 every 10 seconds)
+
+[Service]
+ExecStart=cmd.exe /c "C:\vsystemd-example\scripts\service1.cmd"
+WorkingDirectory=C:\vsystemd-example
+User=LocalSystem
+Restart=always
+RestartSec=5s
