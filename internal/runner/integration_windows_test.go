@@ -20,22 +20,20 @@ import (
 func newIntegratedRunner(t *testing.T, name string, service *unit.ServiceUnit) (*Runner, *stateCollector) {
 	t.Helper()
 
-	runner, err := NewRunner(name, service, storagefake.New())
+	network := transportfake.NewNetwork()
+	collector := newStateCollector()
+	daemon := network.New(transport.DefaultConfig(), daemonPeer, collector.handler)
+	t.Cleanup(func() { daemon.Close() })
+
+	factory := func(peer string, handler transport.MsgHandler) (transport.Transport, error) {
+		return network.New(transport.DefaultConfig(), peer, handler), nil
+	}
+	runner, err := NewRunner(name, service, storagefake.New(), factory)
 	if err != nil {
 		t.Fatalf("NewRunner() error = %v", err)
 	}
 	t.Cleanup(func() { runner.Close() })
 
-	network := transportfake.NewNetwork()
-	collector := newStateCollector()
-	daemon := network.New(transport.DefaultConfig(), daemonPeer, collector.handler)
-	runnerTransport := network.New(transport.DefaultConfig(), name, runner.Handle)
-	runner.SetTransport(runnerTransport)
-
-	t.Cleanup(func() {
-		runnerTransport.Close()
-		daemon.Close()
-	})
 	return runner, collector
 }
 
