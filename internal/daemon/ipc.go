@@ -30,6 +30,12 @@ func (d *Daemon) handle(sourcePeer string, msg transport.Message) error {
 		return d.handleDaemonReload(sourcePeer, msg)
 	case messageListUnits:
 		return d.handleListUnits(sourcePeer, msg)
+	case messageTimerEnable:
+		return d.handleTimerEnable(sourcePeer, msg)
+	case messageTimerStart:
+		return d.handleTimerStart(sourcePeer, msg)
+	case messageTimerStop:
+		return d.handleTimerStop(sourcePeer, msg)
 	default:
 		return nil
 	}

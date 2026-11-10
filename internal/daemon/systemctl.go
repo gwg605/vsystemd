@@ -230,7 +230,7 @@ func (entry *unitStatus) fillTimerState(d *Daemon, name string) {
 	}
 
 	enabled := timerState.Enabled
-	running := false
+	running := d.timerRunning(name)
 	entry.Enabled = &enabled
 	entry.Running = &running
 	if !timerState.LastRun.IsZero() {
