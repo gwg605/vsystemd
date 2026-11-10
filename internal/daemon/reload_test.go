@@ -7,6 +7,8 @@ import (
 	"github.com/gwg605/vsystemd/internal/scm"
 	scmfake "github.com/gwg605/vsystemd/internal/scm/fake"
 	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
+	"github.com/gwg605/vsystemd/internal/transport"
+	transportfake "github.com/gwg605/vsystemd/internal/transport/fake"
 )
 
 func TestReload(t *testing.T) {
@@ -43,7 +45,14 @@ OnCalendar=daily
 		t.Fatalf("CreateService(removed) error = %v", err)
 	}
 
-	daemon := New(manager, store, `C:\vsystemd\vsystemd.exe`)
+	network := transportfake.NewNetwork()
+	daemon, err := New(manager, store, `C:\vsystemd\vsystemd.exe`, func(peer string, handler transport.MsgHandler) (transport.Transport, error) {
+		return network.New(transport.DefaultConfig(), peer, handler), nil
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer daemon.Close()
 	if err := daemon.Reload(); err != nil {
 		t.Fatalf("Reload() error = %v", err)
 	}
