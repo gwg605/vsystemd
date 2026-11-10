@@ -34,6 +34,12 @@ func (s *Storage) WriteUnit(name string, data []byte) {
 	s.units[name] = append([]byte(nil), data...)
 }
 
+func (s *Storage) DeleteUnit(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.units, name)
+}
+
 func (s *Storage) ListUnits() ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

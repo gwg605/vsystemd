@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/gwg605/vsystemd/internal/scheduler"
 	"github.com/gwg605/vsystemd/internal/scm"
 	"github.com/gwg605/vsystemd/internal/storage"
 	"github.com/gwg605/vsystemd/internal/transport"
@@ -19,12 +20,13 @@ type Daemon struct {
 	store      storage.Storage
 	binaryPath string
 	transport  transport.Transport
+	sched      *scheduler.Scheduler
 
 	mu     sync.Mutex
 	states map[string]ServiceState
 
-	timerMu sync.Mutex
-	timers  map[string]*timerRuntime
+	timerMu     sync.Mutex
+	knownTimers map[string]bool
 }
 
 func New(manager scm.Manager, store storage.Storage, binaryPath string, newTransport TransportFactory) (*Daemon, error) {
@@ -33,11 +35,12 @@ func New(manager scm.Manager, store storage.Storage, binaryPath string, newTrans
 	}
 
 	daemon := &Daemon{
-		manager:    manager,
-		store:      store,
-		binaryPath: binaryPath,
-		states:     make(map[string]ServiceState),
-		timers:     make(map[string]*timerRuntime),
+		manager:     manager,
+		store:       store,
+		binaryPath:  binaryPath,
+		states:      make(map[string]ServiceState),
+		sched:       scheduler.New(manager, store),
+		knownTimers: make(map[string]bool),
 	}
 	tr, err := newTransport(daemonPeer, daemon.handle)
 	if err != nil {
@@ -58,5 +61,10 @@ func (d *Daemon) Start() error {
 }
 
 func (d *Daemon) Close() error {
-	return d.transport.Close()
+	schedulerErr := d.sched.Close()
+	transportErr := d.transport.Close()
+	if schedulerErr != nil {
+		return schedulerErr
+	}
+	return transportErr
 }

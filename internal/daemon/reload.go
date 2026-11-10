@@ -34,7 +34,7 @@ func (d *Daemon) reload() error {
 			return fmt.Errorf("update service %s: %w", service.Name, err)
 		}
 	}
-	return nil
+	return d.reloadTimers()
 }
 
 func (d *Daemon) desiredServices() (map[string]scm.ServiceConfig, error) {

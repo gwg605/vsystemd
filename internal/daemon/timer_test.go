@@ -56,6 +56,9 @@ func TestTimerEnablePersists(t *testing.T) {
 func TestTimerStartStop(t *testing.T) {
 	store := storagefake.New()
 	store.WriteUnit("job.timer", []byte("[Timer]\nOnCalendar=daily\n"))
+	if err := store.WriteTimerState("job.timer", storage.TimerState{Enabled: true}); err != nil {
+		t.Fatalf("WriteTimerState() error = %v", err)
+	}
 
 	_, client := newControlClient(t, scmfake.New(), store)
 
@@ -67,7 +70,7 @@ func TestTimerStartStop(t *testing.T) {
 	if !result.Success || !result.Running {
 		t.Errorf("result = %+v", result)
 	}
-	if result.Enabled {
+	if !result.Enabled {
 		t.Error("start changed enabled state")
 	}
 
@@ -86,6 +89,13 @@ func TestTimerStartStop(t *testing.T) {
 	}
 	if result.Running {
 		t.Error("timer is still running after stop")
+	}
+	state, err := store.ReadTimerState("job.timer")
+	if err != nil {
+		t.Fatalf("ReadTimerState() error = %v", err)
+	}
+	if !state.Enabled {
+		t.Error("stop changed enabled state")
 	}
 }
 
@@ -132,5 +142,53 @@ func TestTimerUnknown(t *testing.T) {
 	response := controlRequest(t, client, protocol.TypeTimerStart, protocol.TimerRequest{Unit: "missing.timer"})
 	if response.Type != protocol.TypeErrorResponse {
 		t.Fatalf("response type = %q", response.Type)
+	}
+}
+
+func TestReloadTimers(t *testing.T) {
+	store := storagefake.New()
+	store.WriteUnit("a.timer", []byte("[Timer]\nOnCalendar=daily\n"))
+	store.WriteUnit("b.timer", []byte("[Timer]\nOnCalendar=daily\n"))
+	if err := store.WriteTimerState("a.timer", storage.TimerState{Enabled: true}); err != nil {
+		t.Fatalf("WriteTimerState(a) error = %v", err)
+	}
+	if err := store.WriteTimerState("b.timer", storage.TimerState{Enabled: true}); err != nil {
+		t.Fatalf("WriteTimerState(b) error = %v", err)
+	}
+
+	daemon, _ := newTestDaemon(t, scmfake.New(), store)
+	if err := daemon.Start(); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if !daemon.sched.Has("a.timer") || !daemon.sched.Has("b.timer") {
+		t.Fatal("enabled timers were not started")
+	}
+
+	store.WriteUnit("c.timer", []byte("[Timer]\nOnCalendar=daily\n"))
+	if err := store.WriteTimerState("c.timer", storage.TimerState{Enabled: true}); err != nil {
+		t.Fatalf("WriteTimerState(c) error = %v", err)
+	}
+	store.DeleteUnit("b.timer")
+
+	if err := daemon.reload(); err != nil {
+		t.Fatalf("reload() error = %v", err)
+	}
+
+	if !daemon.sched.Has("a.timer") {
+		t.Error("unchanged timer was stopped")
+	}
+	if daemon.sched.Has("b.timer") {
+		t.Error("removed timer is still running")
+	}
+	if !daemon.sched.Has("c.timer") {
+		t.Error("new enabled timer was not started")
+	}
+
+	state, err := store.ReadTimerState("b.timer")
+	if err != nil {
+		t.Fatalf("ReadTimerState(b) error = %v", err)
+	}
+	if state.Enabled || !state.LastRun.IsZero() || !state.NextRun.IsZero() {
+		t.Errorf("removed timer state = %+v", state)
 	}
 }
