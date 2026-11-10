@@ -2,4 +2,7 @@ module github.com/gwg605/vsystemd
 
 go 1.26.0
 
-require github.com/akamensky/argparse v1.4.0 // indirect
+require (
+	github.com/akamensky/argparse v1.4.0
+	gitlab.com/allddd/go-systemd-time v1.1.0
+)
