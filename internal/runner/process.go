@@ -72,6 +72,7 @@ func (p *ProcessManager) Start() error {
 	cmd.Env = env
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	configureCommand(cmd)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start ExecStart: %w", err)
 	}
@@ -122,6 +123,33 @@ func (p *ProcessManager) PID() uint32 {
 		return 0
 	}
 	return uint32(p.cmd.Process.Pid)
+}
+
+func (p *ProcessManager) Interrupt() error {
+	pid := p.PID()
+	if pid == 0 {
+		return errors.New("process is not running")
+	}
+	return sendCtrlBreak(int(pid))
+}
+
+func (p *ProcessManager) Kill() {
+	p.mu.Lock()
+	cmd := p.cmd
+	p.mu.Unlock()
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	_ = cmd.Process.Kill()
+}
+
+func (p *ProcessManager) logWriters() (io.Writer, io.Writer) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.streamer == nil {
+		return nil, nil
+	}
+	return p.streamer.Stdout(), p.streamer.Stderr()
 }
 
 func (p *ProcessManager) terminate() {
