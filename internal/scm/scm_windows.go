@@ -10,6 +10,8 @@ import (
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
+const managedServiceGroup = "vsystemd"
+
 type windowsManager struct{}
 
 func New() Manager {
@@ -43,7 +45,11 @@ func (windowsManager) UpdateService(cfg ServiceConfig) error {
 	}
 	defer service.Close()
 
-	if err := service.UpdateConfig(windowsServiceConfig(cfg)); err != nil {
+	config := windowsServiceConfig(cfg)
+	if cfg.StartType == 0 {
+		config.StartType = windows.SERVICE_NO_CHANGE
+	}
+	if err := service.UpdateConfig(config); err != nil {
 		return fmt.Errorf("update service %s: %w", cfg.Name, err)
 	}
 	return nil
@@ -143,6 +149,16 @@ func (windowsManager) ListServices() ([]ServiceStatus, error) {
 
 	statuses := make([]ServiceStatus, 0, len(names))
 	for _, name := range names {
+		service, err := m.OpenService(name)
+		if err != nil {
+			continue
+		}
+		config, err := service.Config()
+		service.Close()
+		if err != nil || config.LoadOrderGroup != managedServiceGroup {
+			continue
+		}
+
 		status, err := queryService(m, name)
 		if err != nil {
 			continue
@@ -177,6 +193,7 @@ func windowsServiceConfig(cfg ServiceConfig) mgr.Config {
 		StartType:        windowsStartType(cfg.StartType),
 		ErrorControl:     windows.SERVICE_ERROR_NORMAL,
 		BinaryPathName:   cfg.BinaryPath,
+		LoadOrderGroup:   managedServiceGroup,
 		Dependencies:     cfg.Dependencies,
 		ServiceStartName: cfg.User,
 		DisplayName:      cfg.Name,

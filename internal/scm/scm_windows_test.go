@@ -72,6 +72,9 @@ func TestWindowsServiceConfig(t *testing.T) {
 	if got.BinaryPathName != cfg.BinaryPath {
 		t.Errorf("BinaryPathName = %q", got.BinaryPathName)
 	}
+	if got.LoadOrderGroup != managedServiceGroup {
+		t.Errorf("LoadOrderGroup = %q", got.LoadOrderGroup)
+	}
 	if !reflect.DeepEqual(got.Dependencies, cfg.Dependencies) {
 		t.Errorf("Dependencies = %v", got.Dependencies)
 	}
