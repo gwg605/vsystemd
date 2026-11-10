@@ -21,6 +21,7 @@ type SCMHandler struct {
 	service     *unit.ServiceUnit
 	process     *ProcessManager
 	restart     *RestartController
+	reporter    *StateReporter
 	stopTimeout time.Duration
 }
 
@@ -31,6 +32,10 @@ func NewSCMHandler(service *unit.ServiceUnit, process *ProcessManager, restart *
 		restart:     restart,
 		stopTimeout: resolveStopTimeout(service),
 	}
+}
+
+func (h *SCMHandler) SetStateReporter(reporter *StateReporter) {
+	h.reporter = reporter
 }
 
 func Run(name string, handler *SCMHandler) error {
@@ -49,19 +54,28 @@ func (h *SCMHandler) Execute(_ []string, requests <-chan svc.ChangeRequest, chan
 	changes <- status
 	h.restart.Reset()
 
+	lastExit := 0
+	lastError := ""
+
 outer:
 	for {
 		if !h.restart.AllowStart() {
+			h.report(StateFailed, 0, lastExit, "start limit exceeded")
 			changes <- svc.Status{State: svc.Stopped}
 			return false, 0
 		}
+
+		h.report(StateActivating, 0, lastExit, lastError)
 		if err := h.process.Start(); err != nil {
+			lastError = err.Error()
+			h.report(StateFailed, 0, lastExit, lastError)
 			changes <- svc.Status{State: svc.Stopped}
 			return false, 0
 		}
 
 		status = svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
 		changes <- status
+		h.report(StateActive, h.process.PID(), 0, "")
 
 		waitCh := make(chan waitResult, 1)
 		go func() {
@@ -73,11 +87,25 @@ outer:
 		for {
 			select {
 			case result := <-waitCh:
+				lastExit = result.code
+				if result.err != nil {
+					lastError = result.err.Error()
+				} else {
+					lastError = ""
+				}
+
 				if !h.restart.ShouldRestart(result.code) {
+					if result.code != 0 || result.err != nil {
+						h.report(StateFailed, 0, lastExit, lastError)
+					} else {
+						h.report(StateInactive, 0, lastExit, "")
+					}
 					changes <- svc.Status{State: svc.Stopped}
 					return false, 0
 				}
+
 				h.restart.RecordRestart()
+				h.report(StateRestarting, 0, lastExit, lastError)
 				if delay := h.restart.Delay(); delay > 0 {
 					delayCh = time.After(delay)
 					waitCh = nil
@@ -94,17 +122,32 @@ outer:
 					status = svc.Status{State: svc.StopPending}
 					changes <- status
 					if waitCh == nil {
+						h.report(StateInactive, 0, lastExit, "")
 						changes <- svc.Status{State: svc.Stopped}
 						return false, 0
 					}
 					h.beginStop()
-					<-h.waitForExit(waitCh)
+					result := <-h.waitForExit(waitCh)
+					h.report(StateInactive, 0, result.code, "")
 					changes <- svc.Status{State: svc.Stopped}
 					return false, 0
 				}
 			}
 		}
 	}
+}
+
+func (h *SCMHandler) report(state string, pid uint32, exitCode int, lastError string) {
+	if h.reporter == nil {
+		return
+	}
+	_ = h.reporter.Report(StateEvent{
+		State:        state,
+		PID:          pid,
+		ExitCode:     exitCode,
+		RestartCount: h.restart.RestartCount(),
+		LastError:    lastError,
+	})
 }
 
 func (h *SCMHandler) beginStop() {
