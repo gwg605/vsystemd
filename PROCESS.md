@@ -8,6 +8,7 @@
 - Every task gets its own branch: `feature/phase-X.Y-description`, `fix/description`
 - Each branch requires user review before merge
 - Merge to master with `--no-ff` only after explicit user approval
+- Feature branches are not deleted after merge — keep them for history and reference
 
 ---
 
@@ -63,4 +64,4 @@
 3. Verify build and tests pass
 4. Present to user for review
 5. After approval: merge to master with `--no-ff`
-6. Delete feature branch
+6. Keep the feature branch after merge — do not delete it
