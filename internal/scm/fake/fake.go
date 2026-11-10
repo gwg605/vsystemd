@@ -48,8 +48,22 @@ func (m *Manager) UpdateService(cfg scm.ServiceConfig) error {
 	if !ok {
 		return fmt.Errorf("update service %s: not found", cfg.Name)
 	}
+	startType := svc.config.StartType
 	svc.config = cfg
+	if cfg.StartType == 0 {
+		svc.config.StartType = startType
+	}
 	return nil
+}
+
+func (m *Manager) Config(name string) (scm.ServiceConfig, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	svc, ok := m.services[name]
+	if !ok {
+		return scm.ServiceConfig{}, fmt.Errorf("get config %s: not found", name)
+	}
+	return svc.config, nil
 }
 
 func (m *Manager) DeleteService(name string) error {
