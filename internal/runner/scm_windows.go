@@ -56,6 +56,7 @@ func (h *SCMHandler) Execute(_ []string, requests <-chan svc.ChangeRequest, chan
 
 	lastExit := 0
 	lastError := ""
+	started := false
 
 outer:
 	for {
@@ -64,6 +65,10 @@ outer:
 			changes <- svc.Status{State: svc.Stopped}
 			return false, 0
 		}
+		if started {
+			h.restart.RecordRestart()
+		}
+		started = true
 
 		h.report(StateActivating, 0, lastExit, lastError)
 		if err := h.process.Start(); err != nil {
@@ -104,7 +109,6 @@ outer:
 					return false, 0
 				}
 
-				h.restart.RecordRestart()
 				h.report(StateRestarting, 0, lastExit, lastError)
 				if delay := h.restart.Delay(); delay > 0 {
 					delayCh = time.After(delay)
