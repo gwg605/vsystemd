@@ -8,3 +8,5 @@ require (
 )
 
 require golang.org/x/sys v0.50.0
+
+require github.com/Microsoft/go-winio v0.6.4
