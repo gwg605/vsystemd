@@ -13,19 +13,26 @@ import (
 )
 
 func (d *Daemon) handle(sourcePeer string, msg transport.Message) error {
-	if msg.Type != runner.MessageStateEvent {
+	switch msg.Type {
+	case runner.MessageStateEvent:
+		var event runner.StateEvent
+		if err := json.Unmarshal(msg.Payload, &event); err != nil {
+			return fmt.Errorf("decode state event: %w", err)
+		}
+		if event.Unit == "" {
+			event.Unit = sourcePeer
+		}
+		d.updateFromEvent(event)
+		return nil
+	case runner.MessageStatusRequest:
+		return d.handleStatusRequest(sourcePeer, msg)
+	case messageDaemonReload:
+		return d.handleDaemonReload(sourcePeer, msg)
+	case messageListUnits:
+		return d.handleListUnits(sourcePeer, msg)
+	default:
 		return nil
 	}
-
-	var event runner.StateEvent
-	if err := json.Unmarshal(msg.Payload, &event); err != nil {
-		return fmt.Errorf("decode state event: %w", err)
-	}
-	if event.Unit == "" {
-		event.Unit = sourcePeer
-	}
-	d.updateFromEvent(event)
-	return nil
 }
 
 func (d *Daemon) requestRunnerStates() error {
