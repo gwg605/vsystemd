@@ -67,6 +67,9 @@ func (s *Scheduler) Add(timer Timer) error {
 		done:   make(chan struct{}),
 	}
 	s.timers[timer.Name] = scheduled
+	if next, ok := nextEvent(events, time.Now()); ok {
+		s.writeNext(timer.Name, next)
+	}
 	go s.run(scheduled)
 	return nil
 }
@@ -76,6 +79,28 @@ func (s *Scheduler) Remove(name string) error {
 		return nil
 	}
 	return s.store.DeleteTimerState(name)
+}
+
+func (s *Scheduler) Stop(name string) error {
+	s.stop(name)
+	return nil
+}
+
+func (s *Scheduler) Has(name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.timers[name]
+	return ok
+}
+
+func (s *Scheduler) Names() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	names := make([]string, 0, len(s.timers))
+	for name := range s.timers {
+		names = append(names, name)
+	}
+	return names
 }
 
 func (s *Scheduler) Reload(timers []Timer) error {

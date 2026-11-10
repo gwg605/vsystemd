@@ -181,7 +181,7 @@ func fillTimerState(entry *protocol.UnitStatus, d *Daemon, name string) {
 	}
 
 	enabled := timerState.Enabled
-	running := d.timerRunning(name)
+	running := d.sched.Has(name)
 	entry.Enabled = &enabled
 	entry.Running = &running
 	if !timerState.LastRun.IsZero() {
