@@ -73,6 +73,10 @@ func (r *Runner) Run() error {
 	return Run(serviceName, r.handler)
 }
 
+func (r *Runner) Serve(requests <-chan svc.ChangeRequest, changes chan<- svc.Status) (bool, uint32) {
+	return r.handler.Execute(nil, requests, changes)
+}
+
 func (r *Runner) RunConsole() error {
 	requests := make(chan svc.ChangeRequest)
 	changes := make(chan svc.Status)
