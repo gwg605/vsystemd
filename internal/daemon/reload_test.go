@@ -53,8 +53,8 @@ OnCalendar=daily
 		t.Fatalf("New() error = %v", err)
 	}
 	defer daemon.Close()
-	if err := daemon.Reload(); err != nil {
-		t.Fatalf("Reload() error = %v", err)
+	if err := daemon.reload(); err != nil {
+		t.Fatalf("reload() error = %v", err)
 	}
 
 	config, err := manager.Config("app")

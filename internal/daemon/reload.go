@@ -8,7 +8,7 @@ import (
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
-func (d *Daemon) Reload() error {
+func (d *Daemon) reload() error {
 	desired, err := d.desiredServices()
 	if err != nil {
 		return err

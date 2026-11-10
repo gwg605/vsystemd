@@ -104,8 +104,8 @@ func TestRequestRunnerStates(t *testing.T) {
 		})
 	})
 
-	if err := daemon.RequestRunnerStates(); err != nil {
-		t.Fatalf("RequestRunnerStates() error = %v", err)
+	if err := daemon.requestRunnerStates(); err != nil {
+		t.Fatalf("requestRunnerStates() error = %v", err)
 	}
 
 	state, ok := daemon.State("app.service")

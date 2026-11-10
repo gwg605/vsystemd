@@ -35,7 +35,7 @@ func New(manager scm.Manager, store storage.Storage, binaryPath string, newTrans
 		binaryPath: binaryPath,
 		states:     make(map[string]ServiceState),
 	}
-	tr, err := newTransport(daemonPeer, daemon.Handle)
+	tr, err := newTransport(daemonPeer, daemon.handle)
 	if err != nil {
 		return nil, fmt.Errorf("create transport: %w", err)
 	}

@@ -12,7 +12,7 @@ import (
 	"github.com/gwg605/vsystemd/internal/transport"
 )
 
-func (d *Daemon) Handle(sourcePeer string, msg transport.Message) error {
+func (d *Daemon) handle(sourcePeer string, msg transport.Message) error {
 	if msg.Type != runner.MessageStateEvent {
 		return nil
 	}
@@ -28,7 +28,7 @@ func (d *Daemon) Handle(sourcePeer string, msg transport.Message) error {
 	return nil
 }
 
-func (d *Daemon) RequestRunnerStates() error {
+func (d *Daemon) requestRunnerStates() error {
 	units, err := d.store.ListUnits()
 	if err != nil {
 		return fmt.Errorf("list units: %w", err)
