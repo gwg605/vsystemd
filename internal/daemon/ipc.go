@@ -12,8 +12,6 @@ import (
 	"github.com/gwg605/vsystemd/internal/transport"
 )
 
-const daemonPeer = "daemon"
-
 func (d *Daemon) Handle(sourcePeer string, msg transport.Message) error {
 	if msg.Type != runner.MessageStateEvent {
 		return nil
