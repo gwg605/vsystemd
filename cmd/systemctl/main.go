@@ -58,7 +58,11 @@ func run(args []string) error {
 		if *enableUnit == "" {
 			return errors.New(parser.Usage("unit name is required"))
 		}
-		return enableService(normalizeUnit(*enableUnit), *password)
+		name := normalizeUnit(*enableUnit)
+		if strings.HasSuffix(name, ".timer") {
+			return timerCommand(protocol.TypeTimerEnable, protocol.TimerRequest{Unit: name, Enabled: true})
+		}
+		return enableService(name, *password)
 	}
 
 	for _, command := range unitCommands {
@@ -88,8 +92,11 @@ func normalizeUnit(name string) string {
 }
 
 func dispatch(command, name string) error {
+	if strings.HasSuffix(name, ".timer") {
+		return dispatchTimer(command, name)
+	}
 	if !strings.HasSuffix(name, ".service") {
-		return fmt.Errorf("timer commands are not implemented yet")
+		return fmt.Errorf("unsupported unit type")
 	}
 
 	manager := scm.New()
@@ -119,6 +126,44 @@ func dispatch(command, name string) error {
 	default:
 		return fmt.Errorf("unknown command %s", command)
 	}
+}
+
+func dispatchTimer(command, name string) error {
+	switch command {
+	case "enable":
+		return timerCommand(protocol.TypeTimerEnable, protocol.TimerRequest{Unit: name, Enabled: true})
+	case "disable":
+		return timerCommand(protocol.TypeTimerEnable, protocol.TimerRequest{Unit: name, Enabled: false})
+	case "start":
+		return timerCommand(protocol.TypeTimerStart, protocol.TimerRequest{Unit: name})
+	case "stop":
+		return timerCommand(protocol.TypeTimerStop, protocol.TimerRequest{Unit: name})
+	default:
+		return fmt.Errorf("command %s is not supported for timer units", command)
+	}
+}
+
+func timerCommand(msgType string, request protocol.TimerRequest) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	response, err := daemonRequest(cfg, msgType, request)
+	if err != nil {
+		return err
+	}
+	if err := responseError(response); err != nil {
+		return err
+	}
+
+	var result protocol.TimerResult
+	if err := json.Unmarshal(response.Payload, &result); err != nil {
+		return err
+	}
+	if !result.Success {
+		return fmt.Errorf("%s failed", request.Unit)
+	}
+	return nil
 }
 
 func enableService(name, password string) error {
