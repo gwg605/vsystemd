@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/gwg605/vsystemd/internal/protocol"
 	scmfake "github.com/gwg605/vsystemd/internal/scm/fake"
 	"github.com/gwg605/vsystemd/internal/storage"
 	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
@@ -15,12 +16,12 @@ func TestTimerEnablePersists(t *testing.T) {
 
 	_, client := newControlClient(t, scmfake.New(), store)
 
-	response := controlRequest(t, client, messageTimerEnable, timerRequest{Unit: "job.timer", Enabled: true})
-	if response.Type != messageTimerResult {
+	response := controlRequest(t, client, protocol.TypeTimerEnable, protocol.TimerRequest{Unit: "job.timer", Enabled: true})
+	if response.Type != protocol.TypeTimerResult {
 		t.Fatalf("response type = %q", response.Type)
 	}
 
-	var result timerResult
+	var result protocol.TimerResult
 	if err := json.Unmarshal(response.Payload, &result); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
@@ -36,7 +37,7 @@ func TestTimerEnablePersists(t *testing.T) {
 		t.Error("enabled state was not persisted")
 	}
 
-	response = controlRequest(t, client, messageTimerEnable, timerRequest{Unit: "job.timer", Enabled: false})
+	response = controlRequest(t, client, protocol.TypeTimerEnable, protocol.TimerRequest{Unit: "job.timer", Enabled: false})
 	if err := json.Unmarshal(response.Payload, &result); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
@@ -58,8 +59,8 @@ func TestTimerStartStop(t *testing.T) {
 
 	_, client := newControlClient(t, scmfake.New(), store)
 
-	response := controlRequest(t, client, messageTimerStart, timerRequest{Unit: "job.timer"})
-	var result timerResult
+	response := controlRequest(t, client, protocol.TypeTimerStart, protocol.TimerRequest{Unit: "job.timer"})
+	var result protocol.TimerResult
 	if err := json.Unmarshal(response.Payload, &result); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
@@ -70,8 +71,8 @@ func TestTimerStartStop(t *testing.T) {
 		t.Error("start changed enabled state")
 	}
 
-	listResponse := controlRequest(t, client, messageListUnits, nil)
-	var list listUnitsResponse
+	listResponse := controlRequest(t, client, protocol.TypeListUnits, nil)
+	var list protocol.ListUnitsResponse
 	if err := json.Unmarshal(listResponse.Payload, &list); err != nil {
 		t.Fatalf("unmarshal list: %v", err)
 	}
@@ -79,7 +80,7 @@ func TestTimerStartStop(t *testing.T) {
 		t.Errorf("list units = %+v", list.Units)
 	}
 
-	response = controlRequest(t, client, messageTimerStop, timerRequest{Unit: "job.timer"})
+	response = controlRequest(t, client, protocol.TypeTimerStop, protocol.TimerRequest{Unit: "job.timer"})
 	if err := json.Unmarshal(response.Payload, &result); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
@@ -104,8 +105,8 @@ func TestStartAutoStartsEnabledTimers(t *testing.T) {
 		t.Fatalf("Start() error = %v", err)
 	}
 
-	response := controlRequest(t, client, messageListUnits, nil)
-	var list listUnitsResponse
+	response := controlRequest(t, client, protocol.TypeListUnits, nil)
+	var list protocol.ListUnitsResponse
 	if err := json.Unmarshal(response.Payload, &list); err != nil {
 		t.Fatalf("unmarshal list: %v", err)
 	}
@@ -128,8 +129,8 @@ func TestTimerUnknown(t *testing.T) {
 	store := storagefake.New()
 	_, client := newControlClient(t, scmfake.New(), store)
 
-	response := controlRequest(t, client, messageTimerStart, timerRequest{Unit: "missing.timer"})
-	if response.Type != messageErrorResponse {
+	response := controlRequest(t, client, protocol.TypeTimerStart, protocol.TimerRequest{Unit: "missing.timer"})
+	if response.Type != protocol.TypeErrorResponse {
 		t.Fatalf("response type = %q", response.Type)
 	}
 }

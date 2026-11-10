@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/runner"
 	"github.com/gwg605/vsystemd/internal/scm"
 	"github.com/gwg605/vsystemd/internal/transport"
@@ -24,17 +25,17 @@ func (d *Daemon) handle(sourcePeer string, msg transport.Message) error {
 		}
 		d.updateFromEvent(event)
 		return nil
-	case runner.MessageStatusRequest:
+	case protocol.TypeStatusRequest:
 		return d.handleStatusRequest(sourcePeer, msg)
-	case messageDaemonReload:
+	case protocol.TypeDaemonReload:
 		return d.handleDaemonReload(sourcePeer, msg)
-	case messageListUnits:
+	case protocol.TypeListUnits:
 		return d.handleListUnits(sourcePeer, msg)
-	case messageTimerEnable:
+	case protocol.TypeTimerEnable:
 		return d.handleTimerEnable(sourcePeer, msg)
-	case messageTimerStart:
+	case protocol.TypeTimerStart:
 		return d.handleTimerStart(sourcePeer, msg)
-	case messageTimerStop:
+	case protocol.TypeTimerStop:
 		return d.handleTimerStop(sourcePeer, msg)
 	default:
 		return nil

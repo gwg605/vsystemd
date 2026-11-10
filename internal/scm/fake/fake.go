@@ -66,6 +66,17 @@ func (m *Manager) Config(name string) (scm.ServiceConfig, error) {
 	return svc.config, nil
 }
 
+func (m *Manager) SetStartType(name string, startType scm.StartType) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	svc, ok := m.services[name]
+	if !ok {
+		return fmt.Errorf("set start type %s: not found", name)
+	}
+	svc.config.StartType = startType
+	return nil
+}
+
 func (m *Manager) DeleteService(name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

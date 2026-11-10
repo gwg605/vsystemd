@@ -4,39 +4,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
+	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/transport"
 	"github.com/gwg605/vsystemd/internal/unit"
 )
-
-const (
-	messageTimerEnable = "timer_enable"
-	messageTimerStart  = "timer_start"
-	messageTimerStop   = "timer_stop"
-	messageTimerResult = "timer_result"
-)
-
-type timerRequest struct {
-	Unit    string `json:"unit"`
-	Enabled bool   `json:"enabled"`
-}
-
-type timerResult struct {
-	Unit    string    `json:"unit"`
-	Success bool      `json:"success"`
-	Enabled bool      `json:"enabled"`
-	Running bool      `json:"running"`
-	LastRun time.Time `json:"last_run"`
-	NextRun time.Time `json:"next_run"`
-}
 
 type timerRuntime struct {
 	running bool
 }
 
 func (d *Daemon) handleTimerEnable(sourcePeer string, msg transport.Message) error {
-	var request timerRequest
+	var request protocol.TimerRequest
 	if err := json.Unmarshal(msg.Payload, &request); err != nil {
 		return d.respondError(sourcePeer, msg.ID, err)
 	}
@@ -57,11 +36,11 @@ func (d *Daemon) handleTimerEnable(sourcePeer string, msg transport.Message) err
 	if err != nil {
 		return d.respondError(sourcePeer, msg.ID, err)
 	}
-	return d.respond(sourcePeer, messageTimerResult, msg.ID, response)
+	return d.respond(sourcePeer, protocol.TypeTimerResult, msg.ID, response)
 }
 
 func (d *Daemon) handleTimerStart(sourcePeer string, msg transport.Message) error {
-	var request timerRequest
+	var request protocol.TimerRequest
 	if err := json.Unmarshal(msg.Payload, &request); err != nil {
 		return d.respondError(sourcePeer, msg.ID, err)
 	}
@@ -74,11 +53,11 @@ func (d *Daemon) handleTimerStart(sourcePeer string, msg transport.Message) erro
 	if err != nil {
 		return d.respondError(sourcePeer, msg.ID, err)
 	}
-	return d.respond(sourcePeer, messageTimerResult, msg.ID, response)
+	return d.respond(sourcePeer, protocol.TypeTimerResult, msg.ID, response)
 }
 
 func (d *Daemon) handleTimerStop(sourcePeer string, msg transport.Message) error {
-	var request timerRequest
+	var request protocol.TimerRequest
 	if err := json.Unmarshal(msg.Payload, &request); err != nil {
 		return d.respondError(sourcePeer, msg.ID, err)
 	}
@@ -91,15 +70,15 @@ func (d *Daemon) handleTimerStop(sourcePeer string, msg transport.Message) error
 	if err != nil {
 		return d.respondError(sourcePeer, msg.ID, err)
 	}
-	return d.respond(sourcePeer, messageTimerResult, msg.ID, response)
+	return d.respond(sourcePeer, protocol.TypeTimerResult, msg.ID, response)
 }
 
-func (d *Daemon) timerResult(name string) (timerResult, error) {
+func (d *Daemon) timerResult(name string) (protocol.TimerResult, error) {
 	state, err := d.store.ReadTimerState(name)
 	if err != nil {
-		return timerResult{}, fmt.Errorf("read timer state %s: %w", name, err)
+		return protocol.TimerResult{}, fmt.Errorf("read timer state %s: %w", name, err)
 	}
-	return timerResult{
+	return protocol.TimerResult{
 		Unit:    name,
 		Success: true,
 		Enabled: state.Enabled,
