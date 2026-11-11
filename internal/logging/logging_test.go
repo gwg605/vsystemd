@@ -24,6 +24,12 @@ func TestConfigureWritesLog(t *testing.T) {
 	if !strings.Contains(string(data), "test message") || !strings.Contains(string(data), "key=value") {
 		t.Errorf("log = %q", data)
 	}
+	if strings.Contains(string(data), "time=") || strings.Contains(string(data), "level=") || strings.Contains(string(data), "msg=") {
+		t.Errorf("log contains slog field prefixes: %q", data)
+	}
+	if !strings.Contains(string(data), "[DEBUG]") {
+		t.Errorf("log has no level prefix: %q", data)
+	}
 }
 
 func TestParseLevel(t *testing.T) {
