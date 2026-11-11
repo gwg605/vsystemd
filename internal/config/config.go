@@ -45,7 +45,7 @@ func Default() Config {
 		SystemDir:       filepath.Join(defaultRoot, "system"),
 		LogsDir:         filepath.Join(defaultRoot, "logs"),
 		TimersStateFile: filepath.Join(defaultRoot, "timers.json"),
-		LogFile:         filepath.Join(defaultRoot, "vsystemd.log"),
+		LogFile:         filepath.Join(defaultRoot, "logs", "vsystemd.log"),
 		LogLevel:        "info",
 		IPC: IPC{
 			ConnectTimeoutMS: 2000,
@@ -54,7 +54,7 @@ func Default() Config {
 		},
 		Defaults: Defaults{
 			RestartSecMS:            100,
-			TimeoutStopSecMS:        90000,
+			TimeoutStopSecMS:        45000,
 			StartLimitBurst:         5,
 			StartLimitIntervalSecMS: 10000,
 		},

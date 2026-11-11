@@ -5,6 +5,7 @@ package runner
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -34,6 +35,7 @@ func NewRunner(name string, service *unit.ServiceUnit, store storage.Storage, ne
 
 	logs, err := NewLogStreamer(name, service, store)
 	if err != nil {
+		slog.Error("runner: create log streamer failed", "unit", name, "error", err)
 		return nil, err
 	}
 
@@ -50,6 +52,7 @@ func NewRunner(name string, service *unit.ServiceUnit, store storage.Storage, ne
 
 	tr, err := newTransport(name, runner.handle)
 	if err != nil {
+		slog.Error("runner: create transport failed", "unit", name, "error", err)
 		logs.Close()
 		return nil, fmt.Errorf("create transport: %w", err)
 	}
@@ -61,6 +64,7 @@ func NewRunner(name string, service *unit.ServiceUnit, store storage.Storage, ne
 	runner.transport = tr
 	runner.reporter = NewStateReporter(tr, name)
 	runner.handler.SetStateReporter(runner.reporter)
+	slog.Info("runner: created", "unit", name)
 	return runner, nil
 }
 
@@ -109,10 +113,15 @@ func (r *Runner) RunConsole() error {
 }
 
 func (r *Runner) Close() error {
+	slog.Info("runner: closing", "unit", r.name)
 	transportErr := r.transport.Close()
 	logsErr := r.logs.Close()
 	if transportErr != nil {
+		slog.Warn("runner: close transport failed", "unit", r.name, "error", transportErr)
 		return transportErr
+	}
+	if logsErr != nil {
+		slog.Warn("runner: close logs failed", "unit", r.name, "error", logsErr)
 	}
 	return logsErr
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -17,6 +18,7 @@ type ProcessManager struct {
 
 	mu       sync.Mutex
 	cmd      *exec.Cmd
+	stdin    io.WriteCloser
 	streamer *LogStreamer
 }
 
@@ -62,7 +64,9 @@ func (p *ProcessManager) Start() error {
 	}
 
 	for _, cmd := range pre {
+		slog.Debug("process: running ExecStartPre", "command", cmd.path, "args", cmd.args)
 		if err := runCommand(cmd, env, p.service.WorkingDirectory, stdout, stderr); err != nil && !cmd.ignoreFailure {
+			slog.Error("process: ExecStartPre failed", "command", cmd.path, "args", cmd.args, "error", err)
 			return fmt.Errorf("ExecStartPre failed: %w", err)
 		}
 	}
@@ -73,16 +77,32 @@ func (p *ProcessManager) Start() error {
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	configureCommand(cmd)
+	slog.Info("process: starting ExecStart",
+		"path", start.path,
+		"args", start.args,
+		"working_directory", p.service.WorkingDirectory)
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		slog.Error("process: create ExecStart stdin failed", "path", start.path, "error", err)
+		return fmt.Errorf("create ExecStart stdin: %w", err)
+	}
 	if err := cmd.Start(); err != nil {
+		stdin.Close()
+		slog.Error("process: ExecStart start failed", "path", start.path, "error", err)
 		return fmt.Errorf("start ExecStart: %w", err)
 	}
 
 	p.mu.Lock()
 	p.cmd = cmd
+	p.stdin = stdin
 	p.mu.Unlock()
+	slog.Info("process: ExecStart started", "pid", cmd.Process.Pid)
 
 	for _, cmd := range post {
+		slog.Debug("process: running ExecStartPost", "command", cmd.path, "args", cmd.args)
 		if err := runCommand(cmd, env, p.service.WorkingDirectory, stdout, stderr); err != nil && !cmd.ignoreFailure {
+			slog.Error("process: ExecStartPost failed", "command", cmd.path, "args", cmd.args, "error", err)
 			p.terminate()
 			return fmt.Errorf("ExecStartPost failed: %w", err)
 		}
@@ -98,21 +118,29 @@ func (p *ProcessManager) Wait() (int, error) {
 		return 0, errors.New("process is not running")
 	}
 
+	pid := uint32(cmd.Process.Pid)
 	err := cmd.Wait()
 
 	p.mu.Lock()
 	if p.cmd == cmd {
 		p.cmd = nil
+		if p.stdin != nil {
+			p.stdin.Close()
+			p.stdin = nil
+		}
 	}
 	p.mu.Unlock()
 
 	if err == nil {
+		slog.Info("process: process exited", "pid", pid, "exit_code", 0)
 		return 0, nil
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
+		slog.Info("process: process exited", "pid", pid, "exit_code", exitErr.ExitCode())
 		return exitErr.ExitCode(), nil
 	}
+	slog.Error("process: process wait failed", "pid", pid, "error", err)
 	return -1, err
 }
 
@@ -130,7 +158,30 @@ func (p *ProcessManager) Interrupt() error {
 	if pid == 0 {
 		return errors.New("process is not running")
 	}
-	return sendCtrlBreak(int(pid))
+	slog.Info("process: sending console ctrl-c", "pid", pid)
+	if err := sendConsoleInterrupt(int(pid)); err != nil {
+		slog.Warn("process: console ctrl-c failed", "pid", pid, "error", err)
+		return err
+	}
+
+	p.mu.Lock()
+	stdin := p.stdin
+	p.mu.Unlock()
+	if stdin == nil {
+		slog.Warn("process: child stdin is not available", "pid", pid)
+		return nil
+	}
+	if err := writeStopConfirmation(stdin); err != nil {
+		slog.Warn("process: write stop confirmation to child stdin failed", "pid", pid, "error", err)
+		return err
+	}
+	slog.Info("process: sent stop confirmation to child stdin", "pid", pid)
+	return nil
+}
+
+func writeStopConfirmation(stdin io.Writer) error {
+	_, err := stdin.Write([]byte("Y\r\n"))
+	return err
 }
 
 func (p *ProcessManager) Kill() {
@@ -140,6 +191,7 @@ func (p *ProcessManager) Kill() {
 	if cmd == nil || cmd.Process == nil {
 		return
 	}
+	slog.Warn("process: killing process", "pid", cmd.Process.Pid)
 	_ = cmd.Process.Kill()
 }
 
@@ -155,11 +207,18 @@ func (p *ProcessManager) logWriters() (io.Writer, io.Writer) {
 func (p *ProcessManager) terminate() {
 	p.mu.Lock()
 	cmd := p.cmd
+	stdin := p.stdin
 	p.cmd = nil
+	p.stdin = nil
 	p.mu.Unlock()
+
+	if stdin != nil {
+		stdin.Close()
+	}
 	if cmd == nil || cmd.Process == nil {
 		return
 	}
+	slog.Warn("process: terminating process", "pid", cmd.Process.Pid)
 	cmd.Process.Kill()
 	cmd.Wait()
 }

@@ -3,6 +3,7 @@ package scheduler
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"sync"
 	"time"
@@ -70,11 +71,13 @@ func (s *Scheduler) Add(timer Timer) error {
 	if next, ok := nextEvent(events, time.Now()); ok {
 		s.writeNext(timer.Name, next)
 	}
+	slog.Info("scheduler: timer added", "unit", timer.Name, "service", timer.Service, "on_calendar", timer.OnCalendar)
 	go s.run(scheduled)
 	return nil
 }
 
 func (s *Scheduler) Remove(name string) error {
+	slog.Info("scheduler: timer removed", "unit", name)
 	if !s.stop(name) {
 		return nil
 	}
@@ -82,6 +85,7 @@ func (s *Scheduler) Remove(name string) error {
 }
 
 func (s *Scheduler) Stop(name string) error {
+	slog.Info("scheduler: timer stopped", "unit", name)
 	s.stop(name)
 	return nil
 }
@@ -104,6 +108,7 @@ func (s *Scheduler) Names() []string {
 }
 
 func (s *Scheduler) Reload(timers []Timer) error {
+	slog.Info("scheduler: reload", "timer_count", len(timers))
 	desired := make(map[string]Timer, len(timers))
 	for _, timer := range timers {
 		if _, err := parseEvents(timer); err != nil {
@@ -126,11 +131,13 @@ func (s *Scheduler) Reload(timers []Timer) error {
 	for name, old := range existing {
 		newTimer, ok := desired[name]
 		if !ok {
+			slog.Info("scheduler: removing timer on reload", "unit", name)
 			s.stop(name)
 			_ = s.store.DeleteTimerState(name)
 			continue
 		}
 		if changed(old, newTimer) {
+			slog.Info("scheduler: restarting changed timer", "unit", name)
 			s.stop(name)
 		}
 	}
@@ -191,9 +198,11 @@ func (s *Scheduler) run(timer *scheduledTimer) {
 	for {
 		next, ok := nextEvent(timer.events, time.Now())
 		if !ok {
+			slog.Warn("scheduler: no future timer events, stopping timer", "unit", timer.timer.Name)
 			return
 		}
 		s.writeNext(timer.timer.Name, next)
+		slog.Debug("scheduler: waiting for next timer event", "unit", timer.timer.Name, "next_run", next)
 
 		wait := time.NewTimer(time.Until(next))
 		select {
@@ -204,10 +213,14 @@ func (s *Scheduler) run(timer *scheduledTimer) {
 		}
 
 		firedAt := time.Now()
-		_ = s.manager.StartService(timer.timer.Service)
+		slog.Info("scheduler: firing timer", "unit", timer.timer.Name, "service", timer.timer.Service, "fired_at", firedAt)
+		if err := s.manager.StartService(timer.timer.Service); err != nil {
+			slog.Error("scheduler: start service failed", "unit", timer.timer.Name, "service", timer.timer.Service, "error", err)
+		}
 		next, ok = nextEvent(timer.events, firedAt)
 		s.writeTick(timer.timer.Name, firedAt, next)
 		if !ok {
+			slog.Warn("scheduler: no future timer events, stopping timer", "unit", timer.timer.Name)
 			return
 		}
 	}
@@ -216,20 +229,26 @@ func (s *Scheduler) run(timer *scheduledTimer) {
 func (s *Scheduler) writeNext(name string, next time.Time) {
 	state, err := s.store.ReadTimerState(name)
 	if err != nil {
+		slog.Warn("scheduler: read timer state failed", "unit", name, "error", err)
 		return
 	}
 	state.NextRun = next
-	_ = s.store.WriteTimerState(name, state)
+	if err := s.store.WriteTimerState(name, state); err != nil {
+		slog.Warn("scheduler: write timer state failed", "unit", name, "error", err)
+	}
 }
 
 func (s *Scheduler) writeTick(name string, firedAt, next time.Time) {
 	state, err := s.store.ReadTimerState(name)
 	if err != nil {
+		slog.Warn("scheduler: read timer state failed", "unit", name, "error", err)
 		return
 	}
 	state.LastRun = firedAt
 	state.NextRun = next
-	_ = s.store.WriteTimerState(name, state)
+	if err := s.store.WriteTimerState(name, state); err != nil {
+		slog.Warn("scheduler: write timer state failed", "unit", name, "error", err)
+	}
 }
 
 func parseEvents(timer Timer) ([]systemdtime.CalendarEvent, error) {

@@ -16,6 +16,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.SystemDir == "" || cfg.LogsDir == "" || cfg.TimersStateFile == "" {
 		t.Errorf("paths are empty: %+v", cfg)
 	}
+	if filepath.Base(filepath.Dir(cfg.LogFile)) != "logs" {
+		t.Errorf("LogFile = %q, want file under logs/", cfg.LogFile)
+	}
 	if cfg.IPC.RequestTimeoutMS == 0 {
 		t.Error("IPC defaults were not applied")
 	}

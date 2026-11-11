@@ -48,6 +48,19 @@ func TestWindowsStartType(t *testing.T) {
 	}
 }
 
+func TestSplitBinaryPath(t *testing.T) {
+	executable, args, err := splitBinaryPath(`"C:\vsystemd\vsystemd.exe" --mode=run --unit=app.service`)
+	if err != nil {
+		t.Fatalf("splitBinaryPath() error = %v", err)
+	}
+	if executable != `C:\vsystemd\vsystemd.exe` {
+		t.Errorf("executable = %q", executable)
+	}
+	if !reflect.DeepEqual(args, []string{"--mode=run", "--unit=app.service"}) {
+		t.Errorf("args = %v", args)
+	}
+}
+
 func TestWindowsServiceConfig(t *testing.T) {
 	cfg := ServiceConfig{
 		Name:         "app",

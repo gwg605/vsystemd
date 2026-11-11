@@ -12,6 +12,17 @@ import (
 
 const managedServiceGroup = "vsystemd"
 
+func requireWin32Service(service *mgr.Service, name string) error {
+	config, err := service.Config()
+	if err != nil {
+		return fmt.Errorf("query config %s: %w", name, err)
+	}
+	if config.ServiceType&windows.SERVICE_WIN32 == 0 {
+		return fmt.Errorf("service %s is not a Win32 service (type 0x%X)", name, config.ServiceType)
+	}
+	return nil
+}
+
 type windowsManager struct{}
 
 func New() Manager {
@@ -19,13 +30,18 @@ func New() Manager {
 }
 
 func (windowsManager) CreateService(cfg ServiceConfig) error {
+	executable, args, err := splitBinaryPath(cfg.BinaryPath)
+	if err != nil {
+		return fmt.Errorf("parse binary path for %s: %w", cfg.Name, err)
+	}
+
 	m, err := mgr.Connect()
 	if err != nil {
 		return fmt.Errorf("connect to SCM: %w", err)
 	}
 	defer m.Disconnect()
 
-	service, err := m.CreateService(cfg.Name, cfg.BinaryPath, windowsServiceConfig(cfg))
+	service, err := m.CreateService(cfg.Name, executable, windowsServiceConfig(cfg), args...)
 	if err != nil {
 		return fmt.Errorf("create service %s: %w", cfg.Name, err)
 	}
@@ -44,6 +60,10 @@ func (windowsManager) UpdateService(cfg ServiceConfig) error {
 		return fmt.Errorf("open service %s: %w", cfg.Name, err)
 	}
 	defer service.Close()
+
+	if err := requireWin32Service(service, cfg.Name); err != nil {
+		return err
+	}
 
 	config := windowsServiceConfig(cfg)
 	if cfg.StartType == 0 {
@@ -67,6 +87,10 @@ func (windowsManager) SetStartType(name string, startType StartType) error {
 		return fmt.Errorf("open service %s: %w", name, err)
 	}
 	defer service.Close()
+
+	if err := requireWin32Service(service, name); err != nil {
+		return err
+	}
 
 	err = windows.ChangeServiceConfig(
 		service.Handle,
@@ -113,6 +137,10 @@ func (windowsManager) StartService(name string) error {
 	}
 	defer service.Close()
 
+	if err := requireWin32Service(service, name); err != nil {
+		return err
+	}
+
 	status, err := service.Query()
 	if err != nil {
 		return fmt.Errorf("query service %s: %w", name, err)
@@ -138,6 +166,10 @@ func (windowsManager) StopService(name string) error {
 		return fmt.Errorf("open service %s: %w", name, err)
 	}
 	defer service.Close()
+
+	if err := requireWin32Service(service, name); err != nil {
+		return err
+	}
 
 	status, err := service.Query()
 	if err != nil {
@@ -201,6 +233,10 @@ func queryService(m *mgr.Mgr, name string) (ServiceStatus, error) {
 	}
 	defer service.Close()
 
+	if err := requireWin32Service(service, name); err != nil {
+		return ServiceStatus{}, err
+	}
+
 	status, err := service.Query()
 	if err != nil {
 		return ServiceStatus{}, fmt.Errorf("query service %s: %w", name, err)
@@ -211,6 +247,17 @@ func queryService(m *mgr.Mgr, name string) (ServiceStatus, error) {
 		PID:      status.ProcessId,
 		ExitCode: serviceExitCode(status),
 	}, nil
+}
+
+func splitBinaryPath(binaryPath string) (string, []string, error) {
+	parts, err := windows.DecomposeCommandLine(binaryPath)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(parts) == 0 {
+		return "", nil, fmt.Errorf("empty binary path")
+	}
+	return parts[0], parts[1:], nil
 }
 
 func windowsServiceConfig(cfg ServiceConfig) mgr.Config {

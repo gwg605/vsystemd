@@ -3,6 +3,7 @@ package daemon
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"github.com/gwg605/vsystemd/internal/scheduler"
@@ -44,27 +45,41 @@ func New(manager scm.Manager, store storage.Storage, binaryPath string, newTrans
 	}
 	tr, err := newTransport(daemonPeer, daemon.handle)
 	if err != nil {
+		slog.Error("daemon: create transport failed", "error", err)
 		return nil, fmt.Errorf("create transport: %w", err)
 	}
 	if tr == nil {
 		return nil, errors.New("transport factory returned nil")
 	}
 	daemon.transport = tr
+	slog.Info("daemon: created", "binary", binaryPath)
 	return daemon, nil
 }
 
 func (d *Daemon) Start() error {
+	slog.Info("daemon: starting")
 	if err := d.startTimers(); err != nil {
+		slog.Error("daemon: start timers failed", "error", err)
 		return err
 	}
-	return d.requestRunnerStates()
+	if err := d.requestRunnerStates(); err != nil {
+		slog.Error("daemon: request runner states failed", "error", err)
+		return err
+	}
+	slog.Info("daemon: started")
+	return nil
 }
 
 func (d *Daemon) Close() error {
+	slog.Info("daemon: closing")
 	schedulerErr := d.sched.Close()
 	transportErr := d.transport.Close()
 	if schedulerErr != nil {
+		slog.Warn("daemon: close scheduler failed", "error", schedulerErr)
 		return schedulerErr
+	}
+	if transportErr != nil {
+		slog.Warn("daemon: close transport failed", "error", transportErr)
 	}
 	return transportErr
 }

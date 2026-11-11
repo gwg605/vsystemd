@@ -6,6 +6,9 @@
 *.so
 *.dylib
 
+# Example CMake build output
+/examples/basic/monitor/build/
+
 # Test output
 *.test
 *.out

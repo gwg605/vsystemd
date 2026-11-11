@@ -1,0 +1,6 @@
+[Unit]
+Description=Run service3 every 7 seconds
+
+[Timer]
+OnCalendar=*:*:00/7
+Unit=service3.service
