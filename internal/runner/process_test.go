@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -256,6 +257,16 @@ func TestMissingExecStart(t *testing.T) {
 	manager := NewProcessManager(&unit.ServiceUnit{})
 	if err := manager.Start(); err == nil {
 		t.Fatal("Start() error = nil")
+	}
+}
+
+func TestWriteStopConfirmation(t *testing.T) {
+	var buffer bytes.Buffer
+	if err := writeStopConfirmation(&buffer); err != nil {
+		t.Fatalf("writeStopConfirmation() error = %v", err)
+	}
+	if buffer.String() != "Y\r\n" {
+		t.Errorf("stdin = %q", buffer.String())
 	}
 }
 

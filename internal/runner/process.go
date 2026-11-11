@@ -18,6 +18,7 @@ type ProcessManager struct {
 
 	mu       sync.Mutex
 	cmd      *exec.Cmd
+	stdin    io.WriteCloser
 	streamer *LogStreamer
 }
 
@@ -80,13 +81,21 @@ func (p *ProcessManager) Start() error {
 		"path", start.path,
 		"args", start.args,
 		"working_directory", p.service.WorkingDirectory)
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		slog.Error("process: create ExecStart stdin failed", "path", start.path, "error", err)
+		return fmt.Errorf("create ExecStart stdin: %w", err)
+	}
 	if err := cmd.Start(); err != nil {
+		stdin.Close()
 		slog.Error("process: ExecStart start failed", "path", start.path, "error", err)
 		return fmt.Errorf("start ExecStart: %w", err)
 	}
 
 	p.mu.Lock()
 	p.cmd = cmd
+	p.stdin = stdin
 	p.mu.Unlock()
 	slog.Info("process: ExecStart started", "pid", cmd.Process.Pid)
 
@@ -115,6 +124,10 @@ func (p *ProcessManager) Wait() (int, error) {
 	p.mu.Lock()
 	if p.cmd == cmd {
 		p.cmd = nil
+		if p.stdin != nil {
+			p.stdin.Close()
+			p.stdin = nil
+		}
 	}
 	p.mu.Unlock()
 
@@ -150,7 +163,25 @@ func (p *ProcessManager) Interrupt() error {
 		slog.Warn("process: console ctrl-c failed", "pid", pid, "error", err)
 		return err
 	}
+
+	p.mu.Lock()
+	stdin := p.stdin
+	p.mu.Unlock()
+	if stdin == nil {
+		slog.Warn("process: child stdin is not available", "pid", pid)
+		return nil
+	}
+	if err := writeStopConfirmation(stdin); err != nil {
+		slog.Warn("process: write stop confirmation to child stdin failed", "pid", pid, "error", err)
+		return err
+	}
+	slog.Info("process: sent stop confirmation to child stdin", "pid", pid)
 	return nil
+}
+
+func writeStopConfirmation(stdin io.Writer) error {
+	_, err := stdin.Write([]byte("Y\r\n"))
+	return err
 }
 
 func (p *ProcessManager) Kill() {
@@ -176,8 +207,14 @@ func (p *ProcessManager) logWriters() (io.Writer, io.Writer) {
 func (p *ProcessManager) terminate() {
 	p.mu.Lock()
 	cmd := p.cmd
+	stdin := p.stdin
 	p.cmd = nil
+	p.stdin = nil
 	p.mu.Unlock()
+
+	if stdin != nil {
+		stdin.Close()
+	}
 	if cmd == nil || cmd.Process == nil {
 		return
 	}
