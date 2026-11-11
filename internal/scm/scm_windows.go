@@ -19,13 +19,18 @@ func New() Manager {
 }
 
 func (windowsManager) CreateService(cfg ServiceConfig) error {
+	executable, args, err := splitBinaryPath(cfg.BinaryPath)
+	if err != nil {
+		return fmt.Errorf("parse binary path for %s: %w", cfg.Name, err)
+	}
+
 	m, err := mgr.Connect()
 	if err != nil {
 		return fmt.Errorf("connect to SCM: %w", err)
 	}
 	defer m.Disconnect()
 
-	service, err := m.CreateService(cfg.Name, cfg.BinaryPath, windowsServiceConfig(cfg))
+	service, err := m.CreateService(cfg.Name, executable, windowsServiceConfig(cfg), args...)
 	if err != nil {
 		return fmt.Errorf("create service %s: %w", cfg.Name, err)
 	}
@@ -211,6 +216,17 @@ func queryService(m *mgr.Mgr, name string) (ServiceStatus, error) {
 		PID:      status.ProcessId,
 		ExitCode: serviceExitCode(status),
 	}, nil
+}
+
+func splitBinaryPath(binaryPath string) (string, []string, error) {
+	parts, err := windows.DecomposeCommandLine(binaryPath)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(parts) == 0 {
+		return "", nil, fmt.Errorf("empty binary path")
+	}
+	return parts[0], parts[1:], nil
 }
 
 func windowsServiceConfig(cfg ServiceConfig) mgr.Config {
