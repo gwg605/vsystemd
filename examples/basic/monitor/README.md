@@ -81,14 +81,14 @@ You should see an `[EVENT] console control event CTRL_C_EVENT` line.
 Enable and start the monitor service:
 
 ```powershell
-.\bin\systemctl.exe enable monitor.service
-.\bin\systemctl.exe start monitor.service
+.\bin\systemctl.exe enable monitor-demo.service
+.\bin\systemctl.exe start monitor-demo.service
 ```
 
 Stop it:
 
 ```powershell
-Measure-Command { .\bin\systemctl.exe stop monitor.service }
+Measure-Command { .\bin\systemctl.exe stop monitor-demo.service }
 Get-Content -Tail 40 C:\vsystemd-example\data\file1.txt
 ```
 

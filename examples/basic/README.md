@@ -8,7 +8,7 @@ This example runs three Windows services and one timer:
 | `service2.service` | Depends on `service1.service`; writes to `data\file2.txt` every 15 seconds |
 | `service3.service` | Writes the current date/time to `data\file3.txt` and exits |
 | `service3.timer` | Starts `service3.service` every 7 seconds |
-| `monitor.service` | Optional diagnostic C++ app; logs process/console/control events to `data\file1.txt` |
+| `monitor-demo.service` | Optional diagnostic C++ app; logs process/console/control events to `data\file1.txt` |
 
 `service1` and `service2` are long-running loops. `service3` is a short one-shot
 script that is started by the timer.
@@ -120,7 +120,7 @@ C:\ProgramData\vsystemd\logs\service1.service.stderr
 
 ## 7.1 Diagnostic monitor (optional)
 
-`monitor.service` runs a small C++ application that writes both timestamps and
+`monitor-demo.service` runs a small C++ application that writes both timestamps and
 detailed process/console diagnostics to `data\file1.txt`. It is useful for
 investigating how `systemctl stop` delivers Ctrl-C to a console application.
 
@@ -136,17 +136,17 @@ cd C:\
 Refresh the units and register the monitor:
 
 ```powershell
-Copy-Item C:\vsystemd-example\system\monitor.service C:\ProgramData\vsystemd\system\
+Copy-Item C:\vsystemd-example\system\monitor-demo.service C:\ProgramData\vsystemd\system\
 
 .\bin\systemctl.exe daemon-reload
-.\bin\systemctl.exe enable monitor.service
-.\bin\systemctl.exe start monitor.service
+.\bin\systemctl.exe enable monitor-demo.service
+.\bin\systemctl.exe start monitor-demo.service
 ```
 
 Stop it and inspect the log:
 
 ```powershell
-Measure-Command { .\bin\systemctl.exe stop monitor.service }
+Measure-Command { .\bin\systemctl.exe stop monitor-demo.service }
 Get-Content -Tail 40 C:\vsystemd-example\data\file1.txt
 ```
 
@@ -169,7 +169,7 @@ Stop the timer, then the services:
 .\bin\systemctl.exe stop service2.service
 
 # If the optional monitor was enabled:
-.\bin\systemctl.exe stop monitor.service
+.\bin\systemctl.exe stop monitor-demo.service
 ```
 
 Delete the registered services:
@@ -178,7 +178,7 @@ Delete the registered services:
 sc.exe delete service1
 sc.exe delete service2
 sc.exe delete service3
-sc.exe delete monitor
+sc.exe delete monitor-demo
 ```
 
 Remove the unit files and the example directory:
@@ -188,7 +188,7 @@ Remove-Item C:\ProgramData\vsystemd\system\service1.service
 Remove-Item C:\ProgramData\vsystemd\system\service2.service
 Remove-Item C:\ProgramData\vsystemd\system\service3.service
 Remove-Item C:\ProgramData\vsystemd\system\service3.timer
-Remove-Item C:\ProgramData\vsystemd\system\monitor.service
+Remove-Item C:\ProgramData\vsystemd\system\monitor-demo.service
 Remove-Item -Recurse -Force C:\vsystemd-example
 ```
 
