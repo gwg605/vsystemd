@@ -2,11 +2,23 @@
 
 package runner
 
-import "testing"
+import (
+	"os/exec"
+	"testing"
 
-func TestEnsureConsole(t *testing.T) {
-	ensureConsole()
-	if !hasConsole() {
-		t.Fatal("console is not available")
+	"golang.org/x/sys/windows"
+)
+
+func TestConfigureCommand(t *testing.T) {
+	cmd := exec.Command("cmd.exe")
+	configureCommand(cmd)
+	if cmd.SysProcAttr == nil {
+		t.Fatal("SysProcAttr is nil")
+	}
+	if cmd.SysProcAttr.CreationFlags != windows.CREATE_NEW_CONSOLE {
+		t.Errorf("CreationFlags = %#x", cmd.SysProcAttr.CreationFlags)
+	}
+	if !cmd.SysProcAttr.HideWindow {
+		t.Error("HideWindow = false")
 	}
 }

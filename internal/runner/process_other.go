@@ -9,6 +9,6 @@ import (
 
 func configureCommand(*exec.Cmd) {}
 
-func sendCtrlBreak(int) error {
+func sendConsoleInterrupt(int) error {
 	return errors.New("console interrupts are not supported")
 }

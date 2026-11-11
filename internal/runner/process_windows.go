@@ -3,6 +3,7 @@
 package runner
 
 import (
+	"fmt"
 	"os/exec"
 	"syscall"
 
@@ -11,42 +12,34 @@ import (
 
 var (
 	kernel32 = windows.NewLazySystemDLL("kernel32.dll")
-	user32   = windows.NewLazySystemDLL("user32.dll")
 
-	procAllocConsole     = kernel32.NewProc("AllocConsole")
-	procGetConsoleCP     = kernel32.NewProc("GetConsoleCP")
-	procGetConsoleWindow = kernel32.NewProc("GetConsoleWindow")
-	procShowWindow       = user32.NewProc("ShowWindow")
+	procAttachConsole         = kernel32.NewProc("AttachConsole")
+	procFreeConsole           = kernel32.NewProc("FreeConsole")
+	procSetConsoleCtrlHandler = kernel32.NewProc("SetConsoleCtrlHandler")
 )
 
 func configureCommand(cmd *exec.Cmd) {
-	ensureConsole()
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: windows.CREATE_NEW_PROCESS_GROUP,
+		CreationFlags: windows.CREATE_NEW_CONSOLE,
+		HideWindow:    true,
 	}
 }
 
-func ensureConsole() {
-	if hasConsole() {
-		return
+func sendConsoleInterrupt(pid int) error {
+	attached, _, attachErr := procAttachConsole.Call(uintptr(pid))
+	if attached == 0 {
+		return fmt.Errorf("attach console %d: %w", pid, attachErr)
 	}
+	defer procFreeConsole.Call()
 
-	allocated, _, _ := procAllocConsole.Call()
-	if allocated == 0 {
-		return
+	ignored, _, handlerErr := procSetConsoleCtrlHandler.Call(0, 1)
+	if ignored == 0 {
+		return fmt.Errorf("ignore ctrl-c: %w", handlerErr)
 	}
+	defer procSetConsoleCtrlHandler.Call(0, 0)
 
-	window, _, _ := procGetConsoleWindow.Call()
-	if window != 0 {
-		procShowWindow.Call(window, uintptr(windows.SW_HIDE))
+	if err := windows.GenerateConsoleCtrlEvent(windows.CTRL_C_EVENT, 0); err != nil {
+		return fmt.Errorf("generate ctrl-c: %w", err)
 	}
-}
-
-func hasConsole() bool {
-	codepage, _, _ := procGetConsoleCP.Call()
-	return codepage != 0
-}
-
-func sendCtrlBreak(pid int) error {
-	return windows.GenerateConsoleCtrlEvent(windows.CTRL_BREAK_EVENT, uint32(pid))
+	return nil
 }

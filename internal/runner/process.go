@@ -145,9 +145,9 @@ func (p *ProcessManager) Interrupt() error {
 	if pid == 0 {
 		return errors.New("process is not running")
 	}
-	slog.Info("process: sending console interrupt", "pid", pid)
-	if err := sendCtrlBreak(int(pid)); err != nil {
-		slog.Warn("process: console interrupt failed", "pid", pid, "error", err)
+slog.Info("process: sending console ctrl-c", "pid", pid)
+	if err := sendConsoleInterrupt(int(pid)); err != nil {
+		slog.Warn("process: console ctrl-c failed", "pid", pid, "error", err)
 		return err
 	}
 	return nil
