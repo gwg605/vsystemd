@@ -12,6 +12,17 @@ import (
 
 const managedServiceGroup = "vsystemd"
 
+func requireWin32Service(service *mgr.Service, name string) error {
+	config, err := service.Config()
+	if err != nil {
+		return fmt.Errorf("query config %s: %w", name, err)
+	}
+	if config.ServiceType&windows.SERVICE_WIN32 == 0 {
+		return fmt.Errorf("service %s is not a Win32 service (type 0x%X)", name, config.ServiceType)
+	}
+	return nil
+}
+
 type windowsManager struct{}
 
 func New() Manager {
@@ -50,6 +61,10 @@ func (windowsManager) UpdateService(cfg ServiceConfig) error {
 	}
 	defer service.Close()
 
+	if err := requireWin32Service(service, cfg.Name); err != nil {
+		return err
+	}
+
 	config := windowsServiceConfig(cfg)
 	if cfg.StartType == 0 {
 		config.StartType = windows.SERVICE_NO_CHANGE
@@ -72,6 +87,10 @@ func (windowsManager) SetStartType(name string, startType StartType) error {
 		return fmt.Errorf("open service %s: %w", name, err)
 	}
 	defer service.Close()
+
+	if err := requireWin32Service(service, name); err != nil {
+		return err
+	}
 
 	err = windows.ChangeServiceConfig(
 		service.Handle,
@@ -118,6 +137,10 @@ func (windowsManager) StartService(name string) error {
 	}
 	defer service.Close()
 
+	if err := requireWin32Service(service, name); err != nil {
+		return err
+	}
+
 	status, err := service.Query()
 	if err != nil {
 		return fmt.Errorf("query service %s: %w", name, err)
@@ -143,6 +166,10 @@ func (windowsManager) StopService(name string) error {
 		return fmt.Errorf("open service %s: %w", name, err)
 	}
 	defer service.Close()
+
+	if err := requireWin32Service(service, name); err != nil {
+		return err
+	}
 
 	status, err := service.Query()
 	if err != nil {
@@ -205,6 +232,10 @@ func queryService(m *mgr.Mgr, name string) (ServiceStatus, error) {
 		return ServiceStatus{}, fmt.Errorf("open service %s: %w", name, err)
 	}
 	defer service.Close()
+
+	if err := requireWin32Service(service, name); err != nil {
+		return ServiceStatus{}, err
+	}
 
 	status, err := service.Query()
 	if err != nil {
