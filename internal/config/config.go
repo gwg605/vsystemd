@@ -54,7 +54,7 @@ func Default() Config {
 		},
 		Defaults: Defaults{
 			RestartSecMS:            100,
-			TimeoutStopSecMS:        90000,
+			TimeoutStopSecMS:        45000,
 			StartLimitBurst:         5,
 			StartLimitIntervalSecMS: 10000,
 		},

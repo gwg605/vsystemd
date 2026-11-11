@@ -12,7 +12,7 @@ import (
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
-const defaultStopTimeout = 90 * time.Second
+const defaultStopTimeout = 45 * time.Second
 
 type waitResult struct {
 	code int

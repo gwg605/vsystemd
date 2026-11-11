@@ -339,7 +339,7 @@ SCM stop → SERVICE_CONTROL_STOP → ExecStop → Runner exit
 
 1. Если задан `ExecStop=` — выполнить его
 2. Если не задан — отправить `Ctrl+C` (`GenerateConsoleCtrlEvent`)
-3. Ждать `TimeoutStopSec=` (default 90s)
+3. Ждать `TimeoutStopSec=` (default 45s)
 4. Если процесс не завершился — `TerminateProcess()`
 
 `TimeoutStopSec=` — директива unit-файла, поддерживается в v1.
@@ -523,7 +523,7 @@ Transport реализует матчинг ответов по `request_id`:
   },
   "defaults": {
     "restart_sec_ms": 100,
-    "timeout_stop_sec_ms": 90000,
+    "timeout_stop_sec_ms": 45000,
     "start_limit_burst": 5,
     "start_limit_interval_sec_ms": 10000
   }
