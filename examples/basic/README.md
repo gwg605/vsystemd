@@ -8,6 +8,7 @@ This example runs three Windows services and one timer:
 | `service2.service` | Depends on `service1.service`; writes to `data\file2.txt` every 15 seconds |
 | `service3.service` | Writes the current date/time to `data\file3.txt` and exits |
 | `service3.timer` | Starts `service3.service` every 7 seconds |
+| `monitor.service` | Optional diagnostic C++ app; logs process/console/control events to `data\file1.txt` |
 
 `service1` and `service2` are long-running loops. `service3` is a short one-shot
 script that is started by the timer.
@@ -117,6 +118,45 @@ C:\ProgramData\vsystemd\logs\service1.service.stderr
 
 (the same pattern applies to `service2` and `service3`).
 
+## 7.1 Diagnostic monitor (optional)
+
+`monitor.service` runs a small C++ application that writes both timestamps and
+detailed process/console diagnostics to `data\file1.txt`. It is useful for
+investigating how `systemctl stop` delivers Ctrl-C to a console application.
+
+Build it:
+
+```powershell
+cd C:\vsystemd-example\monitor
+cmake -S . -B build
+cmake --build build --config Release
+cd C:\
+```
+
+Refresh the units and register the monitor:
+
+```powershell
+Copy-Item C:\vsystemd-example\system\monitor.service C:\ProgramData\vsystemd\system\
+
+.\bin\systemctl.exe daemon-reload
+.\bin\systemctl.exe enable monitor.service
+.\bin\systemctl.exe start monitor.service
+```
+
+Stop it and inspect the log:
+
+```powershell
+Measure-Command { .\bin\systemctl.exe stop monitor.service }
+Get-Content -Tail 40 C:\vsystemd-example\data\file1.txt
+```
+
+Expected: `stop` is fast and the log contains a `CTRL_C_EVENT` entry. If the
+event does not appear and the service stops only after the timeout, the log
+contains the console state captured at startup.
+
+> `service1` and `monitor` both append to `file1.txt`. Run only one of them at a
+> time. See [monitor/README.md](monitor/README.md) for details.
+
 ## 8. Stop and remove
 
 Stop the timer, then the services:
@@ -127,6 +167,9 @@ Stop the timer, then the services:
 
 .\bin\systemctl.exe stop service1.service
 .\bin\systemctl.exe stop service2.service
+
+# If the optional monitor was enabled:
+.\bin\systemctl.exe stop monitor.service
 ```
 
 Delete the registered services:
@@ -135,6 +178,7 @@ Delete the registered services:
 sc.exe delete service1
 sc.exe delete service2
 sc.exe delete service3
+sc.exe delete monitor
 ```
 
 Remove the unit files and the example directory:
@@ -144,6 +188,7 @@ Remove-Item C:\ProgramData\vsystemd\system\service1.service
 Remove-Item C:\ProgramData\vsystemd\system\service2.service
 Remove-Item C:\ProgramData\vsystemd\system\service3.service
 Remove-Item C:\ProgramData\vsystemd\system\service3.timer
+Remove-Item C:\ProgramData\vsystemd\system\monitor.service
 Remove-Item -Recurse -Force C:\vsystemd-example
 ```
 

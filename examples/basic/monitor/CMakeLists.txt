@@ -1,0 +1,24 @@
+cmake_minimum_required(VERSION 3.20)
+project(monitor LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+add_executable(monitor monitor.cpp)
+
+set(MONITOR_OUTPUT_DIR "${CMAKE_BINARY_DIR}/bin")
+set_target_properties(monitor PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${MONITOR_OUTPUT_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${MONITOR_OUTPUT_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${MONITOR_OUTPUT_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${MONITOR_OUTPUT_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${MONITOR_OUTPUT_DIR}")
+
+target_compile_definitions(monitor PRIVATE UNICODE _UNICODE)
+
+if (MSVC)
+    target_compile_options(monitor PRIVATE /W4 /utf-8)
+endif()
+
+target_link_libraries(monitor PRIVATE user32 advapi32)

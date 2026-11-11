@@ -1,0 +1,9 @@
+[Unit]
+Description=Diagnostic monitor (process/console info and ticks to file1)
+
+[Service]
+ExecStart=C:\vsystemd-example\monitor\build\bin\monitor.exe
+WorkingDirectory=C:\vsystemd-example\monitor
+User=LocalSystem
+Restart=always
+RestartSec=5s
