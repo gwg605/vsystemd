@@ -8,7 +8,7 @@ This example runs three Windows services and one timer:
 | `service2.service` | Depends on `service1.service`; writes to `data\file2.txt` every 15 seconds |
 | `service3.service` | Writes the current date/time to `data\file3.txt` and exits |
 | `service3.timer` | Starts `service3.service` every 7 seconds |
-| `monitor-demo.service` | Optional diagnostic C++ app; logs process/console/control events to `data\file1.txt` |
+| `monitor-demo.service` | Optional diagnostic C++ app; prints process/console/control events to stdout |
 
 `service1` and `service2` are long-running loops. `service3` is a short one-shot
 script that is started by the timer.
@@ -120,9 +120,11 @@ C:\ProgramData\vsystemd\logs\service1.service.stderr
 
 ## 7.1 Diagnostic monitor (optional)
 
-`monitor-demo.service` runs a small C++ application that writes both timestamps and
-detailed process/console diagnostics to `data\file1.txt`. It is useful for
-investigating how `systemctl stop` delivers Ctrl-C to a console application.
+`monitor-demo.service` runs a small C++ application that prints timestamps and
+detailed process/console diagnostics to stdout. It is useful for investigating
+how `systemctl stop` delivers Ctrl-C to a console application. When run as a
+service, the runner captures stdout/stderr into
+`C:\ProgramData\vsystemd\logs\monitor-demo.service.stdout` and `.stderr`.
 
 Build it:
 
@@ -143,19 +145,18 @@ Copy-Item C:\vsystemd-example\system\monitor-demo.service C:\ProgramData\vsystem
 .\bin\systemctl.exe start monitor-demo.service
 ```
 
-Stop it and inspect the log:
+Stop it and inspect the captured output:
 
 ```powershell
 Measure-Command { .\bin\systemctl.exe stop monitor-demo.service }
-Get-Content -Tail 40 C:\vsystemd-example\data\file1.txt
+Get-Content -Tail 60 C:\ProgramData\vsystemd\logs\monitor-demo.service.stdout
 ```
 
 Expected: `stop` is fast and the log contains a `CTRL_C_EVENT` entry. If the
 event does not appear and the service stops only after the timeout, the log
 contains the console state captured at startup.
 
-> `service1` and `monitor` both append to `file1.txt`. Run only one of them at a
-> time. See [monitor/README.md](monitor/README.md) for details.
+See [monitor/README.md](monitor/README.md) for details.
 
 ## 8. Stop and remove
 

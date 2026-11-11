@@ -3,25 +3,26 @@
 A small C++ console application used to diagnose console control events under
 vsystemd.
 
-It behaves like `service1.cmd`:
+It behaves like `service1.cmd` in cadence:
 
-- appends a timestamp to `C:\vsystemd-example\data\file1.txt` immediately and then
-  every 10 seconds;
-- installs a `SetConsoleCtrlHandler` handler and writes every received console
+- prints a timestamp immediately and then every 10 seconds;
+- installs a `SetConsoleCtrlHandler` handler and prints every received console
   control event (`CTRL_C_EVENT`, `CTRL_BREAK_EVENT`, `CTRL_CLOSE_EVENT`,
-  `CTRL_LOGOFF_EVENT`, `CTRL_SHUTDOWN_EVENT`) to the same file;
+  `CTRL_LOGOFF_EVENT`, `CTRL_SHUTDOWN_EVENT`);
 - on Ctrl-C / Ctrl-Break it stops the main loop and exits with code 0.
 
-All diagnostic output is written to the same file:
+All informational output goes to **stdout**; errors go to **stderr**. When the
+application runs as a vsystemd service, the runner captures these streams into:
 
 ```
-C:\vsystemd-example\data\file1.txt
+C:\ProgramData\vsystemd\logs\monitor-demo.service.stdout
+C:\ProgramData\vsystemd\logs\monitor-demo.service.stderr
 ```
 
-The path is hardcoded. Each line has the form:
+Each line has the form:
 
 ```
-[YYYY-MM-DD HH:MM:SS.mmm] [LEVEL] message
+YYYY-MM-DD HH:MM:SS.mmm [LEVEL] message
 ```
 
 ## What is logged
@@ -68,13 +69,12 @@ regardless of the CMake generator or configuration.
 C:\vsystemd-example\monitor\build\bin\monitor.exe
 ```
 
-Press `Ctrl-C` in the console. Then inspect:
+The diagnostic dump and periodic ticks appear in the console. Press `Ctrl-C`; you
+should see:
 
-```powershell
-Get-Content -Tail 40 C:\vsystemd-example\data\file1.txt
 ```
-
-You should see an `[EVENT] console control event CTRL_C_EVENT` line.
+... [EVENT] console control event CTRL_C_EVENT (0)
+```
 
 ## Run as a vsystemd service
 
@@ -85,11 +85,11 @@ Enable and start the monitor service:
 .\bin\systemctl.exe start monitor-demo.service
 ```
 
-Stop it:
+Stop it and inspect the captured stdout:
 
 ```powershell
 Measure-Command { .\bin\systemctl.exe stop monitor-demo.service }
-Get-Content -Tail 40 C:\vsystemd-example\data\file1.txt
+Get-Content -Tail 60 C:\ProgramData\vsystemd\logs\monitor-demo.service.stdout
 ```
 
 Expected: `stop` completes quickly and the log contains
@@ -98,6 +98,3 @@ Expected: `stop` completes quickly and the log contains
 If the log contains no `CTRL_C_EVENT` and the service is stopped only after the
 timeout, the diagnostic dump shows whether the process had a console at all
 (`GetConsoleWindow`, `GetConsoleCP`, `GetConsoleMode`, `GetConsoleProcessList`).
-
-> `service1` and `monitor` both append to the same `file1.txt`. Run only one of
-> them at a time.

@@ -9,8 +9,7 @@
 #include <cstdlib>
 #include <cwchar>
 #include <exception>
-#include <filesystem>
-#include <fstream>
+#include <iostream>
 #include <mutex>
 #include <string>
 #include <utility>
@@ -18,11 +17,7 @@
 
 namespace {
 
-const std::filesystem::path kDataDir = L"C:\\vsystemd-example\\data";
-const std::filesystem::path kLogPath = kDataDir / L"file1.txt";
-
 std::mutex g_logMutex;
-std::ofstream g_log;
 HANDLE g_exitEvent = nullptr;
 
 std::string Narrow(const std::wstring& value) {
@@ -68,17 +63,9 @@ std::wstring FormatWin32Error(DWORD error) {
 
 void Log(const std::wstring& level, const std::wstring& message) {
     std::lock_guard<std::mutex> lock(g_logMutex);
-    if (!g_log.is_open()) {
-        g_log.open(kLogPath, std::ios::app | std::ios::binary);
-    }
-    if (!g_log.is_open()) {
-        return;
-    }
-
-    const std::wstring line = Timestamp() + L" [" + level + L"] " + message + L"\n";
-    const std::string utf8 = Narrow(line);
-    g_log.write(utf8.data(), static_cast<std::streamsize>(utf8.size()));
-    g_log.flush();
+    std::ostream& output = level == L"ERROR" ? std::cerr : std::cout;
+    output << Narrow(Timestamp() + L" [" + level + L"] " + message) << '\n';
+    output.flush();
 }
 
 void LogInfo(const std::wstring& message) {
@@ -429,12 +416,6 @@ LONG WINAPI UnhandledExceptionLogger(EXCEPTION_POINTERS* info) {
 }  // namespace
 
 int main() {
-    std::error_code filesystemError;
-    std::filesystem::create_directories(kDataDir, filesystemError);
-    if (filesystemError) {
-        LogError(L"create_directories failed, code=" + std::to_wstring(filesystemError.value()));
-    }
-
     SetUnhandledExceptionFilter(UnhandledExceptionLogger);
     std::set_terminate([]() {
         LogError(L"std::terminate called");
