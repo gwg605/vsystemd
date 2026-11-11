@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -18,6 +19,7 @@ func (d *Daemon) handleStatusRequest(sourcePeer string, msg transport.Message) e
 	if err := json.Unmarshal(msg.Payload, &request); err != nil {
 		return d.respondError(sourcePeer, msg.ID, err)
 	}
+	slog.Debug("daemon: status request", "from", sourcePeer, "unit", request.Unit)
 
 	response, err := d.status(request.Unit)
 	if err != nil {
@@ -27,6 +29,7 @@ func (d *Daemon) handleStatusRequest(sourcePeer string, msg transport.Message) e
 }
 
 func (d *Daemon) handleListUnits(sourcePeer string, msg transport.Message) error {
+	slog.Debug("daemon: list units request", "from", sourcePeer)
 	response, err := d.listUnits()
 	if err != nil {
 		return d.respondError(sourcePeer, msg.ID, err)
@@ -35,6 +38,7 @@ func (d *Daemon) handleListUnits(sourcePeer string, msg transport.Message) error
 }
 
 func (d *Daemon) handleDaemonReload(sourcePeer string, msg transport.Message) error {
+	slog.Info("daemon: reload request", "from", sourcePeer)
 	if err := d.reload(); err != nil {
 		return d.respondError(sourcePeer, msg.ID, err)
 	}
@@ -44,16 +48,22 @@ func (d *Daemon) handleDaemonReload(sourcePeer string, msg transport.Message) er
 func (d *Daemon) respond(targetPeer, msgType, requestID string, payload any) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
+		slog.Error("daemon: encode response failed", "type", msgType, "error", err)
 		return fmt.Errorf("encode %s: %w", msgType, err)
 	}
-	return d.transport.Send(targetPeer, transport.Message{
+	if err := d.transport.Send(targetPeer, transport.Message{
 		Type:      msgType,
 		RequestID: requestID,
 		Payload:   data,
-	})
+	}); err != nil {
+		slog.Warn("daemon: send response failed", "to", targetPeer, "type", msgType, "error", err)
+		return err
+	}
+	return nil
 }
 
 func (d *Daemon) respondError(targetPeer, requestID string, err error) error {
+	slog.Warn("daemon: request failed", "to", targetPeer, "request_id", requestID, "error", err)
 	return d.respond(targetPeer, protocol.TypeErrorResponse, requestID, protocol.ErrorResponse{Error: err.Error()})
 }
 

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/gwg605/vsystemd/internal/scm"
@@ -9,32 +10,45 @@ import (
 )
 
 func (d *Daemon) reload() error {
+	slog.Info("daemon: reload started")
 	desired, err := d.desiredServices()
 	if err != nil {
+		slog.Error("daemon: reload failed to build desired services", "error", err)
 		return err
 	}
 
 	services, err := d.manager.ListServices()
 	if err != nil {
+		slog.Error("daemon: reload failed to list services", "error", err)
 		return fmt.Errorf("list services: %w", err)
 	}
 
 	for _, service := range services {
 		config, ok := desired[service.Name]
 		if !ok {
+			slog.Info("daemon: removing service", "service", service.Name)
 			if err := d.manager.StopService(service.Name); err != nil {
+				slog.Error("daemon: stop service failed", "service", service.Name, "error", err)
 				return fmt.Errorf("stop service %s: %w", service.Name, err)
 			}
 			if err := d.manager.DeleteService(service.Name); err != nil {
+				slog.Error("daemon: delete service failed", "service", service.Name, "error", err)
 				return fmt.Errorf("delete service %s: %w", service.Name, err)
 			}
 			continue
 		}
+		slog.Info("daemon: updating service", "service", service.Name)
 		if err := d.manager.UpdateService(config); err != nil {
+			slog.Error("daemon: update service failed", "service", service.Name, "error", err)
 			return fmt.Errorf("update service %s: %w", service.Name, err)
 		}
 	}
-	return d.reloadTimers()
+	if err := d.reloadTimers(); err != nil {
+		slog.Error("daemon: reload timers failed", "error", err)
+		return err
+	}
+	slog.Info("daemon: reload finished")
+	return nil
 }
 
 func (d *Daemon) desiredServices() (map[string]scm.ServiceConfig, error) {

@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -14,10 +15,12 @@ import (
 )
 
 func (d *Daemon) handle(sourcePeer string, msg transport.Message) error {
+	slog.Debug("daemon: message received", "from", sourcePeer, "type", msg.Type)
 	switch msg.Type {
 	case runner.MessageStateEvent:
 		var event runner.StateEvent
 		if err := json.Unmarshal(msg.Payload, &event); err != nil {
+			slog.Error("daemon: decode state event failed", "from", sourcePeer, "error", err)
 			return fmt.Errorf("decode state event: %w", err)
 		}
 		if event.Unit == "" {
@@ -43,6 +46,7 @@ func (d *Daemon) handle(sourcePeer string, msg transport.Message) error {
 }
 
 func (d *Daemon) requestRunnerStates() error {
+	slog.Info("daemon: requesting runner states")
 	units, err := d.store.ListUnits()
 	if err != nil {
 		return fmt.Errorf("list units: %w", err)
@@ -61,11 +65,13 @@ func (d *Daemon) requestRunnerStates() error {
 				Type: runner.MessageStatusRequest,
 			})
 			if err != nil {
+				slog.Debug("daemon: runner state request failed", "unit", unit, "error", err)
 				return
 			}
 
 			var event runner.StateEvent
 			if err := json.Unmarshal(response.Payload, &event); err != nil {
+				slog.Warn("daemon: decode runner state response failed", "unit", unit, "error", err)
 				return
 			}
 			if event.Unit == "" {
@@ -75,6 +81,7 @@ func (d *Daemon) requestRunnerStates() error {
 		}(unit)
 	}
 	wg.Wait()
+	slog.Info("daemon: runner states requested")
 	return nil
 }
 
@@ -109,6 +116,13 @@ func (d *Daemon) updateFromEvent(event runner.StateEvent) {
 	d.mu.Lock()
 	d.states[event.Unit] = state
 	d.mu.Unlock()
+
+	slog.Debug("daemon: service state updated",
+		"unit", event.Unit,
+		"runner_state", event.State,
+		"scm_state", state.SCMState,
+		"pid", state.PID,
+		"exit_code", state.ExitCode)
 }
 
 func (d *Daemon) scmState(unit string) scm.State {

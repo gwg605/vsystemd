@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strings"
 
@@ -20,6 +21,7 @@ func (d *Daemon) handleTimerEnable(sourcePeer string, msg transport.Message) err
 	if err := d.validateTimer(request.Unit); err != nil {
 		return d.respondError(sourcePeer, msg.ID, err)
 	}
+	slog.Info("daemon: timer enable", "unit", request.Unit, "enabled", request.Enabled)
 
 	state, err := d.store.ReadTimerState(request.Unit)
 	if err != nil {
@@ -47,6 +49,7 @@ func (d *Daemon) handleTimerStart(sourcePeer string, msg transport.Message) erro
 	if err != nil {
 		return d.respondError(sourcePeer, msg.ID, err)
 	}
+	slog.Info("daemon: timer start", "unit", request.Unit, "service", definition.Service)
 	if !d.sched.Has(definition.Name) {
 		if err := d.sched.Add(definition); err != nil {
 			return d.respondError(sourcePeer, msg.ID, err)
@@ -68,6 +71,7 @@ func (d *Daemon) handleTimerStop(sourcePeer string, msg transport.Message) error
 	if err := d.validateTimer(request.Unit); err != nil {
 		return d.respondError(sourcePeer, msg.ID, err)
 	}
+	slog.Info("daemon: timer stop", "unit", request.Unit)
 
 	if err := d.sched.Stop(request.Unit); err != nil {
 		return d.respondError(sourcePeer, msg.ID, err)
@@ -137,6 +141,7 @@ func (d *Daemon) timerDefinition(name string) (scheduler.Timer, error) {
 }
 
 func (d *Daemon) startTimers() error {
+	slog.Info("daemon: starting enabled timers")
 	units, err := d.store.ListUnits()
 	if err != nil {
 		return fmt.Errorf("list units: %w", err)
@@ -157,11 +162,14 @@ func (d *Daemon) startTimers() error {
 		}
 		definition, err := d.timerDefinition(name)
 		if err != nil {
+			slog.Warn("daemon: skip timer", "unit", name, "error", err)
 			continue
 		}
 		if err := d.sched.Add(definition); err != nil {
+			slog.Warn("daemon: add timer to scheduler failed", "unit", name, "error", err)
 			continue
 		}
+		slog.Info("daemon: timer started", "unit", name, "service", definition.Service)
 	}
 
 	d.timerMu.Lock()
@@ -171,6 +179,7 @@ func (d *Daemon) startTimers() error {
 }
 
 func (d *Daemon) reloadTimers() error {
+	slog.Info("daemon: reloading timers")
 	units, err := d.store.ListUnits()
 	if err != nil {
 		return fmt.Errorf("list units: %w", err)
@@ -189,6 +198,7 @@ func (d *Daemon) reloadTimers() error {
 		names[name] = true
 		definition, err := d.timerDefinition(name)
 		if err != nil {
+			slog.Warn("daemon: skip timer", "unit", name, "error", err)
 			continue
 		}
 		definitions = append(definitions, definition)
@@ -216,8 +226,10 @@ func (d *Daemon) reloadTimers() error {
 
 	for name := range known {
 		if !names[name] {
+			slog.Info("daemon: deleting removed timer state", "unit", name)
 			_ = d.store.DeleteTimerState(name)
 		}
 	}
+	slog.Info("daemon: timers reloaded", "count", len(desired))
 	return nil
 }

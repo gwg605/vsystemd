@@ -5,6 +5,7 @@ package pipe
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"strings"
 	"sync"
@@ -116,12 +117,14 @@ func (t *Transport) Close() error {
 func (t *Transport) send(targetPeer string, msg transport.Message, opts ...transport.Opt) error {
 	conn, err := t.outboundFor(targetPeer, opts...)
 	if err != nil {
+		slog.Debug("pipe: connect failed", "peer", t.peerName, "target", targetPeer, "error", err)
 		return err
 	}
 
 	conn.mu.Lock()
 	defer conn.mu.Unlock()
 	if err := writeEnvelope(conn.conn, envelope{From: t.peerName, Msg: msg}); err != nil {
+		slog.Warn("pipe: write failed", "peer", t.peerName, "target", targetPeer, "error", err)
 		t.dropOutbound(targetPeer, conn)
 		return fmt.Errorf("send to %s: %w", targetPeer, err)
 	}
@@ -195,6 +198,7 @@ func (t *Transport) acceptLoop() {
 	for {
 		conn, err := t.listener.Accept()
 		if err != nil {
+			slog.Debug("pipe: accept loop stopped", "peer", t.peerName, "error", err)
 			return
 		}
 		t.mu.Lock()
@@ -226,7 +230,9 @@ func (t *Transport) serve(conn net.Conn) {
 		if env.From == "" {
 			continue
 		}
-		_ = t.core.Dispatch(env.From, env.Msg)
+		if err := t.core.Dispatch(env.From, env.Msg); err != nil {
+			slog.Error("pipe: message handler failed", "peer", t.peerName, "from", env.From, "type", env.Msg.Type, "error", err)
+		}
 	}
 }
 

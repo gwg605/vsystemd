@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/daemon"
+	"github.com/gwg605/vsystemd/internal/logging"
 	"github.com/gwg605/vsystemd/internal/runner"
 	"github.com/gwg605/vsystemd/internal/scm"
 	"github.com/gwg605/vsystemd/internal/storage"
@@ -77,6 +79,12 @@ func runDaemon(console bool) error {
 	if err != nil {
 		return err
 	}
+	if err := logging.Configure(cfg.LogFile, cfg.LogLevel); err != nil {
+		return err
+	}
+	defer logging.Close()
+	slog.Info("vsystemd daemon starting", "console", console)
+
 	store, err := storage.New(cfg.Paths())
 	if err != nil {
 		return err
@@ -89,7 +97,13 @@ func runDaemon(console bool) error {
 	defer service.Close()
 
 	if isService {
-		return daemon.RunService(daemonServiceName, service)
+		err := daemon.RunService(daemonServiceName, service)
+		if err != nil {
+			slog.Error("vsystemd daemon exited with error", "error", err)
+		} else {
+			slog.Info("vsystemd daemon exited")
+		}
+		return err
 	}
 	return runDaemonConsole(service)
 }
@@ -115,16 +129,24 @@ func runUnit(name string) error {
 	if err != nil {
 		return err
 	}
+	if err := logging.Configure(cfg.LogFile, cfg.LogLevel); err != nil {
+		return err
+	}
+	defer logging.Close()
+	slog.Info("vsystemd runner starting", "unit", name)
+
 	store, err := storage.New(cfg.Paths())
 	if err != nil {
 		return err
 	}
 	data, err := store.ReadUnit(name)
 	if err != nil {
+		slog.Error("vsystemd runner: read unit failed", "unit", name, "error", err)
 		return err
 	}
 	parsed, err := unit.Parse(name, data)
 	if err != nil {
+		slog.Error("vsystemd runner: parse unit failed", "unit", name, "error", err)
 		return err
 	}
 	if parsed.Service == nil {
@@ -142,10 +164,18 @@ func runUnit(name string) error {
 	if err != nil {
 		return err
 	}
+	var runErr error
 	if isService {
-		return service.Run()
+		runErr = service.Run()
+	} else {
+		runErr = service.RunConsole()
 	}
-	return service.RunConsole()
+	if runErr != nil {
+		slog.Error("vsystemd runner exited with error", "unit", name, "error", runErr)
+	} else {
+		slog.Info("vsystemd runner exited", "unit", name)
+	}
+	return runErr
 }
 
 func applyServiceDefaults(service *unit.ServiceUnit, cfg config.Config) {
