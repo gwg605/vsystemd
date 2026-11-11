@@ -147,15 +147,16 @@ outer:
 					slog.Debug("runner: interrogate")
 					changes <- status
 				case svc.Stop, svc.Shutdown:
-					slog.Info("runner: stop requested", "control", request.Cmd)
+					slog.Info("runner: stop requested", "control", request.Cmd, "pid", h.process.PID(), "timeout", h.stopTimeout)
 					status = svc.Status{State: svc.StopPending}
 					changes <- status
 					if waitCh == nil {
-						slog.Info("runner: stop requested while waiting to restart")
+						slog.Info("runner: stop requested while waiting to restart", "pid", 0, "timeout", h.stopTimeout)
 						h.report(StateInactive, 0, lastExit, "")
 						changes <- svc.Status{State: svc.Stopped}
 						return false, 0
 					}
+					slog.Info("runner: beginning stop sequence", "pid", h.process.PID(), "timeout", h.stopTimeout)
 					h.beginStop()
 					result := <-h.waitForExit(waitCh)
 					slog.Info("runner: service stopped", "exit_code", result.code, "error", result.err)
@@ -202,20 +203,23 @@ func (h *SCMHandler) beginStop() {
 		go func() {
 			if err := runCommand(*cmd, env, h.service.WorkingDirectory, stdout, stderr); err != nil {
 				slog.Warn("runner: ExecStop failed", "error", err)
+				return
 			}
+			slog.Info("runner: ExecStop finished")
 		}()
 		return
 	}
 
-	slog.Info("runner: no ExecStop, sending console interrupt")
+	slog.Info("runner: no ExecStop configured, sending console interrupt", "pid", h.process.PID())
 	if err := h.process.Interrupt(); err != nil {
-		slog.Warn("runner: console interrupt failed", "error", err)
+		slog.Warn("runner: console interrupt failed", "pid", h.process.PID(), "error", err)
 	}
 }
 
 func (h *SCMHandler) waitForExit(waitCh <-chan waitResult) <-chan waitResult {
 	done := make(chan waitResult, 1)
 	go func() {
+		slog.Info("runner: waiting for process to exit", "pid", h.process.PID(), "timeout", h.stopTimeout)
 		timer := time.NewTimer(h.stopTimeout)
 		defer timer.Stop()
 		select {
@@ -223,9 +227,11 @@ func (h *SCMHandler) waitForExit(waitCh <-chan waitResult) <-chan waitResult {
 			slog.Info("runner: process exited during stop", "exit_code", result.code, "error", result.err)
 			done <- result
 		case <-timer.C:
-			slog.Warn("runner: stop timeout reached, killing process", "timeout", h.stopTimeout)
+			slog.Warn("runner: stop timeout reached, killing process", "pid", h.process.PID(), "timeout", h.stopTimeout)
 			h.process.Kill()
-			done <- <-waitCh
+			result := <-waitCh
+			slog.Info("runner: killed process exited", "exit_code", result.code, "error", result.err)
+			done <- result
 		}
 	}()
 	return done
