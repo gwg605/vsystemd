@@ -11,6 +11,7 @@ import (
 
 	"github.com/akamensky/argparse"
 
+	vsystemd "github.com/gwg605/vsystemd"
 	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/scm"
@@ -34,6 +35,13 @@ func main() {
 }
 
 func run(args []string) error {
+	for _, arg := range args[1:] {
+		if arg == "--version" {
+			fmt.Printf("systemctl %s\n", vsystemd.Version)
+			return nil
+		}
+	}
+
 	parser := argparse.NewParser("systemctl", "Control vsystemd units")
 
 	enableCmd := parser.NewCommand("enable", "Enable unit")
