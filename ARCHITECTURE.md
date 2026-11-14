@@ -74,6 +74,7 @@ All other timer directives (`OnUnitActiveSec=`, `OnUnitInactiveSec=`, `Persisten
   - Unit exists, SCM entry exists → `ChangeServiceConfig()` (update)
   - Unit missing, SCM entry exists → `StopService()` + `DeleteService()`
   - Unit exists, SCM entry missing → no action (wait for `enable`)
+- On Windows, `ListServices()` returns only services created by vsystemd (marked with `LoadOrderGroup = "vsystemd"`), so unrelated SCM services are never modified
 - Daemon reloads OnCalendar schedules from updated timer unit files
 
 ### `systemctl start/stop/restart`
@@ -92,37 +93,47 @@ All other timer directives (`OnUnitActiveSec=`, `OnUnitInactiveSec=`, `Persisten
 
 ---
 
-## IPC: Two Channels
+## IPC
+
+All peers own an inbound pipe and accept messages on it. Outgoing messages are written to the receiver's inbound pipe. Replies are sent to the sender's inbound pipe, resolved from the envelope's `from` field. The protocol is newline-delimited JSON.
+
+| Peer | Inbound pipe |
+|---|---|
+| daemon | `\\.\pipe\vsystemd-in` |
+| runner (`foo.service`) | `\\.\pipe\vsystemd-svc-foo.service` |
+| systemctl (`systemctl-<pid>`) | `\\.\pipe\vsystemd-ctl-<pid>` |
 
 ### Channel 1: runner ↔ daemon (best-effort)
 
 - **Pipe owner**: runner (creates on start)
 - **Pipe name**: `\\.\pipe\vsystemd-svc-<unitname>`
+- **Daemon inbound pipe**: `\\.\pipe\vsystemd-in`
 - **Direction**: bidirectional
 - **Protocol**: JSON
 
 Messages:
 ```
-runner → daemon:  StateEvent { unit, state, pid, exit_code, restart_count, timestamp }
+runner → daemon:  StateEvent { unit, state, pid, exit_code, restart_count, timestamp, last_error }
 daemon → runner:  StatusRequest {}  →  runner replies with StateEvent
 ```
 
 Behavior when connection is unavailable:
 - Runner operates normally without daemon connection
 - Daemon falls back to SCM state if runner pipe is unreachable
-- On daemon start: enumerate SCM services, attempt to connect to each runner pipe and request status
+- On daemon start: enumerate known units, attempt to connect to each runner pipe and request status
 
 ### Channel 2: systemctl ↔ daemon
 
-- **Pipe owner**: daemon (creates on start)
-- **Pipe name**: `\\.\pipe\vsystemd-ctl`
+- **Pipe owner**: systemctl (creates `vsystemd-ctl-<pid>` on start)
+- **Daemon inbound pipe**: `\\.\pipe\vsystemd-in`
 - **Direction**: bidirectional
 - **Protocol**: JSON RPC
 
 Commands routed through daemon:
 - `daemon-reload`
-- `status <unit>` (aggregated state)
+- `status <unit>` (aggregated state for services and timers)
 - `list-units`
+- `list-timers`
 - `enable/disable/start/stop` for `.timer` units
 
 Commands that bypass daemon (direct SCM):
@@ -132,22 +143,27 @@ Commands that bypass daemon (direct SCM):
 
 ## State Management
 
-- No persistence; state lives in daemon memory only
-- State is derived from two sources: SCM (authoritative for running/stopped) + runner events (systemd-like detail)
-- On daemon start: SCM poll for base state, then connect to runner pipes for enriched state
+Service state lives in daemon memory only; timer state is persisted separately.
 
 ```go
+type RunnerState string
+type SystemdState string
+
 type ServiceState struct {
     Unit           string
-    SystemdState   string    // "active", "inactive", "failed", "activating", "restarting"
-    SCMState       uint32    // SERVICE_RUNNING, SERVICE_STOPPED, etc.
+    SCMState       scm.State
+    RunnerState    RunnerState
     PID            uint32
     ExitCode       int
     RestartCount   int
     LastTransition time.Time
     LastError      string
 }
+
+func (s ServiceState) Status() SystemdState
 ```
+
+`Status()` computes the final systemd-style state from SCM state, runner state, and exit code, for example `active (running)`, `activating (auto-restart)`, `inactive (dead)`, or `failed`.
 
 ---
 
@@ -229,13 +245,12 @@ Single mechanism: ACL on all vsystemd-managed resources.
 
 | Resource | ACL |
 |---|---|
-| `C:\ProgramData\vsystemd\` | Administrators: Full Control, SYSTEM: Full Control |
-| `\\.\pipe\vsystemd-ctl` read/write | Administrators only |
-| `\\.\pipe\vsystemd-svc-*` write | SYSTEM only |
+| `C:\ProgramData\vsystemd\` and `system\` | SYSTEM: Full Control, Administrators: Full Control, `NT SERVICE\All Services`: ReadAndExecute |
+| `C:\ProgramData\vsystemd\logs\` | SYSTEM: Full Control, Administrators: Full Control, `NT SERVICE\All Services`: Modify |
+| `\\.\pipe\vsystemd-in` | SYSTEM, Administrators, `NT SERVICE\All Services`: Full Control; owner |
+| `\\.\pipe\vsystemd-svc-*`, `\\.\pipe\vsystemd-ctl-*` | SYSTEM, Administrators: Full Control; owner |
 
 No path/binary validation at enable time in v1.
-
-**Dev mode**: a flag/config option that disables additional security checks for development environments.
 
 ---
 

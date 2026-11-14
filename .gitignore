@@ -21,6 +21,9 @@ go.work.sum
 # Environment files
 .env
 
+# Local task list
+TODO.md
+
 # Example CMake build output
 /examples/basic/monitor/build/
 

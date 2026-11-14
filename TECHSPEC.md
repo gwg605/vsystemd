@@ -4,7 +4,7 @@
 
 ## Парсинг OnCalendar= и timespan
 
-**Библиотека:** `gitlab.com/allddd/go-systemd-time` v1.0.0 (BSD-2-Clause)
+**Библиотека:** `gitlab.com/allddd/go-systemd-time` v1.1.0 (BSD-2-Clause)
 
 Используется для разбора:
 
@@ -14,6 +14,11 @@
 Библиотека поддерживает полный синтаксис systemd calendar expressions: списки, диапазоны (`..`), шаги (`/`), тильда (`~` — дни с конца месяца), алиасы (`daily`, `weekly`, `monthly`, `hourly`, `minutely`, `quarterly`, `semiannually`, `annually`), суффикс часового пояса (IANA, UTC, offset). Чистый Go без cgo, работает на Windows.
 
 Поддержка часовых поясов обеспечивается через embedded IANA tzdata (`import _ "time/tzdata"`), без зависимости от наличия tzdata в ОС.
+
+Внутри кода и в persistence время хранится и обрабатывается в UTC.
+`OnCalendar=` без суффикса TZ интерпретируется в локальной TZ машины, с
+суффиксом — в указанной TZ. При вводе время переводится в UTC, при отображении
+показывается в локальной TZ либо с явно указанной TZ.
 
 ---
 
@@ -235,9 +240,6 @@ type Storage interface {
     // unit files
     ListUnits() ([]string, error)
     ReadUnit(name string) ([]byte, error)
-    // logs
-    WriteLog(name, stream string, data []byte) error
-    ReadLogTail(name string, n int) ([]string, error)
     // timer state (persistence)
     ReadTimerState(name string) (TimerState, error)
     WriteTimerState(name string, state TimerState) error
@@ -271,6 +273,12 @@ type ServiceConfig struct {
     Description  string
 }
 ```
+
+`Storage` абстрагирует только persistence-операции: unit-файлы и состояние
+таймеров. Логи ведутся отдельным компонентом `logwriter`.
+
+На Windows `ListServices()` возвращает только managed-сервисы, помеченные
+`LoadOrderGroup = "vsystemd"`; чужие SCM-сервисы не затрагиваются.
 
 ### Go module
 

@@ -34,8 +34,9 @@
 ## CI
 
 - GitHub Actions with `windows-latest` runner
-- CI runs all tests except those requiring real Windows SCM (`//go:build windows` and additional tag `//go:build integration`)
-- Real SCM integration tests are run manually on local Windows machine
+- CI runs `go test ./...`; current integration tests use fake SCM/storage and the `//go:build windows` tag
+- Tests that require a real Windows SCM must use the additional `//go:build integration` tag and are excluded from CI
+- Real SCM integration tests are run manually on a local Windows machine
 - CI must pass before merge
 
 ---
@@ -53,6 +54,8 @@
 - Prefer minimal, well-maintained dependencies
 - CLI: `github.com/akamensky/argparse`
 - Calendar parsing: `gitlab.com/allddd/go-systemd-time`
+- Windows APIs: `golang.org/x/sys`
+- Named pipes: `github.com/Microsoft/go-winio`
 - No CGO
 
 ---
