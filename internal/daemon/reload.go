@@ -71,6 +71,9 @@ func (d *Daemon) desiredServices() (map[string]scm.ServiceConfig, error) {
 		if err != nil {
 			return nil, fmt.Errorf("parse unit %s: %w", name, err)
 		}
+		for _, warning := range parsed.Warnings {
+			slog.Warn("daemon: ignored unit directive", "unit", name, "warning", warning)
+		}
 
 		serviceName := strings.TrimSuffix(name, ".service")
 		services[serviceName] = scm.ServiceConfig{

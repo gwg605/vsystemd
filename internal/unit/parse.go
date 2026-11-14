@@ -89,7 +89,7 @@ func (u *UnitFile) apply(section, key, value string) error {
 	case "service":
 		return u.Service.apply(key, value)
 	case "timer":
-		return u.Timer.apply(key, value)
+		return u.applyTimer(key, value)
 	}
 	return nil
 }
@@ -104,7 +104,19 @@ func (u *UnitFile) applyUnit(key, value string) {
 		u.Requires = append(u.Requires, strings.Fields(value)...)
 	case "Wants":
 		u.Wants = append(u.Wants, strings.Fields(value)...)
+		u.warn("Wants= is ignored")
+	case "Before", "BindsTo", "PartOf", "Conflicts":
+		u.warn(fmt.Sprintf("%s= is not supported", key))
 	}
+}
+
+func (u *UnitFile) warn(message string) {
+	for _, existing := range u.Warnings {
+		if existing == message {
+			return
+		}
+	}
+	u.Warnings = append(u.Warnings, message)
 }
 
 func (s *ServiceUnit) apply(key, value string) error {
@@ -172,7 +184,8 @@ func (s *ServiceUnit) apply(key, value string) error {
 	return nil
 }
 
-func (t *TimerUnit) apply(key, value string) error {
+func (u *UnitFile) applyTimer(key, value string) error {
+	t := u.Timer
 	switch key {
 	case "OnCalendar":
 		t.OnCalendar = append(t.OnCalendar, value)
@@ -182,16 +195,18 @@ func (t *TimerUnit) apply(key, value string) error {
 			return fmt.Errorf("invalid OnBootSec: %w", err)
 		}
 		t.OnBootSec = d
+		u.warn("OnBootSec= is not supported")
 	case "OnStartupSec":
 		d, err := parseTimespan(value)
 		if err != nil {
 			return fmt.Errorf("invalid OnStartupSec: %w", err)
 		}
 		t.OnStartupSec = d
+		u.warn("OnStartupSec= is not supported")
 	case "Unit":
 		t.Unit = value
 	default:
-		t.Warnings = append(t.Warnings, fmt.Sprintf("unsupported timer directive %s", key))
+		u.warn(fmt.Sprintf("unsupported timer directive %s", key))
 	}
 	return nil
 }

@@ -55,6 +55,9 @@ StartLimitIntervalSec=30s
 	if !reflect.DeepEqual(file.Wants, []string{"redis.service"}) {
 		t.Errorf("Wants = %v", file.Wants)
 	}
+	if !reflect.DeepEqual(file.Warnings, []string{"Wants= is ignored"}) {
+		t.Errorf("Warnings = %v", file.Warnings)
+	}
 	if file.Timer != nil {
 		t.Error("Timer should be nil")
 	}
@@ -148,8 +151,9 @@ Persistent=true
 	if timer.Unit != "backup.service" {
 		t.Errorf("Unit = %q", timer.Unit)
 	}
-	if !reflect.DeepEqual(timer.Warnings, []string{"unsupported timer directive Persistent"}) {
-		t.Errorf("Warnings = %v", timer.Warnings)
+	wantWarnings := []string{"OnBootSec= is not supported", "unsupported timer directive Persistent"}
+	if !reflect.DeepEqual(file.Warnings, wantWarnings) {
+		t.Errorf("Warnings = %v", file.Warnings)
 	}
 }
 
