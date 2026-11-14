@@ -25,7 +25,7 @@ The project provides two binaries:
 
 ## Requirements
 
-- Windows 10/11 or Windows Server;
+- Windows 8.1 / Windows Server 2012 R2 or later;
 - Administrator rights for installation and service management;
 - Go 1.26+ to build from source.
 
