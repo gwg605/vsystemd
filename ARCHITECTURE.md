@@ -63,8 +63,9 @@ All other timer directives (`OnUnitActiveSec=`, `OnUnitInactiveSec=`, `Persisten
 
 ### `systemctl disable foo.service`
 
-- `ChangeServiceConfig(START_TYPE = DISABLED)`
-- Service remains registered in SCM
+- If the service exists in SCM: `StopService()` (and wait for `SERVICE_STOPPED`), then `DeleteService()`
+- If the service is not registered in SCM: no-op
+- This is symmetric to `enable`: the SCM entry is removed
 
 ### `systemctl daemon-reload`
 

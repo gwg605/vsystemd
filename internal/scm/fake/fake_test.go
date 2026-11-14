@@ -65,17 +65,6 @@ func TestServiceLifecycle(t *testing.T) {
 		t.Errorf("ListServices() = %v", statuses)
 	}
 
-	if err := m.SetStartType("app", scm.StartTypeManual); err != nil {
-		t.Fatalf("SetStartType() error = %v", err)
-	}
-	config, err := m.Config("app")
-	if err != nil {
-		t.Fatalf("Config() error = %v", err)
-	}
-	if config.StartType != scm.StartTypeManual {
-		t.Errorf("StartType = %v", config.StartType)
-	}
-
 	if err := m.DeleteService("app"); err != nil {
 		t.Fatalf("DeleteService() error = %v", err)
 	}
@@ -94,9 +83,6 @@ func TestMissingService(t *testing.T) {
 	}
 	if err := m.UpdateService(scm.ServiceConfig{Name: "missing"}); err == nil {
 		t.Error("UpdateService() error = nil")
-	}
-	if err := m.SetStartType("missing", scm.StartTypeDisabled); err == nil {
-		t.Error("SetStartType() error = nil")
 	}
 	if err := m.DeleteService("missing"); err == nil {
 		t.Error("DeleteService() error = nil")

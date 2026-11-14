@@ -69,6 +69,10 @@ func (d *Daemon) respondError(targetPeer, requestID string, err error) error {
 }
 
 func (d *Daemon) status(name string) (protocol.StatusResponse, error) {
+	if strings.HasSuffix(name, ".timer") {
+		return d.timerStatus(name)
+	}
+
 	cached, hasCached := d.State(name)
 	serviceName := strings.TrimSuffix(name, filepath.Ext(name))
 	scmStatus, scmErr := d.manager.QueryStatus(serviceName)
@@ -140,7 +144,7 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 		entry := protocol.UnitStatus{Unit: name, Description: parsed.Description}
 		if strings.HasSuffix(name, ".timer") {
 			entry.Type = "timer"
-			entry.SystemdState = string(SystemdInactiveDead)
+			entry.Activates = timerTarget(parsed.Timer, name)
 			fillTimerState(&entry, d, name)
 			units = append(units, entry)
 			continue
@@ -180,6 +184,46 @@ func (d *Daemon) serviceState(name string, services map[string]scm.ServiceStatus
 		state.SCMState = service.State
 	}
 	return state
+}
+
+func (d *Daemon) timerStatus(name string) (protocol.StatusResponse, error) {
+	data, err := d.store.ReadUnit(name)
+	if err != nil {
+		return protocol.StatusResponse{}, fmt.Errorf("unit %s not found", name)
+	}
+	parsed, err := unit.Parse(name, data)
+	if err != nil {
+		return protocol.StatusResponse{}, fmt.Errorf("parse unit %s: %w", name, err)
+	}
+
+	state, err := d.store.ReadTimerState(name)
+	if err != nil {
+		return protocol.StatusResponse{}, fmt.Errorf("read timer state %s: %w", name, err)
+	}
+
+	running := d.sched.Has(name)
+	enabled := state.Enabled
+	systemdState := SystemdInactiveDead
+	if running {
+		systemdState = SystemdActiveWaiting
+	}
+
+	response := protocol.StatusResponse{
+		Unit:         name,
+		SystemdState: string(systemdState),
+		Enabled:      &enabled,
+		Running:      &running,
+		Activates:    timerTarget(parsed.Timer, name),
+	}
+	if !state.LastRun.IsZero() {
+		lastRun := state.LastRun
+		response.LastRun = &lastRun
+	}
+	if !state.NextRun.IsZero() {
+		nextRun := state.NextRun
+		response.NextRun = &nextRun
+	}
+	return response, nil
 }
 
 func (d *Daemon) logTail(unitName string) []string {
@@ -237,6 +281,11 @@ func fillTimerState(entry *protocol.UnitStatus, d *Daemon, name string) {
 	running := d.sched.Has(name)
 	entry.Enabled = &enabled
 	entry.Running = &running
+	if running {
+		entry.SystemdState = string(SystemdActiveWaiting)
+	} else {
+		entry.SystemdState = string(SystemdInactiveDead)
+	}
 	if !timerState.LastRun.IsZero() {
 		lastRun := timerState.LastRun
 		entry.LastRun = &lastRun

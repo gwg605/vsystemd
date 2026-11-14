@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/gwg605/vsystemd/internal/protocol"
 	scmfake "github.com/gwg605/vsystemd/internal/scm/fake"
@@ -190,5 +191,48 @@ func TestReloadTimers(t *testing.T) {
 	}
 	if state.Enabled || !state.LastRun.IsZero() || !state.NextRun.IsZero() {
 		t.Errorf("removed timer state = %+v", state)
+	}
+}
+
+func TestTimerStatus(t *testing.T) {
+	store := storagefake.New()
+	store.WriteUnit("job.timer", []byte("[Timer]\nOnCalendar=daily\nUnit=backup.service\n"))
+	lastRun := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
+	if err := store.WriteTimerState("job.timer", storage.TimerState{
+		Enabled: true,
+		LastRun: lastRun,
+	}); err != nil {
+		t.Fatalf("WriteTimerState() error = %v", err)
+	}
+
+	_, client := newControlClient(t, scmfake.New(), store)
+	controlRequest(t, client, protocol.TypeTimerStart, protocol.TimerRequest{Unit: "job.timer"})
+
+	response := controlRequest(t, client, protocol.TypeStatusRequest, protocol.StatusRequest{Unit: "job.timer"})
+	if response.Type != protocol.TypeStatusResponse {
+		t.Fatalf("response type = %q", response.Type)
+	}
+
+	var status protocol.StatusResponse
+	if err := json.Unmarshal(response.Payload, &status); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if status.SystemdState != string(SystemdActiveWaiting) {
+		t.Errorf("SystemdState = %q", status.SystemdState)
+	}
+	if status.Enabled == nil || !*status.Enabled {
+		t.Errorf("Enabled = %v", status.Enabled)
+	}
+	if status.Running == nil || !*status.Running {
+		t.Errorf("Running = %v", status.Running)
+	}
+	if status.Activates != "backup.service" {
+		t.Errorf("Activates = %q", status.Activates)
+	}
+	if status.LastRun == nil || !status.LastRun.Equal(lastRun) {
+		t.Errorf("LastRun = %v", status.LastRun)
+	}
+	if status.NextRun == nil || status.NextRun.IsZero() {
+		t.Errorf("NextRun = %v", status.NextRun)
 	}
 }

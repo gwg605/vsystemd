@@ -159,8 +159,8 @@ foreground for debugging:
 .\bin\vsystemd.exe --mode=daemon --console
 ```
 
-The daemon must be running for `status`, `list-units`, `daemon-reload`, and
-timer commands.
+The daemon must be running for `status`, `list-units`, `list-timers`,
+`daemon-reload`, and timer commands.
 
 ### 5. Enable and start services
 
@@ -193,6 +193,15 @@ unit files were deleted. It does not create SCM entries for new units — run
 - `start` adds the timer to the scheduler immediately;
 - `stop` removes it from the scheduler;
 - `disable` persists `enabled=false` but does not stop a running timer.
+
+Inspect timers with:
+
+```powershell
+.\bin\systemctl.exe status foo.timer
+.\bin\systemctl.exe list-timers
+```
+
+Timer times are displayed in the local timezone with a numeric UTC offset.
 
 ### 7. Logs and state
 
@@ -231,10 +240,11 @@ Set `"log_level": "debug"` in `config.json` for verbose daemon/runner logs.
 | Command | Route | Description |
 |---|---|---|
 | `enable <unit>.service` | SCM | Create/update the service and set automatic start |
-| `disable <unit>.service` | SCM | Set start type to disabled |
+| `disable <unit>.service` | SCM | Stop and remove the service from SCM |
 | `start/stop/restart <unit>.service` | SCM | Control the service |
 | `status <unit>` | daemon | Aggregated status and log tail |
 | `list-units` | daemon | List known units and states |
+| `list-timers` | daemon | List timers with next/last run times |
 | `daemon-reload` | daemon | Rescan units and update SCM entries |
 | `enable/disable <unit>.timer` | daemon | Persist timer enabled state |
 | `start/stop <unit>.timer` | daemon | Add/remove timer from scheduler |

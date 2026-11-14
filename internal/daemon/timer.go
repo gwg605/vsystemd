@@ -129,15 +129,19 @@ func (d *Daemon) timerDefinition(name string) (scheduler.Timer, error) {
 		return scheduler.Timer{}, fmt.Errorf("timer %s has no OnCalendar", name)
 	}
 
-	target := parsed.Timer.Unit
-	if target == "" {
-		target = strings.TrimSuffix(name, ".timer") + ".service"
-	}
+	target := timerTarget(parsed.Timer, name)
 	return scheduler.Timer{
 		Name:       name,
 		Service:    strings.TrimSuffix(target, filepath.Ext(target)),
 		OnCalendar: parsed.Timer.OnCalendar,
 	}, nil
+}
+
+func timerTarget(timer *unit.TimerUnit, name string) string {
+	if timer.Unit != "" {
+		return timer.Unit
+	}
+	return strings.TrimSuffix(name, ".timer") + ".service"
 }
 
 func (d *Daemon) startTimers() error {
