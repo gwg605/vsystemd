@@ -47,6 +47,17 @@ func TestTimerCommands(t *testing.T) {
 	if stop.Running || !stop.Enabled {
 		t.Errorf("stop result = %+v", stop)
 	}
+	if !stop.NextRun.IsZero() {
+		t.Errorf("stop result NextRun = %v, want zero", stop.NextRun)
+	}
+
+	listResponse = daemonRequest(t, client, protocol.TypeListUnits, nil)
+	if err := json.Unmarshal(listResponse.Payload, &list); err != nil {
+		t.Fatalf("unmarshal list: %v", err)
+	}
+	if len(list.Units) != 1 || list.Units[0].NextRun != nil {
+		t.Errorf("stopped timer list = %+v", list.Units)
+	}
 
 	disable := timerRequest(t, client, protocol.TypeTimerEnable, protocol.TimerRequest{Unit: "job.timer", Enabled: false})
 	if disable.Enabled {

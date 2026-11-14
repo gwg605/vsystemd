@@ -57,7 +57,8 @@ func TestTimerEnablePersists(t *testing.T) {
 func TestTimerStartStop(t *testing.T) {
 	store := storagefake.New()
 	store.WriteUnit("job.timer", []byte("[Timer]\nOnCalendar=daily\n"))
-	if err := store.WriteTimerState("job.timer", storage.TimerState{Enabled: true}); err != nil {
+	lastRun := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
+	if err := store.WriteTimerState("job.timer", storage.TimerState{Enabled: true, LastRun: lastRun}); err != nil {
 		t.Fatalf("WriteTimerState() error = %v", err)
 	}
 
@@ -73,6 +74,9 @@ func TestTimerStartStop(t *testing.T) {
 	}
 	if !result.Enabled {
 		t.Error("start changed enabled state")
+	}
+	if result.NextRun.IsZero() {
+		t.Errorf("NextRun = %v, want set on start", result.NextRun)
 	}
 
 	listResponse := controlRequest(t, client, protocol.TypeListUnits, nil)
@@ -97,6 +101,12 @@ func TestTimerStartStop(t *testing.T) {
 	}
 	if !state.Enabled {
 		t.Error("stop changed enabled state")
+	}
+	if !state.NextRun.IsZero() {
+		t.Errorf("NextRun = %v, want zero after stop", state.NextRun)
+	}
+	if !state.LastRun.Equal(lastRun) {
+		t.Errorf("LastRun = %v, want %v", state.LastRun, lastRun)
 	}
 }
 

@@ -135,7 +135,7 @@ systemctl создаёт `vsystemd-ctl-<pid>` при старте, слушае�
 
 **`timer_start`** — добавить таймер в scheduler (не меняет `enabled`).
 
-**`timer_stop`** — убрать таймер из scheduler (не меняет `enabled`).
+**`timer_stop`** — убрать таймер из scheduler (не меняет `enabled`); `next_run` сбрасывается, `last_run` сохраняется.
 
 ---
 
