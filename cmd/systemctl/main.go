@@ -35,13 +35,6 @@ func main() {
 }
 
 func run(args []string) error {
-	for _, arg := range args[1:] {
-		if arg == "--version" {
-			fmt.Printf("systemctl %s\n", vsystemd.Version)
-			return nil
-		}
-	}
-
 	parser := argparse.NewParser("systemctl", "Control vsystemd units")
 
 	enableCmd := parser.NewCommand("enable", "Enable unit")
@@ -58,9 +51,15 @@ func run(args []string) error {
 	listUnits := parser.NewCommand("list-units", "List known units")
 	listTimers := parser.NewCommand("list-timers", "List timers")
 	daemonReload := parser.NewCommand("daemon-reload", "Reload unit files")
+	versionCmd := parser.NewCommand("--version", "Print version")
 
 	if err := parser.Parse(args); err != nil {
 		return errors.New(parser.Usage(err))
+	}
+
+	if versionCmd.Happened() {
+		fmt.Printf("systemctl %s\n", vsystemd.Version)
+		return nil
 	}
 
 	if enableCmd.Happened() {
