@@ -58,7 +58,7 @@ func run(args []string) error {
 	}
 
 	if versionCmd.Happened() {
-		fmt.Printf("systemctl %s\n", vsystemd.Version)
+		fmt.Printf("systemctl %s\n%s\n", vsystemd.Version, vsystemd.FeatureFlags)
 		return nil
 	}
 

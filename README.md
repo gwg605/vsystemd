@@ -251,6 +251,13 @@ Set `"log_level": "debug"` in `config.json` for verbose daemon/runner logs.
 | `enable/disable <unit>.timer` | daemon | Persist timer enabled state |
 | `start/stop <unit>.timer` | daemon | Add/remove timer from scheduler |
 
+`systemctl --version` prints the version and compiled feature flags:
+
+```
+systemctl 1
++WIN32 +SCM +PIPE +TIMERS +LOGROTATE
+```
+
 ## Service accounts
 
 If `User=` is omitted, vsystemd uses `NT SERVICE\<service-name>` by default.
