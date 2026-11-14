@@ -191,7 +191,8 @@ unit files were deleted. It does not create SCM entries for new units — run
 - `enable` persists `enabled=true`; the timer is started automatically when the
   daemon starts;
 - `start` adds the timer to the scheduler immediately;
-- `stop` removes it from the scheduler;
+- `stop` removes it from the scheduler and clears `next_run` while keeping
+  `last_run` for history;
 - `disable` persists `enabled=false` but does not stop a running timer.
 
 Inspect timers with:

@@ -73,6 +73,48 @@ func TestSchedulerFires(t *testing.T) {
 	}
 }
 
+func TestStopClearsNextRun(t *testing.T) {
+	store := storagefake.New()
+	scheduler := New(scmfake.New(), store)
+	defer scheduler.Close()
+
+	if err := scheduler.Add(Timer{
+		Name:       "job.timer",
+		Service:    "app",
+		OnCalendar: []string{"daily"},
+	}); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+
+	state, err := store.ReadTimerState("job.timer")
+	if err != nil {
+		t.Fatalf("ReadTimerState() error = %v", err)
+	}
+	if state.NextRun.IsZero() {
+		t.Fatal("next run was not set")
+	}
+	lastRun := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
+	state.LastRun = lastRun
+	if err := store.WriteTimerState("job.timer", state); err != nil {
+		t.Fatalf("WriteTimerState() error = %v", err)
+	}
+
+	if err := scheduler.Stop("job.timer"); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+
+	state, err = store.ReadTimerState("job.timer")
+	if err != nil {
+		t.Fatalf("ReadTimerState() error = %v", err)
+	}
+	if !state.NextRun.IsZero() {
+		t.Errorf("NextRun = %v, want zero", state.NextRun)
+	}
+	if !state.LastRun.Equal(lastRun) {
+		t.Errorf("LastRun = %v, want %v", state.LastRun, lastRun)
+	}
+}
+
 func TestNextEventLocalTimezone(t *testing.T) {
 	events, err := parseEvents(Timer{
 		Name:       "job.timer",

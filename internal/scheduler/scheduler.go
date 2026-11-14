@@ -88,6 +88,23 @@ func (s *Scheduler) Remove(name string) error {
 func (s *Scheduler) Stop(name string) error {
 	slog.Info("scheduler: timer stopped", "unit", name)
 	s.stop(name)
+	return s.clearNext(name)
+}
+
+func (s *Scheduler) clearNext(name string) error {
+	state, err := s.store.ReadTimerState(name)
+	if err != nil {
+		slog.Warn("scheduler: read timer state failed", "unit", name, "error", err)
+		return err
+	}
+	if state.NextRun.IsZero() {
+		return nil
+	}
+	state.NextRun = time.Time{}
+	if err := s.store.WriteTimerState(name, state); err != nil {
+		slog.Warn("scheduler: write timer state failed", "unit", name, "error", err)
+		return err
+	}
 	return nil
 }
 

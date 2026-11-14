@@ -178,6 +178,7 @@ Daemon implements a full `OnCalendar` expression parser and scheduler in-process
 - Full systemd calendar expression syntax supported (weekdays, ranges, lists, steps, wildcards)
 - Full IANA timezone support via embedded `time/tzdata` (`import _ "time/tzdata"`)
 - Scheduler fires by calling SCM `StartService()` directly
+- `systemctl stop <unit>.timer` removes the timer from the scheduler and clears its `next_run`, keeping `last_run` for history
 - Missed ticks are not caught up — if daemon was stopped, scheduling resumes from next future tick
 - If daemon is down, `OnCalendar` timers do not fire (accepted limitation)
 
