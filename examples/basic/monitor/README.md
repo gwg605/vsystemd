@@ -15,8 +15,7 @@ All informational output goes to **stdout**; errors go to **stderr**. When the
 application runs as a vsystemd service, the runner captures these streams into:
 
 ```
-C:\ProgramData\vsystemd\logs\monitor-demo.service.stdout
-C:\ProgramData\vsystemd\logs\monitor-demo.service.stderr
+C:\ProgramData\vsystemd\logs\monitor-demo\<timestamp>.log
 ```
 
 Each line has the form:
@@ -89,7 +88,7 @@ Stop it and inspect the captured stdout:
 
 ```powershell
 Measure-Command { .\bin\systemctl.exe stop monitor-demo.service }
-Get-Content -Tail 60 C:\ProgramData\vsystemd\logs\monitor-demo.service.stdout
+.\bin\systemctl.exe status monitor-demo.service
 ```
 
 Expected: `stop` completes quickly and the log contains

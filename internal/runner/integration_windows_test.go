@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/sys/windows/svc"
 
-	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
+	"github.com/gwg605/vsystemd/internal/logwriter"
 	"github.com/gwg605/vsystemd/internal/transport"
 	transportfake "github.com/gwg605/vsystemd/internal/transport/fake"
 	"github.com/gwg605/vsystemd/internal/unit"
@@ -25,11 +25,18 @@ func newIntegratedRunner(t *testing.T, name string, service *unit.ServiceUnit) (
 	daemon := network.New(transport.DefaultConfig(), daemonPeer, collector.handler)
 	t.Cleanup(func() { daemon.Close() })
 
+	serviceName := strings.TrimSuffix(name, filepath.Ext(name))
+	logs, err := NewLogStreamer(serviceName, service, t.TempDir(), logwriter.Rotation{}, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("NewLogStreamer() error = %v", err)
+	}
+
 	factory := func(peer string, handler transport.MsgHandler) (transport.Transport, error) {
 		return network.New(transport.DefaultConfig(), peer, handler), nil
 	}
-	runner, err := NewRunner(name, service, storagefake.New(), factory)
+	runner, err := NewRunner(name, service, logs, factory)
 	if err != nil {
+		logs.Close()
 		t.Fatalf("NewRunner() error = %v", err)
 	}
 	t.Cleanup(func() { runner.Close() })

@@ -3,62 +3,25 @@ package logging
 import (
 	"bytes"
 	"context"
-	"fmt"
+	"io"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
-var (
-	mu   sync.Mutex
-	file *os.File
-)
-
-func Configure(path, level string) error {
-	if path == "" {
-		return nil
-	}
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create log directory: %w", err)
-	}
-
-	opened, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("open log file %s: %w", path, err)
+func Configure(writer io.Writer, level string) {
+	if writer == nil {
+		writer = io.Discard
 	}
 
 	handler := &handler{
 		mu:     &sync.Mutex{},
-		writer: opened,
+		writer: writer,
 		level:  parseLevel(level),
 	}
-
-	mu.Lock()
-	previous := file
-	file = opened
-	mu.Unlock()
-
 	slog.SetDefault(slog.New(handler))
-	if previous != nil {
-		previous.Close()
-	}
-	return nil
-}
-
-func Close() error {
-	mu.Lock()
-	defer mu.Unlock()
-	if file == nil {
-		return nil
-	}
-	err := file.Close()
-	file = nil
-	return err
 }
 
 func parseLevel(level string) slog.Level {
@@ -76,7 +39,7 @@ func parseLevel(level string) slog.Level {
 
 type handler struct {
 	mu     *sync.Mutex
-	writer *os.File
+	writer io.Writer
 	level  slog.Level
 	attrs  []slog.Attr
 	groups []string

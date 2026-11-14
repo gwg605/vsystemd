@@ -16,8 +16,6 @@ type TimerState struct {
 type Storage interface {
 	ListUnits() ([]string, error)
 	ReadUnit(name string) ([]byte, error)
-	WriteLog(name, stream string, data []byte) error
-	ReadLogTail(name string, n int) ([]string, error)
 	ReadTimerState(name string) (TimerState, error)
 	WriteTimerState(name string, state TimerState) error
 	DeleteTimerState(name string) error

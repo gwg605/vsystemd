@@ -39,12 +39,13 @@ cmd/
 internal/
   config/            config.json loading and defaults
   daemon/            daemon state, reload, IPC, timer management
-  logging/           file logging setup
+  logging/           slog setup
+  logwriter/         timestamped log files with rotation
   protocol/          systemctl <-> daemon message types
   runner/            process management, restart logic, SCM handler, logs
   scheduler/         OnCalendar scheduler
   scm/               Windows SCM integration (+ fake/)
-  storage/           unit files, logs, timer persistence (+ fake/)
+  storage/           unit files and timer persistence (+ fake/)
   transport/         transport interface, request matching (+ fake/)
   transport/pipe/    named pipe transport
   unit/              unit file parser and models
@@ -91,6 +92,7 @@ This creates:
 C:\ProgramData\vsystemd
 C:\ProgramData\vsystemd\system
 C:\ProgramData\vsystemd\logs
+C:\ProgramData\vsystemd\logs\vsystemd
 ```
 
 and applies the ACLs required by `SYSTEM`, `Administrators`, and service
@@ -113,8 +115,11 @@ Example:
   "system_dir": "C:\\ProgramData\\vsystemd\\system",
   "logs_dir": "C:\\ProgramData\\vsystemd\\logs",
   "timers_state_file": "C:\\ProgramData\\vsystemd\\timers.json",
-  "log_file": "C:\\ProgramData\\vsystemd\\logs\\vsystemd.log",
   "log_level": "info",
+  "logs": {
+    "max_size_mb": 10,
+    "max_age_days": 7
+  },
   "ipc": {
     "connect_timeout_ms": 2000,
     "idle_timeout_ms": 5000,
@@ -191,14 +196,30 @@ unit files were deleted. It does not create SCM entries for new units — run
 
 ### 7. Logs and state
 
+`<timestamp>` is the UTC file creation time in `YYYY-MM-DD_HH-MM-SS.mmm`
+format. `<service>` is the unit filename without its extension (`foo.service` →
+`foo`).
+
 ```
-C:\ProgramData\vsystemd\logs\vsystemd.log          daemon/runner operations
-C:\ProgramData\vsystemd\logs\<unit>.stdout          service stdout
-C:\ProgramData\vsystemd\logs\<unit>.stderr          service stderr
-C:\ProgramData\vsystemd\timers.json                 timer persistence
+C:\ProgramData\vsystemd\logs\vsystemd\daemon_<timestamp>.log
+C:\ProgramData\vsystemd\logs\vsystemd\<service>_<timestamp>.log
+C:\ProgramData\vsystemd\logs\<service>\<timestamp>.log
+C:\ProgramData\vsystemd\timers.json
 ```
 
-`<unit>` is the full unit filename, for example `foo.service.stdout`.
+- the first file contains daemon operation logs;
+- the second contains runner operation logs;
+- the third contains service stdout and stderr by default;
+- `StandardOutput=file:<path>` truncates the specified file;
+- `StandardOutput=append:<path>` appends to the specified file;
+- `StandardOutput=null` discards the stream;
+- explicit `file:`/`append:` paths are never rotated or age-cleaned;
+- managed logs are rotated when `max_size_mb` is exceeded or the file becomes
+  older than `max_age_days`; a new timestamped file is started.
+
+Log writers keep their files open but readable. `systemctl status` shows the
+last lines from the current/latest managed file, or from the explicit
+`file:`/`append:` target if one is configured.
 
 Set `"log_level": "debug"` in `config.json` for verbose daemon/runner logs.
 

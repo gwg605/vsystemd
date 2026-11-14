@@ -57,45 +57,6 @@ func (s *fileStorage) ReadUnit(name string) ([]byte, error) {
 	return data, nil
 }
 
-func (s *fileStorage) WriteLog(name, stream string, data []byte) error {
-	if err := validateName(name); err != nil {
-		return err
-	}
-	if err := validateName(stream); err != nil {
-		return err
-	}
-	file, err := os.OpenFile(
-		filepath.Join(s.paths.LogsDir, name+"."+stream),
-		os.O_WRONLY|os.O_CREATE|os.O_APPEND,
-		0o644,
-	)
-	if err != nil {
-		return fmt.Errorf("open log %s.%s: %w", name, stream, err)
-	}
-	defer file.Close()
-	if _, err := file.Write(data); err != nil {
-		return fmt.Errorf("write log %s.%s: %w", name, stream, err)
-	}
-	return nil
-}
-
-func (s *fileStorage) ReadLogTail(name string, n int) ([]string, error) {
-	if err := validateName(name); err != nil {
-		return nil, err
-	}
-	if n <= 0 {
-		return nil, nil
-	}
-	data, err := os.ReadFile(filepath.Join(s.paths.LogsDir, name+".stdout"))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read log %s: %w", name, err)
-	}
-	return tailLines(data, n), nil
-}
-
 func (s *fileStorage) ReadTimerState(name string) (TimerState, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -168,19 +129,4 @@ func validateName(name string) error {
 		return fmt.Errorf("invalid name %q", name)
 	}
 	return nil
-}
-
-func tailLines(data []byte, n int) []string {
-	text := strings.TrimRight(string(data), "\r\n")
-	if text == "" {
-		return nil
-	}
-	lines := strings.Split(text, "\n")
-	for i := range lines {
-		lines[i] = strings.TrimSuffix(lines[i], "\r")
-	}
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return lines
 }

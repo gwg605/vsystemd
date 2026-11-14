@@ -2,9 +2,12 @@ package daemon
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/gwg605/vsystemd/internal/logwriter"
 	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/runner"
 	"github.com/gwg605/vsystemd/internal/scm"
@@ -43,7 +46,6 @@ func controlRequest(t *testing.T, client transport.Transport, msgType string, pa
 func TestStatusResponse(t *testing.T) {
 	store := storagefake.New()
 	store.WriteUnit("app.service", []byte("[Unit]\nDescription=App\n[Service]\nExecStart=x\n"))
-	store.WriteLog("app.service", "stdout", []byte("line1\nline2\n"))
 
 	manager := scmfake.New()
 	if err := manager.CreateService(scm.ServiceConfig{Name: "app"}); err != nil {
@@ -54,6 +56,14 @@ func TestStatusResponse(t *testing.T) {
 	}
 
 	daemon, client := newControlClient(t, manager, store)
+	logDir := logwriter.ServiceLogDir(daemon.logsDir, "app")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("create log dir: %v", err)
+	}
+	logPath := filepath.Join(logDir, time.Now().UTC().Format(logwriter.TimestampLayout)+".log")
+	if err := os.WriteFile(logPath, []byte("line1\nline2\n"), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
 	daemon.updateFromEvent(runner.StateEvent{
 		Unit:         "app.service",
 		State:        runner.StateActive,
@@ -84,6 +94,30 @@ func TestStatusResponse(t *testing.T) {
 		t.Errorf("status = %+v", status)
 	}
 	if len(status.LogTail) != 2 || status.LogTail[1] != "line2" {
+		t.Errorf("LogTail = %v", status.LogTail)
+	}
+}
+
+func TestStatusExplicitLog(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "app.log")
+	if err := os.WriteFile(logPath, []byte("explicit-line\n"), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	store := storagefake.New()
+	store.WriteUnit("app.service", []byte("[Service]\nExecStart=x\nStandardOutput=file:"+logPath+"\n"))
+
+	_, client := newControlClient(t, scmfake.New(), store)
+	response := controlRequest(t, client, protocol.TypeStatusRequest, protocol.StatusRequest{Unit: "app.service"})
+	if response.Type != protocol.TypeStatusResponse {
+		t.Fatalf("response type = %q", response.Type)
+	}
+
+	var status protocol.StatusResponse
+	if err := json.Unmarshal(response.Payload, &status); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(status.LogTail) != 1 || status.LogTail[0] != "explicit-line" {
 		t.Errorf("LogTail = %v", status.LogTail)
 	}
 }

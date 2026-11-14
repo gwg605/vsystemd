@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/akamensky/argparse"
 	"golang.org/x/sys/windows/svc"
@@ -14,6 +16,7 @@ import (
 	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/daemon"
 	"github.com/gwg605/vsystemd/internal/logging"
+	"github.com/gwg605/vsystemd/internal/logwriter"
 	"github.com/gwg605/vsystemd/internal/runner"
 	"github.com/gwg605/vsystemd/internal/scm"
 	"github.com/gwg605/vsystemd/internal/storage"
@@ -79,10 +82,19 @@ func runDaemon(console bool) error {
 	if err != nil {
 		return err
 	}
-	if err := logging.Configure(cfg.LogFile, cfg.LogLevel); err != nil {
+
+	startTime := time.Now().UTC()
+	operationLog, err := logwriter.OpenManaged(
+		filepath.Join(cfg.LogsDir, "vsystemd"),
+		"daemon_",
+		startTime,
+		cfg.LogRotation(),
+	)
+	if err != nil {
 		return err
 	}
-	defer logging.Close()
+	defer operationLog.Close()
+	logging.Configure(operationLog, cfg.LogLevel)
 	slog.Info("vsystemd daemon starting", "console", console)
 
 	store, err := storage.New(cfg.Paths())
@@ -90,7 +102,7 @@ func runDaemon(console bool) error {
 		return err
 	}
 
-	service, err := daemon.New(scm.New(), store, executable, transportFactory(cfg))
+	service, err := daemon.New(scm.New(), store, executable, cfg.LogsDir, cfg.LogRotation(), transportFactory(cfg))
 	if err != nil {
 		return err
 	}
@@ -129,10 +141,20 @@ func runUnit(name string) error {
 	if err != nil {
 		return err
 	}
-	if err := logging.Configure(cfg.LogFile, cfg.LogLevel); err != nil {
+
+	startTime := time.Now().UTC()
+	serviceName := strings.TrimSuffix(name, filepath.Ext(name))
+	operationLog, err := logwriter.OpenManaged(
+		filepath.Join(cfg.LogsDir, "vsystemd"),
+		serviceName+"_",
+		startTime,
+		cfg.LogRotation(),
+	)
+	if err != nil {
 		return err
 	}
-	defer logging.Close()
+	defer operationLog.Close()
+	logging.Configure(operationLog, cfg.LogLevel)
 	slog.Info("vsystemd runner starting", "unit", name)
 
 	store, err := storage.New(cfg.Paths())
@@ -153,8 +175,19 @@ func runUnit(name string) error {
 		return fmt.Errorf("%s is not a service unit", name)
 	}
 
+	if err := logwriter.Cleanup(logwriter.ServiceLogDir(cfg.LogsDir, serviceName), cfg.Logs.MaxAgeDays, time.Now().UTC()); err != nil {
+		slog.Debug("vsystemd runner: cleanup service logs failed", "unit", name, "error", err)
+	}
+
 	applyServiceDefaults(parsed.Service, cfg)
-	service, err := runner.NewRunner(name, parsed.Service, store, transportFactory(cfg))
+	logs, err := runner.NewLogStreamer(serviceName, parsed.Service, cfg.LogsDir, cfg.LogRotation(), startTime)
+	if err != nil {
+		slog.Error("vsystemd runner: create log streamer failed", "unit", name, "error", err)
+		return err
+	}
+	defer logs.Close()
+
+	service, err := runner.NewRunner(name, parsed.Service, logs, transportFactory(cfg))
 	if err != nil {
 		return err
 	}

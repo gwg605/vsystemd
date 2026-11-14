@@ -59,40 +59,6 @@ func TestFileUnits(t *testing.T) {
 	}
 }
 
-func TestFileLogs(t *testing.T) {
-	st, _ := newTestStorage(t)
-
-	if err := st.WriteLog("app", "stdout", []byte("one\ntwo\n")); err != nil {
-		t.Fatalf("WriteLog() error = %v", err)
-	}
-	if err := st.WriteLog("app", "stdout", []byte("three\n")); err != nil {
-		t.Fatalf("WriteLog() error = %v", err)
-	}
-	if err := st.WriteLog("app", "stderr", []byte("error\n")); err != nil {
-		t.Fatalf("WriteLog() error = %v", err)
-	}
-
-	lines, err := st.ReadLogTail("app", 2)
-	if err != nil {
-		t.Fatalf("ReadLogTail() error = %v", err)
-	}
-	if !reflect.DeepEqual(lines, []string{"two", "three"}) {
-		t.Errorf("ReadLogTail() = %v", lines)
-	}
-
-	missing, err := st.ReadLogTail("missing", 10)
-	if err != nil {
-		t.Fatalf("ReadLogTail() error = %v", err)
-	}
-	if len(missing) != 0 {
-		t.Errorf("ReadLogTail() = %v for missing log", missing)
-	}
-
-	if err := st.WriteLog("../app", "stdout", nil); err == nil {
-		t.Error("WriteLog() error = nil for invalid name")
-	}
-}
-
 func TestFileTimerStates(t *testing.T) {
 	st, _ := newTestStorage(t)
 	state := TimerState{

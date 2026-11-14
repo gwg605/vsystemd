@@ -1,34 +1,27 @@
 package logging
 
 import (
+	"bytes"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestConfigureWritesLog(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "vsystemd.log")
-	if err := Configure(path, "debug"); err != nil {
-		t.Fatalf("Configure() error = %v", err)
-	}
-	defer Close()
+	var buffer bytes.Buffer
+	Configure(&buffer, "debug")
 
 	slog.Debug("test message", "key", "value")
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read log: %v", err)
+	output := buffer.String()
+	if !strings.Contains(output, "test message") || !strings.Contains(output, "key=value") {
+		t.Errorf("log = %q", output)
 	}
-	if !strings.Contains(string(data), "test message") || !strings.Contains(string(data), "key=value") {
-		t.Errorf("log = %q", data)
+	if strings.Contains(output, "time=") || strings.Contains(output, "level=") || strings.Contains(output, "msg=") {
+		t.Errorf("log contains slog field prefixes: %q", output)
 	}
-	if strings.Contains(string(data), "time=") || strings.Contains(string(data), "level=") || strings.Contains(string(data), "msg=") {
-		t.Errorf("log contains slog field prefixes: %q", data)
-	}
-	if !strings.Contains(string(data), "[DEBUG]") {
-		t.Errorf("log has no level prefix: %q", data)
+	if !strings.Contains(output, "[DEBUG]") {
+		t.Errorf("log has no level prefix: %q", output)
 	}
 }
 
