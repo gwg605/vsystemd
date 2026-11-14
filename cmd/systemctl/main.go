@@ -107,7 +107,16 @@ func dispatch(command, name string) error {
 
 	switch command {
 	case "disable":
-		return manager.SetStartType(serviceName, scm.StartTypeDisabled)
+		if _, err := manager.QueryStatus(serviceName); err != nil {
+			return nil
+		}
+		if err := manager.StopService(serviceName); err != nil {
+			return err
+		}
+		if err := waitStopped(manager, serviceName, 2*time.Minute); err != nil {
+			return err
+		}
+		return manager.DeleteService(serviceName)
 	case "start":
 		return manager.StartService(serviceName)
 	case "stop":
