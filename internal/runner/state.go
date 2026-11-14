@@ -55,7 +55,7 @@ func (r *StateReporter) Report(event StateEvent) error {
 		event.Unit = r.unit
 	}
 	if event.Timestamp.IsZero() {
-		event.Timestamp = time.Now()
+		event.Timestamp = time.Now().UTC()
 	}
 
 	r.mu.Lock()

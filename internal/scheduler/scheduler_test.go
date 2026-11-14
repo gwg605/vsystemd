@@ -61,6 +61,9 @@ func TestSchedulerFires(t *testing.T) {
 			t.Fatalf("ReadTimerState() error = %v", err)
 		}
 		if !state.LastRun.IsZero() && !state.NextRun.IsZero() {
+			if state.LastRun.Location() != time.UTC || state.NextRun.Location() != time.UTC {
+				t.Errorf("timer times are not UTC: %v/%v", state.LastRun.Location(), state.NextRun.Location())
+			}
 			break
 		}
 		if time.Now().After(deadline) {

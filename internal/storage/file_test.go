@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -103,6 +104,38 @@ func TestFileTimerStates(t *testing.T) {
 	}
 	if len(states) != 0 {
 		t.Errorf("ListTimerStates() = %v after delete", states)
+	}
+}
+
+func TestTimerStateStoredInUTC(t *testing.T) {
+	st, paths := newTestStorage(t)
+	zone := time.FixedZone("MSK", 3*60*60)
+	input := TimerState{
+		Enabled: true,
+		LastRun: time.Date(2026, 11, 9, 10, 0, 0, 0, zone),
+		NextRun: time.Date(2026, 11, 9, 11, 0, 0, 0, zone),
+	}
+
+	if err := st.WriteTimerState("job.timer", input); err != nil {
+		t.Fatalf("WriteTimerState() error = %v", err)
+	}
+	got, err := st.ReadTimerState("job.timer")
+	if err != nil {
+		t.Fatalf("ReadTimerState() error = %v", err)
+	}
+	if got.LastRun.Location() != time.UTC || got.NextRun.Location() != time.UTC {
+		t.Errorf("locations = %v/%v", got.LastRun.Location(), got.NextRun.Location())
+	}
+	if !got.LastRun.Equal(input.LastRun) || !got.NextRun.Equal(input.NextRun) {
+		t.Errorf("times changed: %+v", got)
+	}
+
+	data, err := os.ReadFile(paths.TimersFile)
+	if err != nil {
+		t.Fatalf("read timer file: %v", err)
+	}
+	if !strings.Contains(string(data), "Z\"") {
+		t.Errorf("timer file has no UTC timestamps: %s", data)
 	}
 }
 

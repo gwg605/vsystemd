@@ -13,6 +13,16 @@ type TimerState struct {
 	NextRun time.Time `json:"next_run"`
 }
 
+func (s TimerState) UTC() TimerState {
+	if !s.LastRun.IsZero() {
+		s.LastRun = s.LastRun.UTC()
+	}
+	if !s.NextRun.IsZero() {
+		s.NextRun = s.NextRun.UTC()
+	}
+	return s
+}
+
 type Storage interface {
 	ListUnits() ([]string, error)
 	ReadUnit(name string) ([]byte, error)

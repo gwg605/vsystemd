@@ -56,7 +56,7 @@ func (h *handler) Handle(_ context.Context, record slog.Record) error {
 	}
 
 	var buffer bytes.Buffer
-	buffer.WriteString(timestamp.Format("2006-01-02 15:04:05.000"))
+	buffer.WriteString(timestamp.UTC().Format("2006-01-02 15:04:05.000Z"))
 	buffer.WriteString(" [")
 	buffer.WriteString(record.Level.String())
 	buffer.WriteString("] ")

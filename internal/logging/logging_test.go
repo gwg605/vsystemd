@@ -23,6 +23,9 @@ func TestConfigureWritesLog(t *testing.T) {
 	if !strings.Contains(output, "[DEBUG]") {
 		t.Errorf("log has no level prefix: %q", output)
 	}
+	if !strings.Contains(output, "Z [DEBUG]") {
+		t.Errorf("log timestamp is not UTC: %q", output)
+	}
 }
 
 func TestParseLevel(t *testing.T) {

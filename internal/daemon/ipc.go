@@ -99,7 +99,7 @@ func (d *Daemon) updateFromEvent(event runner.StateEvent) {
 
 	transition := event.Timestamp
 	if transition.IsZero() {
-		transition = time.Now()
+		transition = time.Now().UTC()
 	}
 
 	state := ServiceState{

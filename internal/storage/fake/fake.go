@@ -67,13 +67,13 @@ func (s *Storage) ReadUnit(name string) ([]byte, error) {
 func (s *Storage) ReadTimerState(name string) (storage.TimerState, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.timers[name], nil
+	return s.timers[name].UTC(), nil
 }
 
 func (s *Storage) WriteTimerState(name string, state storage.TimerState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.timers[name] = state
+	s.timers[name] = state.UTC()
 	return nil
 }
 
@@ -89,7 +89,7 @@ func (s *Storage) ListTimerStates() (map[string]storage.TimerState, error) {
 	defer s.mu.Unlock()
 	states := make(map[string]storage.TimerState, len(s.timers))
 	for name, state := range s.timers {
-		states[name] = state
+		states[name] = state.UTC()
 	}
 	return states, nil
 }

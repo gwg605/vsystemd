@@ -74,7 +74,7 @@ func (s *fileStorage) WriteTimerState(name string, state TimerState) error {
 	if err != nil {
 		return err
 	}
-	states[name] = state
+	states[name] = state.UTC()
 	return s.saveTimerStates(states)
 }
 
@@ -110,11 +110,18 @@ func (s *fileStorage) loadTimerStates() (map[string]TimerState, error) {
 	if err := json.Unmarshal(data, &states); err != nil {
 		return nil, fmt.Errorf("parse timer state: %w", err)
 	}
+	for name, state := range states {
+		states[name] = state.UTC()
+	}
 	return states, nil
 }
 
 func (s *fileStorage) saveTimerStates(states map[string]TimerState) error {
-	data, err := json.MarshalIndent(states, "", "  ")
+	normalized := make(map[string]TimerState, len(states))
+	for name, state := range states {
+		normalized[name] = state.UTC()
+	}
+	data, err := json.MarshalIndent(normalized, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode timer state: %w", err)
 	}

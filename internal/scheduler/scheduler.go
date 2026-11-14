@@ -68,7 +68,7 @@ func (s *Scheduler) Add(timer Timer) error {
 		done:   make(chan struct{}),
 	}
 	s.timers[timer.Name] = scheduled
-	if next, ok := nextEvent(events, time.Now()); ok {
+	if next, ok := nextEvent(events, time.Now().UTC()); ok {
 		s.writeNext(timer.Name, next)
 	}
 	slog.Info("scheduler: timer added", "unit", timer.Name, "service", timer.Service, "on_calendar", timer.OnCalendar)
@@ -196,7 +196,7 @@ func (s *Scheduler) run(timer *scheduledTimer) {
 	defer close(timer.done)
 
 	for {
-		next, ok := nextEvent(timer.events, time.Now())
+		next, ok := nextEvent(timer.events, time.Now().UTC())
 		if !ok {
 			slog.Warn("scheduler: no future timer events, stopping timer", "unit", timer.timer.Name)
 			return
@@ -212,7 +212,7 @@ func (s *Scheduler) run(timer *scheduledTimer) {
 			return
 		}
 
-		firedAt := time.Now()
+		firedAt := time.Now().UTC()
 		slog.Info("scheduler: firing timer", "unit", timer.timer.Name, "service", timer.timer.Service, "fired_at", firedAt)
 		if err := s.manager.StartService(timer.timer.Service); err != nil {
 			slog.Error("scheduler: start service failed", "unit", timer.timer.Name, "service", timer.timer.Service, "error", err)
@@ -232,7 +232,7 @@ func (s *Scheduler) writeNext(name string, next time.Time) {
 		slog.Warn("scheduler: read timer state failed", "unit", name, "error", err)
 		return
 	}
-	state.NextRun = next
+	state.NextRun = utcTime(next)
 	if err := s.store.WriteTimerState(name, state); err != nil {
 		slog.Warn("scheduler: write timer state failed", "unit", name, "error", err)
 	}
@@ -244,8 +244,8 @@ func (s *Scheduler) writeTick(name string, firedAt, next time.Time) {
 		slog.Warn("scheduler: read timer state failed", "unit", name, "error", err)
 		return
 	}
-	state.LastRun = firedAt
-	state.NextRun = next
+	state.LastRun = utcTime(firedAt)
+	state.NextRun = utcTime(next)
 	if err := s.store.WriteTimerState(name, state); err != nil {
 		slog.Warn("scheduler: write timer state failed", "unit", name, "error", err)
 	}
@@ -274,17 +274,26 @@ func parseEvents(timer Timer) ([]systemdtime.CalendarEvent, error) {
 }
 
 func nextEvent(events []systemdtime.CalendarEvent, now time.Time) (time.Time, bool) {
+	now = now.UTC()
 	var next time.Time
 	for _, event := range events {
 		candidate, ok := event.Next(now)
 		if !ok {
 			continue
 		}
+		candidate = candidate.UTC()
 		if next.IsZero() || candidate.Before(next) {
 			next = candidate
 		}
 	}
 	return next, !next.IsZero()
+}
+
+func utcTime(value time.Time) time.Time {
+	if value.IsZero() {
+		return time.Time{}
+	}
+	return value.UTC()
 }
 
 func changed(old, next Timer) bool {

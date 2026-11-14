@@ -221,6 +221,9 @@ Log writers keep their files open but readable. `systemctl status` shows the
 last lines from the current/latest managed file, or from the explicit
 `file:`/`append:` target if one is configured.
 
+Log timestamps are written in UTC with a `Z` suffix. Timer `last_run` and
+`next_run` values in `timers.json` are also stored in UTC.
+
 Set `"log_level": "debug"` in `config.json` for verbose daemon/runner logs.
 
 ## systemctl commands
