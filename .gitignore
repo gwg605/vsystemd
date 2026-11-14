@@ -6,17 +6,23 @@
 *.so
 *.dylib
 
-# Example CMake build output
-/examples/basic/monitor/build/
-
 # Test output
 *.test
 *.out
 coverage.*
+!coverage.go
+*.coverprofile
+profile.cov
 
 # Go workspace
 go.work
 go.work.sum
+
+# Environment files
+.env
+
+# Example CMake build output
+/examples/basic/monitor/build/
 
 # Editor / OS
 .vscode/
