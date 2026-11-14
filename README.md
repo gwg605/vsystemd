@@ -55,7 +55,6 @@ examples/basic/      service/timer example and diagnostic monitor
 scripts/             default path/ACL setup script
 ARCHITECTURE.md
 TECHSPEC.md
-PLAN.md
 PROCESS.md
 ```
 
@@ -297,5 +296,4 @@ Remove-Item -Recurse -Force C:\ProgramData\vsystemd
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — components and semantics
 - [`TECHSPEC.md`](TECHSPEC.md) — protocols and data formats
-- [`PLAN.md`](PLAN.md) — implementation phases
 - [`PROCESS.md`](PROCESS.md) — branching and review workflow
