@@ -48,6 +48,7 @@ func run(args []string) error {
 	}
 
 	listUnits := parser.NewCommand("list-units", "List known units")
+	listTimers := parser.NewCommand("list-timers", "List timers")
 	daemonReload := parser.NewCommand("daemon-reload", "Reload unit files")
 
 	if err := parser.Parse(args); err != nil {
@@ -77,6 +78,8 @@ func run(args []string) error {
 	switch {
 	case listUnits.Happened():
 		return listUnitsCommand()
+	case listTimers.Happened():
+		return listTimersCommand()
 	case daemonReload.Happened():
 		return daemonReloadCommand()
 	default:
@@ -231,24 +234,41 @@ func statusCommand(cfg config.Config, name string) error {
 }
 
 func listUnitsCommand() error {
-	cfg, err := config.Load()
+	list, err := fetchUnits()
 	if err != nil {
-		return err
-	}
-	response, err := daemonRequest(cfg, protocol.TypeListUnits, nil)
-	if err != nil {
-		return err
-	}
-	if err := responseError(response); err != nil {
-		return err
-	}
-
-	var list protocol.ListUnitsResponse
-	if err := json.Unmarshal(response.Payload, &list); err != nil {
 		return err
 	}
 	printUnits(list)
 	return nil
+}
+
+func listTimersCommand() error {
+	list, err := fetchUnits()
+	if err != nil {
+		return err
+	}
+	printTimers(list)
+	return nil
+}
+
+func fetchUnits() (protocol.ListUnitsResponse, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return protocol.ListUnitsResponse{}, err
+	}
+	response, err := daemonRequest(cfg, protocol.TypeListUnits, nil)
+	if err != nil {
+		return protocol.ListUnitsResponse{}, err
+	}
+	if err := responseError(response); err != nil {
+		return protocol.ListUnitsResponse{}, err
+	}
+
+	var list protocol.ListUnitsResponse
+	if err := json.Unmarshal(response.Payload, &list); err != nil {
+		return protocol.ListUnitsResponse{}, err
+	}
+	return list, nil
 }
 
 func daemonReloadCommand() error {
@@ -328,6 +348,21 @@ func waitStopped(manager scm.Manager, name string, timeout time.Duration) error 
 
 func printStatus(status protocol.StatusResponse) {
 	fmt.Printf("%s - %s\n", status.Unit, status.SystemdState)
+	if status.Activates != "" {
+		fmt.Printf("    Activates: %s\n", status.Activates)
+	}
+	if status.Enabled != nil {
+		fmt.Printf("    Enabled: %s\n", yesNo(*status.Enabled))
+	}
+	if status.Running != nil {
+		fmt.Printf("    Running: %s\n", yesNo(*status.Running))
+	}
+	if status.NextRun != nil {
+		fmt.Printf("    Trigger: %s\n", formatTime(*status.NextRun))
+	}
+	if status.LastRun != nil {
+		fmt.Printf("    Last run: %s\n", formatTime(*status.LastRun))
+	}
 	if status.PID != 0 {
 		fmt.Printf("    PID: %d\n", status.PID)
 	}
@@ -347,6 +382,66 @@ func printUnits(list protocol.ListUnitsResponse) {
 	for _, entry := range list.Units {
 		fmt.Printf("%-24s %-24s %s\n", entry.Unit, entry.SystemdState, entry.Description)
 	}
+}
+
+func printTimers(list protocol.ListUnitsResponse) {
+	fmt.Printf("%-28s %-12s %-28s %-12s %-24s %s\n", "NEXT", "LEFT", "LAST", "PASSED", "UNIT", "ACTIVATES")
+	for _, entry := range list.Units {
+		if entry.Type != "timer" {
+			continue
+		}
+
+		var next, left, last, passed string
+		if entry.NextRun != nil {
+			next = formatTime(*entry.NextRun)
+			left = formatDelta(time.Until(*entry.NextRun))
+		}
+		if entry.LastRun != nil {
+			last = formatTime(*entry.LastRun)
+			passed = formatDelta(time.Since(*entry.LastRun))
+		}
+		fmt.Printf("%-28s %-12s %-28s %-12s %-24s %s\n", next, left, last, passed, entry.Unit, entry.Activates)
+	}
+}
+
+func formatTime(value time.Time) string {
+	return value.Local().Format("2006-01-02 15:04:05 -07:00")
+}
+
+func formatDelta(value time.Duration) string {
+	if value < 0 {
+		value = -value
+	}
+
+	total := int64(value / time.Second)
+	days := total / 86400
+	total %= 86400
+	hours := total / 3600
+	total %= 3600
+	minutes := total / 60
+	seconds := total % 60
+
+	parts := make([]string, 0, 3)
+	if days > 0 {
+		parts = append(parts, fmt.Sprintf("%dd", days))
+	}
+	if hours > 0 {
+		parts = append(parts, fmt.Sprintf("%dh", hours))
+	}
+	if minutes > 0 {
+		parts = append(parts, fmt.Sprintf("%dm", minutes))
+	}
+	if len(parts) == 0 || seconds > 0 {
+		parts = append(parts, fmt.Sprintf("%ds", seconds))
+	}
+	return strings.Join(parts, " ")
+}
+
+func yesNo(value bool) string {
+	if value {
+		return "yes"
+	}
+	return "no"
 }
 
 func vsystemdPath() (string, error) {

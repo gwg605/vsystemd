@@ -89,6 +89,13 @@ because `service2` declares a dependency on `service1`.
 `enable` persists `enabled=true` (the timer will be started automatically when the
 daemon starts). `start` adds the timer to the scheduler immediately.
 
+Inspect the timer:
+
+```powershell
+.\bin\systemctl.exe status service3.timer
+.\bin\systemctl.exe list-timers
+```
+
 ## 7. Verify
 
 ```powershell

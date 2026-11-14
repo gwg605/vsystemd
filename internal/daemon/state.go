@@ -23,6 +23,7 @@ const (
 	SystemdActivatingStart       SystemdState = "activating (start)"
 	SystemdActivatingAutoRestart SystemdState = "activating (auto-restart)"
 	SystemdInactiveDead          SystemdState = "inactive (dead)"
+	SystemdActiveWaiting         SystemdState = "active (waiting)"
 	SystemdFailed                SystemdState = "failed"
 	SystemdDeactivatingStop      SystemdState = "deactivating (stop)"
 )

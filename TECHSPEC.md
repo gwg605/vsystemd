@@ -139,14 +139,16 @@ systemctl создаёт `vsystemd-ctl-<pid>` при старте, слушае�
 | Тип | request_id | Payload |
 |---|---|---|
 | `reload_result` | id запроса `daemon_reload` | `success` |
-| `status_response` | id запроса `status_request` | `unit`, `systemd_state`, `scm_state`, `pid`, `exit_code`, `restart_count`, `last_transition`, `last_error`, `log_tail` |
-| `list_units_response` | id запроса `list_units` | `units[]`: `unit`, `type`, `systemd_state`, `scm_state`, `description`, `enabled`, `running`, `next_run`, `last_run` |
+| `status_response` | id запроса `status_request` | `unit`, `systemd_state`, `scm_state`, `pid`, `exit_code`, `restart_count`, `last_transition`, `last_error`, `log_tail`; для `.timer` дополнительно `enabled`, `running`, `next_run`, `last_run`, `activates` |
+| `list_units_response` | id запроса `list_units` | `units[]`: `unit`, `type`, `systemd_state`, `scm_state`, `description`, `enabled`, `running`, `next_run`, `last_run`, `activates` |
 | `timer_result` | id исходного запроса | `unit`, `success`, `enabled`, `running`, `last_run`, `next_run` |
 | `error_response` | id исходного запроса | `error` |
 
 **`error_response`** — универсальный ответ на любой запрос в случае ошибки обработки. `request_id` содержит `id` того запроса, который вызвал ошибку.
 
-Поля `enabled`, `running`, `next_run`, `last_run` в `list_units_response` заполняются только для юнитов типа `.timer`; для `.service` — `null`.
+Поля `enabled`, `running`, `next_run`, `last_run`, `activates` в `list_units_response` заполняются только для юнитов типа `.timer`; для `.service` — `null`/пусто.
+
+Для `.timer` поле `systemd_state` равно `active (waiting)`, если таймер добавлен в scheduler, иначе `inactive (dead)`.
 
 ---
 

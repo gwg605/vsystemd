@@ -27,15 +27,20 @@ type StatusRequest struct {
 }
 
 type StatusResponse struct {
-	Unit           string    `json:"unit"`
-	SystemdState   string    `json:"systemd_state"`
-	SCMState       scm.State `json:"scm_state"`
-	PID            uint32    `json:"pid"`
-	ExitCode       int       `json:"exit_code"`
-	RestartCount   int       `json:"restart_count"`
-	LastTransition time.Time `json:"last_transition"`
-	LastError      string    `json:"last_error"`
-	LogTail        []string  `json:"log_tail"`
+	Unit           string     `json:"unit"`
+	SystemdState   string     `json:"systemd_state"`
+	SCMState       scm.State  `json:"scm_state"`
+	PID            uint32     `json:"pid"`
+	ExitCode       int        `json:"exit_code"`
+	RestartCount   int        `json:"restart_count"`
+	LastTransition time.Time  `json:"last_transition"`
+	LastError      string     `json:"last_error"`
+	LogTail        []string   `json:"log_tail"`
+	Enabled        *bool      `json:"enabled,omitempty"`
+	Running        *bool      `json:"running,omitempty"`
+	NextRun        *time.Time `json:"next_run,omitempty"`
+	LastRun        *time.Time `json:"last_run,omitempty"`
+	Activates      string     `json:"activates,omitempty"`
 }
 
 type UnitStatus struct {
@@ -48,6 +53,7 @@ type UnitStatus struct {
 	Running      *bool      `json:"running"`
 	NextRun      *time.Time `json:"next_run"`
 	LastRun      *time.Time `json:"last_run"`
+	Activates    string     `json:"activates,omitempty"`
 }
 
 type ListUnitsResponse struct {
