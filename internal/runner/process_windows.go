@@ -48,12 +48,6 @@ func sendConsoleInterrupt(pid int) error {
 	}
 	slog.Debug("process: ignoring ctrl-c in runner while sending it to child", "pid", pid)
 
-	defer func() {
-		if reset, _, resetErr := procSetConsoleCtrlHandler.Call(0, 0); reset == 0 {
-			slog.Warn("process: SetConsoleCtrlHandler(FALSE) failed", "pid", pid, "error", resetErr)
-		}
-	}()
-
 	slog.Info("process: sending CTRL_C_EVENT to child console", "pid", pid)
 	if err := windows.GenerateConsoleCtrlEvent(windows.CTRL_C_EVENT, 0); err != nil {
 		slog.Warn("process: GenerateConsoleCtrlEvent failed", "pid", pid, "error", err)
