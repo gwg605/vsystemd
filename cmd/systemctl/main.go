@@ -141,6 +141,12 @@ func dispatchTimer(command, name string) error {
 		return timerCommand(protocol.TypeTimerStart, protocol.TimerRequest{Unit: name})
 	case "stop":
 		return timerCommand(protocol.TypeTimerStop, protocol.TimerRequest{Unit: name})
+	case "status":
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		return statusCommand(cfg, name)
 	default:
 		return fmt.Errorf("command %s is not supported for timer units", command)
 	}
