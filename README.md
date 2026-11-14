@@ -26,6 +26,7 @@ The project provides two binaries:
 ## Requirements
 
 - Windows 8.1 / Windows Server 2012 R2 or later;
+- Windows PowerShell 4.0+ for the setup scripts;
 - Administrator rights for installation and service management;
 - Go 1.26+ to build from source.
 

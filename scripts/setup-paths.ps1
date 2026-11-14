@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 4.0
 
 [CmdletBinding()]
 param(
@@ -14,7 +14,7 @@ $ServicesSid = 'S-1-5-80-0'
 
 function Test-Elevated {
     $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = [System.Security.Principal.WindowsPrincipal]::new($identity)
+    $principal = New-Object System.Security.Principal.WindowsPrincipal -ArgumentList $identity
     return $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
@@ -24,11 +24,11 @@ function New-DirectoryRule {
         [System.Security.AccessControl.FileSystemRights]$Rights
     )
 
-    $identity = [System.Security.Principal.SecurityIdentifier]::new($Sid)
+    $identity = New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $Sid
     $inheritance = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor `
                    [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
 
-    return [System.Security.AccessControl.FileSystemAccessRule]::new(
+    return New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList @(
         $identity,
         $Rights,
         $inheritance,
@@ -43,7 +43,7 @@ function Set-DirectoryAcl {
         [hashtable[]]$Rules
     )
 
-    $acl = [System.Security.AccessControl.DirectorySecurity]::new()
+    $acl = New-Object System.Security.AccessControl.DirectorySecurity
     $acl.SetAccessRuleProtection($true, $false)
     foreach ($rule in $Rules) {
         $acl.AddAccessRule((New-DirectoryRule -Sid $rule.Sid -Rights $rule.Rights))
