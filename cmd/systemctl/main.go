@@ -11,6 +11,7 @@ import (
 
 	"github.com/akamensky/argparse"
 
+	vsystemd "github.com/gwg605/vsystemd"
 	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/scm"
@@ -50,9 +51,15 @@ func run(args []string) error {
 	listUnits := parser.NewCommand("list-units", "List known units")
 	listTimers := parser.NewCommand("list-timers", "List timers")
 	daemonReload := parser.NewCommand("daemon-reload", "Reload unit files")
+	versionCmd := parser.NewCommand("--version", "Print version")
 
 	if err := parser.Parse(args); err != nil {
 		return errors.New(parser.Usage(err))
+	}
+
+	if versionCmd.Happened() {
+		fmt.Printf("systemctl %s\n%s\n", vsystemd.Version, vsystemd.FeatureFlags)
+		return nil
 	}
 
 	if enableCmd.Happened() {

@@ -50,6 +50,7 @@ internal/
   transport/pipe/    named pipe transport
   unit/              unit file parser and models
 tests/               end-to-end scenarios with fake SCM/storage/transport
+VERSION              current version (embedded into the binaries)
 examples/basic/      service/timer example and diagnostic monitor
 scripts/             default path/ACL setup script
 ARCHITECTURE.md
@@ -239,6 +240,7 @@ Set `"log_level": "debug"` in `config.json` for verbose daemon/runner logs.
 
 | Command | Route | Description |
 |---|---|---|
+| `--version` | — | Print the systemctl version |
 | `enable <unit>.service` | SCM | Create/update the service and set automatic start |
 | `disable <unit>.service` | SCM | Stop and remove the service from SCM |
 | `start/stop/restart <unit>.service` | SCM | Control the service |
@@ -248,6 +250,13 @@ Set `"log_level": "debug"` in `config.json` for verbose daemon/runner logs.
 | `daemon-reload` | daemon | Rescan units and update SCM entries |
 | `enable/disable <unit>.timer` | daemon | Persist timer enabled state |
 | `start/stop <unit>.timer` | daemon | Add/remove timer from scheduler |
+
+`systemctl --version` prints the version and compiled feature flags:
+
+```
+systemctl 1
++WIN32 +SCM +PIPE +TIMERS +LOGROTATE
+```
 
 ## Service accounts
 
