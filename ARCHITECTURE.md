@@ -185,8 +185,8 @@ All other dependency types (`Wants=`, `BindsTo=`, `PartOf=`, `Conflicts=`, `Befo
 
 ## Logging
 
-- Service stdout/stderr → `C:\ProgramData\vsystemd\logs\<name>.stdout` / `<name>.stderr`
-- vsystemd own log → `C:\ProgramData\vsystemd\vsystemd.log`
+- Service stdout/stderr → `C:\ProgramData\vsystemd\logs\<service>\<timestamp>.log`
+- vsystemd own logs → `C:\ProgramData\vsystemd\logs\vsystemd\daemon_<timestamp>.log` / `<service>_<timestamp>.log`
 - No journald, no journalctl
 - `systemctl status` shows last N lines from log file
 

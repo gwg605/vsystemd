@@ -8,7 +8,7 @@ import (
 	"github.com/gwg605/vsystemd/internal/storage"
 )
 
-func TestUnitsAndLogs(t *testing.T) {
+func TestUnits(t *testing.T) {
 	st := New()
 	st.WriteUnit("job.timer", []byte("[Timer]\nOnCalendar=daily\n"))
 	st.WriteUnit("app.service", []byte("[Service]\nExecStart=/app\n"))
@@ -32,20 +32,6 @@ func TestUnitsAndLogs(t *testing.T) {
 
 	if _, err := st.ReadUnit("missing.service"); err == nil {
 		t.Error("ReadUnit() error = nil for missing unit")
-	}
-
-	if err := st.WriteLog("app", "stdout", []byte("one\ntwo\n")); err != nil {
-		t.Fatalf("WriteLog() error = %v", err)
-	}
-	if err := st.WriteLog("app", "stdout", []byte("three\n")); err != nil {
-		t.Fatalf("WriteLog() error = %v", err)
-	}
-	lines, err := st.ReadLogTail("app", 2)
-	if err != nil {
-		t.Fatalf("ReadLogTail() error = %v", err)
-	}
-	if !reflect.DeepEqual(lines, []string{"two", "three"}) {
-		t.Errorf("ReadLogTail() = %v", lines)
 	}
 }
 

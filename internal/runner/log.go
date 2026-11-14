@@ -1,12 +1,11 @@
 package runner
 
 import (
-	"fmt"
 	"io"
-	"os"
-	"strings"
+	"log/slog"
+	"time"
 
-	"github.com/gwg605/vsystemd/internal/storage"
+	"github.com/gwg605/vsystemd/internal/logwriter"
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
@@ -16,29 +15,87 @@ type LogStreamer struct {
 	closers []io.Closer
 }
 
-func NewLogStreamer(name string, service *unit.ServiceUnit, store storage.Storage) (*LogStreamer, error) {
+func NewLogStreamer(serviceName string, service *unit.ServiceUnit, logsDir string, rotation logwriter.Rotation, startTime time.Time) (*LogStreamer, error) {
+	stdoutTarget, stderrTarget, warnings := logwriter.ResolveServiceOutputs(service)
+	for _, warning := range warnings {
+		slog.Warn("log: "+warning, "unit", serviceName)
+	}
+
+	defaultPath := logwriter.ManagedPath(logwriter.ServiceLogDir(logsDir, serviceName), "", startTime)
+	stdout := toWriterSpec(defaultPath, stdoutTarget)
+	stderr := toWriterSpec(defaultPath, stderrTarget)
+
+	if stdout.path != "" && stderr.path != "" && logwriter.SamePath(stdout.path, stderr.path) {
+		if stdout.kind == logwriter.OutputAppend || stderr.kind == logwriter.OutputAppend {
+			stdout.kind = logwriter.OutputAppend
+			stderr.kind = logwriter.OutputAppend
+		} else if stdout.kind != logwriter.OutputDefault {
+			stderr.kind = stdout.kind
+		} else if stderr.kind != logwriter.OutputDefault {
+			stdout.kind = stderr.kind
+		}
+	}
+
 	streamer := &LogStreamer{}
+	opened := make(map[string]io.Writer)
 
-	stdout, stdoutCloser, err := logWriter(name, "stdout", service.StandardOutput, store)
-	if err != nil {
-		return nil, fmt.Errorf("StandardOutput: %w", err)
-	}
-	streamer.stdout = stdout
-	if stdoutCloser != nil {
-		streamer.closers = append(streamer.closers, stdoutCloser)
+	open := func(target writerSpec) (io.Writer, error) {
+		if target.kind == logwriter.OutputNull {
+			return io.Discard, nil
+		}
+		key := logwriter.CanonicalPath(target.path)
+		if existing, ok := opened[key]; ok {
+			return existing, nil
+		}
+
+		var writer io.Writer
+		if target.kind == logwriter.OutputDefault {
+			managed, openErr := logwriter.OpenManaged(logwriter.ServiceLogDir(logsDir, serviceName), "", startTime, rotation)
+			if openErr != nil {
+				return nil, openErr
+			}
+			streamer.closers = append(streamer.closers, managed)
+			writer = managed
+		} else {
+			explicit, openErr := logwriter.OpenFile(target.path, target.kind == logwriter.OutputFile)
+			if openErr != nil {
+				return nil, openErr
+			}
+			streamer.closers = append(streamer.closers, explicit)
+			writer = explicit
+		}
+
+		opened[key] = writer
+		return writer, nil
 	}
 
-	stderr, stderrCloser, err := logWriter(name, "stderr", service.StandardError, store)
+	stdoutWriter, err := open(stdout)
 	if err != nil {
 		streamer.Close()
-		return nil, fmt.Errorf("StandardError: %w", err)
+		return nil, err
 	}
-	streamer.stderr = stderr
-	if stderrCloser != nil {
-		streamer.closers = append(streamer.closers, stderrCloser)
+	streamer.stdout = stdoutWriter
+
+	stderrWriter, err := open(stderr)
+	if err != nil {
+		streamer.Close()
+		return nil, err
 	}
+	streamer.stderr = stderrWriter
 
 	return streamer, nil
+}
+
+type writerSpec struct {
+	kind logwriter.OutputKind
+	path string
+}
+
+func toWriterSpec(defaultPath string, target logwriter.OutputTarget) writerSpec {
+	if target.Kind == logwriter.OutputDefault {
+		return writerSpec{kind: target.Kind, path: defaultPath}
+	}
+	return writerSpec{kind: target.Kind, path: target.Path}
 }
 
 func (l *LogStreamer) Stdout() io.Writer {
@@ -58,32 +115,4 @@ func (l *LogStreamer) Close() error {
 	}
 	l.closers = nil
 	return firstErr
-}
-
-func logWriter(name, stream, value string, store storage.Storage) (io.Writer, io.Closer, error) {
-	if strings.HasPrefix(value, "file:") {
-		path := strings.TrimPrefix(value, "file:")
-		if path == "" {
-			return nil, nil, fmt.Errorf("empty file path")
-		}
-		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
-		if err != nil {
-			return nil, nil, fmt.Errorf("open log file %s: %w", path, err)
-		}
-		return file, file, nil
-	}
-	return &storageWriter{store: store, name: name, stream: stream}, nil, nil
-}
-
-type storageWriter struct {
-	store  storage.Storage
-	name   string
-	stream string
-}
-
-func (w *storageWriter) Write(data []byte) (int, error) {
-	if err := w.store.WriteLog(w.name, w.stream, data); err != nil {
-		return 0, err
-	}
-	return len(data), nil
 }

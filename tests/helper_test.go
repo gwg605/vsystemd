@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -15,6 +16,7 @@ import (
 	"golang.org/x/sys/windows/svc"
 
 	"github.com/gwg605/vsystemd/internal/daemon"
+	"github.com/gwg605/vsystemd/internal/logwriter"
 	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/runner"
 	scmfake "github.com/gwg605/vsystemd/internal/scm/fake"
@@ -108,7 +110,7 @@ func (e *testEnv) transportFactory(peer string, handler transport.MsgHandler) (t
 
 func (e *testEnv) newDaemon(t *testing.T) *daemon.Daemon {
 	t.Helper()
-	d, err := daemon.New(e.manager, e.store, `C:\vsystemd\vsystemd.exe`, e.transportFactory)
+	d, err := daemon.New(e.manager, e.store, `C:\vsystemd\vsystemd.exe`, t.TempDir(), logwriter.Rotation{}, e.transportFactory)
 	if err != nil {
 		t.Fatalf("daemon.New() error = %v", err)
 	}
@@ -118,8 +120,14 @@ func (e *testEnv) newDaemon(t *testing.T) *daemon.Daemon {
 
 func (e *testEnv) newRunner(t *testing.T, name string, service *unit.ServiceUnit) *runner.Runner {
 	t.Helper()
-	r, err := runner.NewRunner(name, service, e.store, e.transportFactory)
+	serviceName := strings.TrimSuffix(name, filepath.Ext(name))
+	logs, err := runner.NewLogStreamer(serviceName, service, t.TempDir(), logwriter.Rotation{}, time.Now().UTC())
 	if err != nil {
+		t.Fatalf("runner.NewLogStreamer() error = %v", err)
+	}
+	r, err := runner.NewRunner(name, service, logs, e.transportFactory)
+	if err != nil {
+		logs.Close()
 		t.Fatalf("runner.NewRunner() error = %v", err)
 	}
 	t.Cleanup(func() { r.Close() })

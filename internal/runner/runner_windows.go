@@ -13,7 +13,6 @@ import (
 
 	"golang.org/x/sys/windows/svc"
 
-	"github.com/gwg605/vsystemd/internal/storage"
 	"github.com/gwg605/vsystemd/internal/transport"
 	"github.com/gwg605/vsystemd/internal/unit"
 )
@@ -28,15 +27,13 @@ type Runner struct {
 	transport transport.Transport
 }
 
-func NewRunner(name string, service *unit.ServiceUnit, store storage.Storage, newTransport TransportFactory) (*Runner, error) {
+func NewRunner(name string, service *unit.ServiceUnit, logs *LogStreamer, newTransport TransportFactory) (*Runner, error) {
 	if newTransport == nil {
 		return nil, errors.New("transport factory is required")
 	}
 
-	logs, err := NewLogStreamer(name, service, store)
-	if err != nil {
-		slog.Error("runner: create log streamer failed", "unit", name, "error", err)
-		return nil, err
+	if logs == nil {
+		return nil, errors.New("log streamer is required")
 	}
 
 	process := NewProcessManager(service)

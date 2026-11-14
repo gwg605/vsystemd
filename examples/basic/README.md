@@ -112,11 +112,13 @@ Expected result:
 Service logs are written to:
 
 ```
-C:\ProgramData\vsystemd\logs\service1.service.stdout
-C:\ProgramData\vsystemd\logs\service1.service.stderr
+C:\ProgramData\vsystemd\logs\service1\<timestamp>.log
+C:\ProgramData\vsystemd\logs\service2\<timestamp>.log
+C:\ProgramData\vsystemd\logs\service3\<timestamp>.log
 ```
 
-(the same pattern applies to `service2` and `service3`).
+stdout and stderr of each service share one file. `systemctl status` shows the
+tail of the current/latest file.
 
 ## 7.1 Diagnostic monitor (optional)
 
@@ -124,7 +126,7 @@ C:\ProgramData\vsystemd\logs\service1.service.stderr
 detailed process/console diagnostics to stdout. It is useful for investigating
 how `systemctl stop` delivers Ctrl-C to a console application. When run as a
 service, the runner captures stdout/stderr into
-`C:\ProgramData\vsystemd\logs\monitor-demo.service.stdout` and `.stderr`.
+`C:\ProgramData\vsystemd\logs\monitor-demo\<timestamp>.log`.
 
 Build it:
 
@@ -149,7 +151,7 @@ Stop it and inspect the captured output:
 
 ```powershell
 Measure-Command { .\bin\systemctl.exe stop monitor-demo.service }
-Get-Content -Tail 60 C:\ProgramData\vsystemd\logs\monitor-demo.service.stdout
+.\bin\systemctl.exe status monitor-demo.service
 ```
 
 Expected: `stop` is fast and the log contains a `CTRL_C_EVENT` entry. If the
@@ -223,5 +225,5 @@ sc.exe delete vsystemd
 
   ```powershell
   .\bin\systemctl.exe status service1.service
-  Get-Content -Tail 20 C:\ProgramData\vsystemd\logs\service1.service.stderr
+  Get-ChildItem C:\ProgramData\vsystemd\logs\service1
   ```

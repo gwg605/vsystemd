@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/gwg605/vsystemd/internal/logwriter"
 	"github.com/gwg605/vsystemd/internal/scm"
 	scmfake "github.com/gwg605/vsystemd/internal/scm/fake"
 	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
@@ -46,7 +47,7 @@ OnCalendar=daily
 	}
 
 	network := transportfake.NewNetwork()
-	daemon, err := New(manager, store, `C:\vsystemd\vsystemd.exe`, func(peer string, handler transport.MsgHandler) (transport.Transport, error) {
+	daemon, err := New(manager, store, `C:\vsystemd\vsystemd.exe`, t.TempDir(), logwriter.Rotation{}, func(peer string, handler transport.MsgHandler) (transport.Transport, error) {
 		return network.New(transport.DefaultConfig(), peer, handler), nil
 	})
 	if err != nil {

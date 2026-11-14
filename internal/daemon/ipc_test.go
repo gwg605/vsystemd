@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/gwg605/vsystemd/internal/logwriter"
 	"github.com/gwg605/vsystemd/internal/runner"
 	"github.com/gwg605/vsystemd/internal/scm"
 	scmfake "github.com/gwg605/vsystemd/internal/scm/fake"
@@ -17,7 +18,7 @@ func newTestDaemon(t *testing.T, manager scm.Manager, store storage.Storage) (*D
 	t.Helper()
 
 	network := transportfake.NewNetwork()
-	daemon, err := New(manager, store, `C:\vsystemd\vsystemd.exe`, func(peer string, handler transport.MsgHandler) (transport.Transport, error) {
+	daemon, err := New(manager, store, `C:\vsystemd\vsystemd.exe`, t.TempDir(), logwriter.Rotation{}, func(peer string, handler transport.MsgHandler) (transport.Transport, error) {
 		return network.New(transport.DefaultConfig(), peer, handler), nil
 	})
 	if err != nil {

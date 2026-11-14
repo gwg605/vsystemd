@@ -192,7 +192,7 @@ systemctl создаёт `vsystemd-ctl-<pid>` при старте, слушае�
 | `restart_count` | runner | количество автоматических рестартов с момента последнего старта |
 | `last_transition` | daemon | timestamp последней смены состояния |
 | `last_error` | runner | строка с ошибкой запуска, сгенерированная runner'ом; только последняя; null если ошибок не было |
-| `log_tail` | лог-файл | последние 10 строк из `C:\ProgramData\vsystemd\logs\<name>.stdout` |
+| `log_tail` | лог-файл | последние 10 строк из текущего файла `logs\<service>\` или явного `file:`/`append:` файла |
 
 ---
 
@@ -291,7 +291,7 @@ type ServiceConfig struct {
 | `SCMHandler` | Регистрация в SCM, приём control-кодов (STOP, INTERROGATE), обновление `SetServiceStatus` |
 | `ProcessManager` | Запуск ExecStartPre → ExecStart → ExecStartPost, настройка env/user/workdir, ExecStop |
 | `RestartController` | `Restart=` / `RestartSec=` / `StartLimitBurst=` логика, счётчик `restart_count` |
-| `LogStreamer` | Перехват stdout/stderr дочернего процесса → `storage.WriteLog()` |
+| `LogStreamer` | Перехват stdout/stderr дочернего процесса → `logwriter.Writer` |
 | `StateReporter` | Отправка `state_event` в daemon, обслуживание входящего pipe, ответ на `status_request` |
 
 ### Жизненный цикл
@@ -400,20 +400,33 @@ SCM stop → SERVICE_CONTROL_STOP → ExecStop → Runner exit
 
 ### Логи сервисов
 
-- stdout → `C:\ProgramData\vsystemd\logs\<name>.stdout`
-- stderr → `C:\ProgramData\vsystemd\logs\<name>.stderr`
-- `StandardOutput=file:/path` / `StandardError=file:/path` — перенаправление в указанный файл
-- Прочие значения (`journal`, `null`, `inherit`, etc.) — парсируются, игнорируются с предупреждением
+- по умолчанию stdout и stderr → `C:\ProgramData\vsystemd\logs\<service>\<timestamp>.log`
+- `<service>` — имя юнита без расширения (`foo.service` → `foo`)
+- `<timestamp>` — UTC время создания файла, формат `YYYY-MM-DD_HH-MM-SS.mmm`
+- `StandardOutput=file:<path>` / `StandardError=file:<path>` — truncate, без ротации
+- `StandardOutput=append:<path>` / `StandardError=append:<path>` — append, без ротации
+- `null` — поток отбрасывается
+- прочие значения — warning и дефолтный лог
+- одинаковый канонический путь для stdout/stderr → один writer
+- `file:` + `append:` на один путь → append для обоих
+- относительные пути считаются от `WorkingDirectory`; родительские каталоги создаются
 
-### Собственный лог vsystemd
+### Собственные логи vsystemd
 
-- Файл: `C:\ProgramData\vsystemd\vsystemd.log`
-- Формат: plain text
-- Ротация: не поддерживается в v1
+- daemon → `C:\ProgramData\vsystemd\logs\vsystemd\daemon_<timestamp>.log`
+- runner → `C:\ProgramData\vsystemd\logs\vsystemd\<service>_<timestamp>.log`
+- формат: plain text
+- файлы открыты на append и доступны на чтение
+- ротация по `logs.max_size_mb` и `logs.max_age_days`
+- при ротации создаётся новый файл с UTC timestamp; переименования не используются
+- закрытые managed-логи старше `max_age_days` удаляются
+- `file:`/`append:` файлы не ротируются и не удаляются
 
 ### `systemctl status`
 
-Показывает последние 10 строк из `<name>.stdout`.
+Показывает последние 10 строк из текущего/последнего managed-файла
+`logs\<service>\`, либо из явно заданного `file:`/`append:` файла.
+Ротированные файлы не подмешиваются. При `null` для обоих потоков tail пуст.
 
 ---
 
@@ -514,8 +527,11 @@ Transport реализует матчинг ответов по `request_id`:
   "system_dir": "C:\\ProgramData\\vsystemd\\system",
   "logs_dir": "C:\\ProgramData\\vsystemd\\logs",
   "timers_state_file": "C:\\ProgramData\\vsystemd\\timers.json",
-  "log_file": "C:\\ProgramData\\vsystemd\\vsystemd.log",
   "log_level": "info",
+  "logs": {
+    "max_size_mb": 10,
+    "max_age_days": 7
+  },
   "ipc": {
     "connect_timeout_ms": 2000,
     "idle_timeout_ms": 5000,

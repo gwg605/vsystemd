@@ -143,7 +143,8 @@ $logsRules = @(
 $specs = @(
     [pscustomobject]@{ Path = $Root; Rules = $rootRules },
     [pscustomobject]@{ Path = (Join-Path $Root 'system'); Rules = $rootRules },
-    [pscustomobject]@{ Path = (Join-Path $Root 'logs'); Rules = $logsRules }
+    [pscustomobject]@{ Path = (Join-Path $Root 'logs'); Rules = $logsRules },
+    [pscustomobject]@{ Path = (Join-Path $Root 'logs\vsystemd'); Rules = $logsRules }
 )
 
 $failed = $false

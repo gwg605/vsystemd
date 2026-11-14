@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/gwg605/vsystemd/internal/logwriter"
 	"github.com/gwg605/vsystemd/internal/storage"
 	"github.com/gwg605/vsystemd/internal/transport"
 )
@@ -30,14 +31,19 @@ type Defaults struct {
 	StartLimitIntervalSecMS int `json:"start_limit_interval_sec_ms"`
 }
 
+type Logs struct {
+	MaxSizeMB  int `json:"max_size_mb"`
+	MaxAgeDays int `json:"max_age_days"`
+}
+
 type Config struct {
 	SystemDir       string   `json:"system_dir"`
 	LogsDir         string   `json:"logs_dir"`
 	TimersStateFile string   `json:"timers_state_file"`
-	LogFile         string   `json:"log_file"`
 	LogLevel        string   `json:"log_level"`
 	IPC             IPC      `json:"ipc"`
 	Defaults        Defaults `json:"defaults"`
+	Logs            Logs     `json:"logs"`
 }
 
 func Default() Config {
@@ -45,7 +51,6 @@ func Default() Config {
 		SystemDir:       filepath.Join(defaultRoot, "system"),
 		LogsDir:         filepath.Join(defaultRoot, "logs"),
 		TimersStateFile: filepath.Join(defaultRoot, "timers.json"),
-		LogFile:         filepath.Join(defaultRoot, "logs", "vsystemd.log"),
 		LogLevel:        "info",
 		IPC: IPC{
 			ConnectTimeoutMS: 2000,
@@ -57,6 +62,10 @@ func Default() Config {
 			TimeoutStopSecMS:        45000,
 			StartLimitBurst:         5,
 			StartLimitIntervalSecMS: 10000,
+		},
+		Logs: Logs{
+			MaxSizeMB:  10,
+			MaxAgeDays: 7,
 		},
 	}
 }
@@ -110,6 +119,13 @@ func (d Defaults) StartLimitIntervalSec() time.Duration {
 	return time.Duration(d.StartLimitIntervalSecMS) * time.Millisecond
 }
 
+func (c Config) LogRotation() logwriter.Rotation {
+	return logwriter.Rotation{
+		MaxSizeMB:  c.Logs.MaxSizeMB,
+		MaxAgeDays: c.Logs.MaxAgeDays,
+	}
+}
+
 func (c *Config) applyDefaults() {
 	defaults := Default()
 	if c.SystemDir == "" {
@@ -120,9 +136,6 @@ func (c *Config) applyDefaults() {
 	}
 	if c.TimersStateFile == "" {
 		c.TimersStateFile = defaults.TimersStateFile
-	}
-	if c.LogFile == "" {
-		c.LogFile = defaults.LogFile
 	}
 	if c.LogLevel == "" {
 		c.LogLevel = defaults.LogLevel

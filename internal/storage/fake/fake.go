@@ -64,23 +64,6 @@ func (s *Storage) ReadUnit(name string) ([]byte, error) {
 	return append([]byte(nil), data...), nil
 }
 
-func (s *Storage) WriteLog(name, stream string, data []byte) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	key := name + "." + stream
-	s.logs[key] = append(s.logs[key], data...)
-	return nil
-}
-
-func (s *Storage) ReadLogTail(name string, n int) ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if n <= 0 {
-		return nil, nil
-	}
-	return tailLines(s.logs[name+".stdout"], n), nil
-}
-
 func (s *Storage) ReadTimerState(name string) (storage.TimerState, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -109,19 +92,4 @@ func (s *Storage) ListTimerStates() (map[string]storage.TimerState, error) {
 		states[name] = state
 	}
 	return states, nil
-}
-
-func tailLines(data []byte, n int) []string {
-	text := strings.TrimRight(string(data), "\r\n")
-	if text == "" {
-		return nil
-	}
-	lines := strings.Split(text, "\n")
-	for i := range lines {
-		lines[i] = strings.TrimSuffix(lines[i], "\r")
-	}
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return lines
 }

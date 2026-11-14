@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gwg605/vsystemd/internal/logwriter"
 	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/scm"
 	"github.com/gwg605/vsystemd/internal/transport"
@@ -92,10 +93,7 @@ func (d *Daemon) status(name string) (protocol.StatusResponse, error) {
 		state.SCMState = 0
 	}
 
-	logTail, err := d.store.ReadLogTail(name, 10)
-	if err != nil {
-		return protocol.StatusResponse{}, fmt.Errorf("read log tail: %w", err)
-	}
+	logTail := d.logTail(name)
 
 	return protocol.StatusResponse{
 		Unit:           name,
@@ -182,6 +180,51 @@ func (d *Daemon) serviceState(name string, services map[string]scm.ServiceStatus
 		state.SCMState = service.State
 	}
 	return state
+}
+
+func (d *Daemon) logTail(unitName string) []string {
+	data, err := d.store.ReadUnit(unitName)
+	if err != nil {
+		return nil
+	}
+	parsed, err := unit.Parse(unitName, data)
+	if err != nil || parsed.Service == nil {
+		return nil
+	}
+
+	stdout, stderr, warnings := logwriter.ResolveServiceOutputs(parsed.Service)
+	for _, warning := range warnings {
+		slog.Warn("daemon: log output warning", "unit", unitName, "warning", warning)
+	}
+
+	target := logwriter.StatusTarget(stdout, stderr)
+	switch target.Kind {
+	case logwriter.OutputNull:
+		return nil
+	case logwriter.OutputFile, logwriter.OutputAppend:
+		lines, err := logwriter.ReadTail(target.Path, 10)
+		if err != nil {
+			slog.Warn("daemon: read log tail failed", "unit", unitName, "path", target.Path, "error", err)
+			return nil
+		}
+		return lines
+	default:
+		serviceName := strings.TrimSuffix(unitName, filepath.Ext(unitName))
+		path, err := logwriter.LatestFile(logwriter.ServiceLogDir(d.logsDir, serviceName))
+		if err != nil {
+			slog.Warn("daemon: find latest log failed", "unit", unitName, "error", err)
+			return nil
+		}
+		if path == "" {
+			return nil
+		}
+		lines, err := logwriter.ReadTail(path, 10)
+		if err != nil {
+			slog.Warn("daemon: read log tail failed", "unit", unitName, "path", path, "error", err)
+			return nil
+		}
+		return lines
+	}
 }
 
 func fillTimerState(entry *protocol.UnitStatus, d *Daemon, name string) {
