@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sync"
 	"time"
+	_ "time/tzdata"
 
 	systemdtime "gitlab.com/allddd/go-systemd-time"
 
@@ -68,7 +69,7 @@ func (s *Scheduler) Add(timer Timer) error {
 		done:   make(chan struct{}),
 	}
 	s.timers[timer.Name] = scheduled
-	if next, ok := nextEvent(events, time.Now().UTC()); ok {
+	if next, ok := nextEvent(events, time.Now()); ok {
 		s.writeNext(timer.Name, next)
 	}
 	slog.Info("scheduler: timer added", "unit", timer.Name, "service", timer.Service, "on_calendar", timer.OnCalendar)
@@ -196,7 +197,7 @@ func (s *Scheduler) run(timer *scheduledTimer) {
 	defer close(timer.done)
 
 	for {
-		next, ok := nextEvent(timer.events, time.Now().UTC())
+		next, ok := nextEvent(timer.events, time.Now())
 		if !ok {
 			slog.Warn("scheduler: no future timer events, stopping timer", "unit", timer.timer.Name)
 			return
@@ -217,7 +218,7 @@ func (s *Scheduler) run(timer *scheduledTimer) {
 		if err := s.manager.StartService(timer.timer.Service); err != nil {
 			slog.Error("scheduler: start service failed", "unit", timer.timer.Name, "service", timer.timer.Service, "error", err)
 		}
-		next, ok = nextEvent(timer.events, firedAt)
+		next, ok = nextEvent(timer.events, firedAt.Local())
 		s.writeTick(timer.timer.Name, firedAt, next)
 		if !ok {
 			slog.Warn("scheduler: no future timer events, stopping timer", "unit", timer.timer.Name)
@@ -274,7 +275,6 @@ func parseEvents(timer Timer) ([]systemdtime.CalendarEvent, error) {
 }
 
 func nextEvent(events []systemdtime.CalendarEvent, now time.Time) (time.Time, bool) {
-	now = now.UTC()
 	var next time.Time
 	for _, event := range events {
 		candidate, ok := event.Next(now)

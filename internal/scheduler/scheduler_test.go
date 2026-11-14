@@ -73,6 +73,54 @@ func TestSchedulerFires(t *testing.T) {
 	}
 }
 
+func TestNextEventLocalTimezone(t *testing.T) {
+	events, err := parseEvents(Timer{
+		Name:       "job.timer",
+		Service:    "app",
+		OnCalendar: []string{"*-*-* 12:00:00"},
+	})
+	if err != nil {
+		t.Fatalf("parseEvents() error = %v", err)
+	}
+
+	zone := time.FixedZone("MSK", 3*60*60)
+	now := time.Date(2026, 11, 11, 11, 0, 0, 0, zone)
+	next, ok := nextEvent(events, now)
+	if !ok {
+		t.Fatal("nextEvent() = false")
+	}
+
+	want := time.Date(2026, 11, 11, 12, 0, 0, 0, zone).UTC()
+	if !next.Equal(want) {
+		t.Errorf("next = %v, want %v", next, want)
+	}
+	if next.Location() != time.UTC {
+		t.Errorf("next location = %v", next.Location())
+	}
+}
+
+func TestNextEventExplicitTimezone(t *testing.T) {
+	events, err := parseEvents(Timer{
+		Name:       "job.timer",
+		Service:    "app",
+		OnCalendar: []string{"*-*-* 12:00:00 Asia/Tokyo"},
+	})
+	if err != nil {
+		t.Fatalf("parseEvents() error = %v", err)
+	}
+
+	now := time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC)
+	next, ok := nextEvent(events, now)
+	if !ok {
+		t.Fatal("nextEvent() = false")
+	}
+
+	want := time.Date(2026, 11, 11, 3, 0, 0, 0, time.UTC)
+	if !next.Equal(want) {
+		t.Errorf("next = %v, want %v", next, want)
+	}
+}
+
 func TestReloadDiff(t *testing.T) {
 	store := storagefake.New()
 	scheduler := New(scmfake.New(), store)
