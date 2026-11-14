@@ -174,6 +174,9 @@ func runUnit(name string) error {
 	if parsed.Service == nil {
 		return fmt.Errorf("%s is not a service unit", name)
 	}
+	for _, warning := range parsed.Warnings {
+		slog.Warn("vsystemd runner: ignored unit directive", "unit", name, "warning", warning)
+	}
 
 	if err := logwriter.Cleanup(logwriter.ServiceLogDir(cfg.LogsDir, serviceName), cfg.Logs.MaxAgeDays, time.Now().UTC()); err != nil {
 		slog.Debug("vsystemd runner: cleanup service logs failed", "unit", name, "error", err)

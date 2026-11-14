@@ -18,6 +18,7 @@ type UnitFile struct {
 	Wants       []string
 	Service     *ServiceUnit
 	Timer       *TimerUnit
+	Warnings    []string
 }
 
 type ServiceUnit struct {
@@ -43,5 +44,4 @@ type TimerUnit struct {
 	OnBootSec    time.Duration
 	OnStartupSec time.Duration
 	Unit         string
-	Warnings     []string
 }

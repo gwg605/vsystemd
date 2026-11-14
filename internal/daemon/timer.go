@@ -125,6 +125,9 @@ func (d *Daemon) timerDefinition(name string) (scheduler.Timer, error) {
 	if err != nil {
 		return scheduler.Timer{}, fmt.Errorf("parse timer %s: %w", name, err)
 	}
+	for _, warning := range parsed.Warnings {
+		slog.Warn("daemon: ignored timer directive", "unit", name, "warning", warning)
+	}
 	if len(parsed.Timer.OnCalendar) == 0 {
 		return scheduler.Timer{}, fmt.Errorf("timer %s has no OnCalendar", name)
 	}

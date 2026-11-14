@@ -216,6 +216,9 @@ func enableService(name, password string) error {
 	if parsed.Service == nil {
 		return fmt.Errorf("%s is not a service unit", name)
 	}
+	for _, warning := range parsed.Warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s: %s\n", name, warning)
+	}
 
 	executable, err := vsystemdPath()
 	if err != nil {
