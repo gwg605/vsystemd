@@ -240,7 +240,7 @@ Set `"log_level": "debug"` in `config.json` for verbose daemon/runner logs.
 | Command | Route | Description |
 |---|---|---|
 | `--version` | — | Print the systemctl version |
-| `enable <unit>.service` | SCM | Create/update the service and set automatic start |
+| `enable <unit>.service` | SCM | Create/update the service and set automatic start; prompts for a password for domain accounts |
 | `disable <unit>.service` | SCM | Stop and remove the service from SCM |
 | `start/stop/restart <unit>.service` | SCM | Control the service |
 | `status <unit>` | daemon | Aggregated status and log tail |

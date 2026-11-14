@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/akamensky/argparse"
+	"golang.org/x/term"
 
 	vsystemd "github.com/gwg605/vsystemd"
 	"github.com/gwg605/vsystemd/internal/config"
@@ -221,13 +222,19 @@ func enableService(name, password string) error {
 		return err
 	}
 	serviceName := strings.TrimSuffix(name, ".service")
+	account := unitUser(parsed.Service.User, serviceName)
+	resolvedPassword, err := resolvePassword(account, password)
+	if err != nil {
+		return err
+	}
+
 	serviceConfig := scm.ServiceConfig{
 		Name:         serviceName,
 		BinaryPath:   `"` + executable + `" --mode=run --unit=` + name,
 		StartType:    scm.StartTypeAutomatic,
 		Dependencies: unitDependencies(parsed),
-		User:         unitUser(parsed.Service.User, serviceName),
-		Password:     password,
+		User:         account,
+		Password:     resolvedPassword,
 		Description:  parsed.Description,
 	}
 
@@ -502,4 +509,34 @@ func unitUser(user, serviceName string) string {
 		return user
 	}
 	return `NT SERVICE\` + serviceName
+}
+
+func resolvePassword(account, provided string) (string, error) {
+	if provided != "" || !passwordRequired(account) {
+		return provided, nil
+	}
+
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Fprintf(os.Stderr, "warning: no password provided for %s; attempting with an empty password\n", account)
+		return "", nil
+	}
+
+	fmt.Printf("Password for %s: ", account)
+	password, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Println()
+	if err != nil {
+		return "", fmt.Errorf("read password: %w", err)
+	}
+	return string(password), nil
+}
+
+func passwordRequired(account string) bool {
+	switch strings.ToLower(account) {
+	case "localsystem", "system",
+		"nt authority\\system",
+		"nt authority\\localservice", "local service", "localservice",
+		"nt authority\\networkservice", "network service", "networkservice":
+		return false
+	}
+	return !strings.HasPrefix(strings.ToLower(account), `nt service\`)
 }
