@@ -228,6 +228,41 @@ func TestRequiredEnvironmentFileMissing(t *testing.T) {
 	}
 }
 
+func TestEnvironmentFileInvalidPathRejected(t *testing.T) {
+	dotdot := t.TempDir() + string(filepath.Separator) + ".." + string(filepath.Separator) + "x.env"
+	for _, file := range []string{"relative.env", "-relative.env", dotdot, "-" + dotdot} {
+		manager := NewProcessManager(&unit.ServiceUnit{
+			EnvironmentFiles: []string{file},
+			ExecStart:        "x",
+		})
+		if err := manager.Start(); err == nil {
+			t.Errorf("Start() error = nil for EnvironmentFile %q, want error", file)
+		}
+	}
+}
+
+func TestOptionalEnvironmentFileMissing(t *testing.T) {
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	marker := filepath.Join(t.TempDir(), "ran.txt")
+	manager := NewProcessManager(&unit.ServiceUnit{
+		EnvironmentFiles: []string{"-" + filepath.Join(t.TempDir(), "missing.env")},
+		ExecStart:        helperCommand("record", marker, "ran"),
+	})
+	if err := manager.Start(); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if _, err := manager.Wait(); err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("read marker: %v", err)
+	}
+	if strings.TrimSpace(string(data)) != "ran" {
+		t.Errorf("marker = %q, want \"ran\"", data)
+	}
+}
+
 func TestWorkingDirectory(t *testing.T) {
 	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	dir := t.TempDir()
