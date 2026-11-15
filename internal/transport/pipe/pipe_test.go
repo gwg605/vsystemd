@@ -36,7 +36,7 @@ func TestSendAndRequest(t *testing.T) {
 	events := make(chan transport.Message, 1)
 	var server transport.Transport
 	var err error
-	server, err = New(transport.DefaultConfig(), transport.NewPeer(transport.PeerRunner, serverPeer, false), func(source transport.Peer, msg transport.Message) error {
+	server, err = newWithAuth(transport.DefaultConfig(), transport.NewPeer(transport.PeerRunner, serverPeer, false), func(source transport.Peer, msg transport.Message) error {
 		if source.Name() != clientPeer {
 			return nil
 		}
@@ -51,13 +51,14 @@ func TestSendAndRequest(t *testing.T) {
 			})
 		}
 		return nil
-	})
+	}, fixedAuth{transport.NewPeer(transport.PeerRunner, clientPeer, false)})
 	if err != nil {
 		t.Fatalf("server New() error = %v", err)
 	}
 	defer server.Close()
 
-	client, err := New(transport.DefaultConfig(), transport.NewPeer(transport.PeerRunner, clientPeer, false), nil)
+	client, err := newWithAuth(transport.DefaultConfig(), transport.NewPeer(transport.PeerRunner, clientPeer, false), nil,
+		fixedAuth{transport.NewPeer(transport.PeerRunner, serverPeer, false)})
 	if err != nil {
 		t.Fatalf("client New() error = %v", err)
 	}
@@ -94,7 +95,8 @@ func TestSendAndRequest(t *testing.T) {
 }
 
 func TestSendToMissingPeer(t *testing.T) {
-	client, err := New(transport.DefaultConfig(), transport.NewPeer(transport.PeerRunner, "test-missing-client.service", false), nil)
+	client, err := newWithAuth(transport.DefaultConfig(), transport.NewPeer(transport.PeerRunner, "test-missing-client.service", false), nil,
+		fixedAuth{transport.NewPeer(transport.PeerRunner, "test-missing-target.service", false)})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}

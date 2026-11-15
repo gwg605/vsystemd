@@ -4,6 +4,8 @@ package pipe
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
 	"testing"
 
 	"github.com/gwg605/vsystemd/internal/daemon"
@@ -23,16 +25,20 @@ func TestDaemonRealHandlerOverPipe(t *testing.T) {
 	store.WriteUnit("app.service", []byte("[Service]\nExecStart=x\n"))
 	manager := scmfake.New()
 
+	controlName := fmt.Sprintf("systemctl_%d", os.Getpid())
+	controlPeer := transport.NewPeer(transport.PeerControl, controlName, true)
+
 	d, err := daemon.New(manager, store, `C:\vsystemd\vsystemd.exe`, t.TempDir(), logwriter.Rotation{},
 		func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
-			return New(transport.DefaultConfig(), local, handler)
+			return newWithAuth(transport.DefaultConfig(), local, handler, fixedAuth{controlPeer})
 		})
 	if err != nil {
 		t.Fatalf("daemon.New: %v", err)
 	}
 	t.Cleanup(func() { d.Close() })
 
-	control, err := New(transport.DefaultConfig(), transport.NewPeer(transport.PeerControl, "systemctl_42", false), nil)
+	control, err := newWithAuth(transport.DefaultConfig(), transport.NewPeer(transport.PeerControl, controlName, false), nil,
+		fixedAuth{transport.NewPeer(transport.PeerDaemon, transport.PeerDaemonName, false)})
 	if err != nil {
 		t.Fatalf("control New: %v", err)
 	}
