@@ -14,10 +14,7 @@ import (
 	"github.com/gwg605/vsystemd/internal/transport"
 )
 
-const (
-	defaultRoot = `C:\ProgramData\vsystemd`
-	configEnv   = "VSYSTEMD_CONFIG"
-)
+const defaultRoot = `C:\ProgramData\vsystemd`
 
 // defaultInheritEnv is the comma-separated list of environment variables
 // inherited from the runner when building a clean service environment.
@@ -104,12 +101,12 @@ func Default() Config {
 }
 
 func Load() (Config, error) {
-	cfg := Default()
-	path := os.Getenv(configEnv)
-	if path == "" {
-		path = filepath.Join(defaultRoot, "config.json")
-	}
+	return LoadFrom(filepath.Join(defaultRoot, "config.json"))
+}
 
+// LoadFrom reads a config from an explicit path; a missing file yields defaults.
+func LoadFrom(path string) (Config, error) {
+	cfg := Default()
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return cfg, nil

@@ -104,9 +104,9 @@ scripts\setup-paths.cmd -Check
 
 ### 2. Optional configuration
 
-The default configuration is used when `C:\ProgramData\vsystemd\config.json`
-does not exist. A custom config can be supplied via the `VSYSTEMD_CONFIG`
-environment variable.
+The configuration is read from the fixed path
+`C:\ProgramData\vsystemd\config.json`. When that file does not exist, built-in
+defaults are used.
 
 Example:
 
