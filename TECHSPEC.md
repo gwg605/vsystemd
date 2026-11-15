@@ -540,6 +540,16 @@ func (c *Component) handleStatusRequest(source transport.Peer, msg transport.Mes
 
 Общие проверки: `GetNamedPipeClientProcessId` → `OpenProcess`; время создания процесса должно быть раньше соединения (защита от переиспользования PID); токен → SID и elevation. Из-за проверки elevation control-клиент (`systemctl`) должен запускаться elevated.
 
+### Проверка сервера при дозвоне (исходящие соединения)
+
+Имена каналов детерминированы (`vsystemd-in`, `vsystemd-svc-<unit>`, `vsystemd-ctl-<pid>`), поэтому локальный процесс может «занять» имя (pipe squatting). Чтобы dialer не доверял чужому серверу, после подключения проверяется процесс-сервер по PID из handle (`GetNamedPipeServerProcessId`):
+
+- **control** (`systemctl_<pid>`) → PID сервера должен совпадать с `<pid>` из имени;
+- **runner** (`<service>.service`) → сервер — SCM-служба `<service>` (те же проверки, что и для входящих: own-process, аккаунт, `FILE_ID`);
+- **daemon** → LocalSystem или elevated-администратор.
+
+При несовпадении соединение закрывается и сообщение не отправляется. Проверка не устраняет DoS при сквоттинге (легитимный слушатель не стартует из-за `FILE_FLAG_FIRST_PIPE_INSTANCE`), но закрывает доверие чужому серверу и утечку ответов.
+
 ### Request/Response
 
 Transport реализует матчинг ответов по `request_id` и сверяет источник ответа с ожидаемым target:

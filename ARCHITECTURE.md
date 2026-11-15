@@ -108,6 +108,7 @@ All peers own an inbound pipe and accept messages on it. Outgoing messages are w
 - Daemon pipe: a client is either a service runner (own-process SCM service whose `ServiceStartName` matches the token SID and whose configured binary has the same `FILE_ID` as the running image) or an elevated control client; anything else is rejected.
 - Runner/control pipes: only the daemon (LocalSystem or an elevated administrator) is accepted.
 - The process creation time must precede the connection (anti PID-reuse).
+- Outbound: after dialing a peer, the server process is verified against the target (control → pid encoded in the name; runner → the SCM service for the unit, same checks as inbound; daemon → LocalSystem/elevated); a squatter on the pipe name is rejected.
 - Consequence: `systemctl` must run elevated, otherwise the daemon rejects the control connection.
 
 ### Channel 1: runner ↔ daemon (best-effort)
