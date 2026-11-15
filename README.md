@@ -250,6 +250,12 @@ Set `"log_level": "debug"` in `config.json` for verbose daemon/runner logs.
 | `daemon-reload` | daemon | Rescan units and update SCM entries |
 | `enable/disable <unit>.timer` | daemon | Persist timer enabled state |
 | `start/stop <unit>.timer` | daemon | Add/remove timer from scheduler |
+| `--log [none\|stdout\|stderr]` | — | Enable diagnostic logging (default `none`) |
+
+`systemctl` must be run elevated: the daemon rejects control connections from
+non-elevated processes, and `enable`/`start`/`stop` use SCM directly. The
+`--log` flag is a global option and goes after the command, e.g.
+`systemctl list-units --log stderr`.
 
 `systemctl --version` prints the version and compiled feature flags:
 

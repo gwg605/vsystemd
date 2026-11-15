@@ -95,13 +95,20 @@ All other timer directives (`OnUnitActiveSec=`, `OnUnitInactiveSec=`, `Persisten
 
 ## IPC
 
-All peers own an inbound pipe and accept messages on it. Outgoing messages are written to the receiver's inbound pipe. Replies are sent to the sender's inbound pipe, resolved from the envelope's `from` field. The protocol is newline-delimited JSON.
+All peers own an inbound pipe and accept messages on it. Outgoing messages are written to the receiver's inbound pipe. The transport authenticates every inbound connection (OS identity) and hands the handler a verified `Peer`; replies are sent to that verified source peer. The envelope's `from` field is untrusted and is checked against the verified peer name. The protocol is newline-delimited JSON.
 
-| Peer | Inbound pipe |
-|---|---|
-| daemon | `\\.\pipe\vsystemd-in` |
-| runner (`foo.service`) | `\\.\pipe\vsystemd-svc-foo.service` |
-| systemctl (`systemctl-<pid>`) | `\\.\pipe\vsystemd-ctl-<pid>` |
+| Peer | PeerType | Inbound pipe |
+|---|---|---|
+| daemon | `daemon` | `\\.\pipe\vsystemd-in` |
+| runner (`foo.service`) | `runner` | `\\.\pipe\vsystemd-svc-foo.service` |
+| systemctl (`systemctl_<pid>`) | `control` | `\\.\pipe\vsystemd-ctl-<pid>` |
+
+### Authentication
+
+- Daemon pipe: a client is either a service runner (own-process SCM service whose `ServiceStartName` matches the token SID and whose configured binary has the same `FILE_ID` as the running image) or an elevated control client; anything else is rejected.
+- Runner/control pipes: only the daemon (LocalSystem or an elevated administrator) is accepted.
+- The process creation time must precede the connection (anti PID-reuse).
+- Consequence: `systemctl` must run elevated, otherwise the daemon rejects the control connection.
 
 ### Channel 1: runner ↔ daemon (best-effort)
 

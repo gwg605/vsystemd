@@ -448,14 +448,24 @@ SCM stop → SERVICE_CONTROL_STOP → ExecStop → Runner exit
 
 ### Два уровня
 
-**Уровень Transport** (`internal/transport/`) — абстрактный интерфейс. Оперирует понятиями `peerName`, `Message`, `Send`, `Req`. Не знает про pipes, конверты, именование.
+**Уровень Transport** (`internal/transport/`) — абстрактный peer-центричный интерфейс. Оперирует понятиями `Peer` (тип + имя), `Message`, `Target`, `Send`, `Req`. Не знает про pipes, конверты, именование.
 
-**Уровень Pipe** (`internal/transport/pipe/`) — реализация Transport на named pipes. Добавляет envelope с деталями доставки. Вычисляет обратный pipe получателя из поля `from` входящего сообщения.
+**Уровень Pipe** (`internal/transport/pipe/`) — реализация Transport на named pipes. Добавляет envelope с деталями доставки, аутентифицирует входящее соединение по ОС-идентичности и отдаёт доверенный `Peer`. Исходящий target строится методом `Target`.
 
 ### Transport API
 
 ```go
 // internal/transport/
+
+type PeerType uint8 // PeerDaemon | PeerRunner | PeerControl
+
+// Peer — проверенная идентичность пира. Создаётся только транспортом;
+// приложение получает его в обработчике или через Target.
+type Peer struct{ /* typ, name, elevated */ }
+
+func (p Peer) Type() PeerType
+func (p Peer) Name() string
+func (p Peer) Elevated() bool
 
 type Message struct {
     ID        string          // UUID
@@ -464,27 +474,31 @@ type Message struct {
     Payload   json.RawMessage // тело сообщения
 }
 
-type MsgHandler func(sourcePeer string, msg Message) error
+type MsgHandler func(source Peer, msg Message) error
 
 type Transport interface {
-    Send(targetPeer string, msg Message, opts ...Opt) error
-    Req(targetPeer string, msg Message, opts ...Opt) (Message, error)
+    Target(typ PeerType, opts ...PeerOption) Peer
+    Send(target Peer, msg Message, opts ...Opt) error
+    Req(target Peer, msg Message, opts ...Opt) (Message, error)
     Close() error
 }
 
-func New(config Config, peerName string, handler MsgHandler) (Transport, error)
+func New(config Config, local Peer, handler MsgHandler) (Transport, error)
 
 // Opts — переопределяют значения из конфига
 WithTimeout(d time.Duration)        // таймаут ожидания ответа (для Req)
 WithConnectTimeout(d time.Duration) // таймаут подключения (для Send и Req)
+
+// PeerOption
+WithName(name string) // имя целевого пира (напр. юнит для runner)
 ```
 
-Хендлер сам отвечает за отправку ответа через `transport.Send()`. Это позволяет отвечать синхронно или асинхронно:
+Хендлер отвечает, используя `source` как target:
 
 ```go
-func handleStatusRequest(src string, msg Message) error {
-    resp := buildStatusResponse(msg)
-    return transport.Send(src, resp)
+func (c *Component) handleStatusRequest(source transport.Peer, msg transport.Message) error {
+    resp := c.buildStatusResponse(msg)
+    return c.transport.Send(source, resp)
 }
 ```
 
@@ -494,7 +508,7 @@ func handleStatusRequest(src string, msg Message) error {
 
 ```json
 {
-  "from": "systemctl-1234",
+  "from": "systemctl_1234",
   "msg": {
     "id": "uuid",
     "request_id": null,
@@ -504,23 +518,37 @@ func handleStatusRequest(src string, msg Message) error {
 }
 ```
 
-Поле `from` содержит `peerName` отправителя. Обратный pipe вычисляется из него по соглашению об именовании — явная регистрация (`register_pipe`) не нужна.
+Поле `from` содержит имя отправителя (недоверенное). Транспорт сверяет его с именем проверенного `Peer` и дропает сообщение при несовпадении.
 
 ### Именование peers и pipes
 
-| peerName | Входящий pipe |
-|---|---|
-| `daemon` | `\\.\pipe\vsystemd-in` |
-| `foo.service` | `\\.\pipe\vsystemd-svc-foo.service` |
-| `systemctl-<pid>` | `\\.\pipe\vsystemd-ctl-<pid>` |
+| PeerType | peerName | Входящий pipe |
+|---|---|---|
+| daemon | `daemon` | `\\.\pipe\vsystemd-in` |
+| runner | `foo.service` | `\\.\pipe\vsystemd-svc-foo.service` |
+| control | `systemctl_<pid>` | `\\.\pipe\vsystemd-ctl-<pid>` |
+
+### Аутентификация входящих соединений
+
+Аутентификатор внутренний (не часть публичного интерфейса) и выбирается по типу локального пира:
+
+- **daemon-канал** (`clientAuthenticator`): клиент — либо service-runner (own-process служба SCM, чей `ServiceStartName` совпадает с SID токена, а `FILE_ID` запущенного образа совпадает с `FILE_ID` exe из `BinaryPathName`) → `PeerRunner(<service>.service)`; либо elevated control-клиент → `PeerControl(systemctl_<pid>)`; иначе соединение отклоняется.
+- **runner/control-каналы** (`daemonOnlyAuthenticator`): принимается только демон (LocalSystem или elevated-администратор) → `PeerDaemon`.
+
+Общие проверки: `GetNamedPipeClientProcessId` → `OpenProcess`; время создания процесса должно быть раньше соединения (защита от переиспользования PID); токен → SID и elevation. Из-за проверки elevation control-клиент (`systemctl`) должен запускаться elevated.
 
 ### Request/Response
 
-Transport реализует матчинг ответов по `request_id`:
+Transport реализует матчинг ответов по `request_id` и сверяет источник ответа с ожидаемым target:
 
 - `Req()` отправляет сообщение с уникальным `id` и ждёт входящего сообщения с `request_id` равным этому `id`
-- Поддерживает несколько одновременно ожидающих запросов
-- При истечении таймаута возвращает ошибку и пишет в лог
+- ответ принимается только от того пира, которому был адресован запрос
+- поддерживает несколько одновременно ожидающих запросов
+- при истечении таймаута возвращает ошибку и пишет в лог
+
+### Логи
+
+Логи pipe-транспорта помечаются тегом `[clientPid->serverPid]`, например `pipe: [1110->13241] sent`. `systemctl` включает диагностические логи флагом `--log [none|stdout|stderr]` (по умолчанию `none`).
 
 ---
 
