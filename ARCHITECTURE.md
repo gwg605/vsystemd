@@ -58,7 +58,7 @@ All other timer directives (`OnUnitActiveSec=`, `OnUnitInactiveSec=`, `Persisten
 
 - If service does not exist in SCM: `CreateService()` with `START_TYPE = AUTO_START`
 - If service already exists in SCM: `ChangeServiceConfig(START_TYPE = AUTO_START)`
-- If `User=` requires a password (domain\user): request interactively or via `--password` flag; attempt creation even if no password provided
+- If `User=` requires a password (domain\user): request interactively or via `--password`, `--password-file`, or `--password-stdin` (only one source); attempt creation even if no password provided
 - System accounts (LocalSystem, LocalService, NetworkService, `NT SERVICE\*`): no password needed
 
 ### `systemctl disable foo.service`
