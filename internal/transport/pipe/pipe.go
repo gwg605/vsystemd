@@ -4,6 +4,7 @@ package pipe
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -39,6 +40,7 @@ type Transport struct {
 	config   transport.Config
 	core     *transport.Core
 	listener *pipeListener
+	auth     authenticator
 
 	mu       sync.Mutex
 	outbound map[string]*outbound
@@ -53,6 +55,10 @@ type outbound struct {
 }
 
 func New(config transport.Config, local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
+	return newWithAuth(config, local, handler, authenticatorFor(local))
+}
+
+func newWithAuth(config transport.Config, local transport.Peer, handler transport.MsgHandler, auth authenticator) (transport.Transport, error) {
 	config = config.WithDefaults()
 	listener, err := listenPipe(pipeName(local), pipeACLFor(local))
 	if err != nil {
@@ -63,6 +69,7 @@ func New(config transport.Config, local transport.Peer, handler transport.MsgHan
 		local:    local,
 		config:   config,
 		listener: listener,
+		auth:     auth,
 		outbound: make(map[string]*outbound),
 		inbound:  make(map[conn]struct{}),
 	}
@@ -209,6 +216,12 @@ func (t *Transport) acceptLoop() {
 			slog.Debug("pipe: accept loop stopped", "peer", t.local.Name(), "error", err)
 			return
 		}
+		peer, err := t.authenticate(c)
+		if err != nil {
+			slog.Warn("pipe: authentication failed", "local", t.local.Name(), "error", err)
+			c.Close()
+			continue
+		}
 		t.mu.Lock()
 		if t.closed {
 			t.mu.Unlock()
@@ -217,12 +230,23 @@ func (t *Transport) acceptLoop() {
 		}
 		t.inbound[c] = struct{}{}
 		t.mu.Unlock()
-		slog.Debug("pipe: accepted", "local", t.local.Name())
-		go t.serve(c)
+		slog.Debug("pipe: accepted", "local", t.local.Name(), "peer", peer.String())
+		go t.serve(c, peer)
 	}
 }
 
-func (t *Transport) serve(c conn) {
+func (t *Transport) authenticate(c conn) (transport.Peer, error) {
+	sc, ok := c.(*serverConn)
+	if !ok {
+		return transport.Peer{}, errors.New("connection has no handle")
+	}
+	if t.auth == nil {
+		return transport.Peer{}, errors.New("transport has no authenticator")
+	}
+	return t.auth.authenticate(sc.Handle(), time.Now())
+}
+
+func (t *Transport) serve(c conn, peer transport.Peer) {
 	defer func() {
 		c.Close()
 		t.mu.Lock()
@@ -230,7 +254,7 @@ func (t *Transport) serve(c conn) {
 		t.mu.Unlock()
 	}()
 
-	slog.Debug("pipe: serve started", "local", t.local.Name())
+	slog.Debug("pipe: serve started", "local", t.local.Name(), "peer", peer.String())
 	decoder := json.NewDecoder(c)
 	for {
 		var env envelope
@@ -240,15 +264,9 @@ func (t *Transport) serve(c conn) {
 		}
 		slog.Debug("pipe: received", "local", t.local.Name(),
 			"from", env.From, "type", env.Msg.Type, "id", env.Msg.ID, "request_id", env.Msg.RequestID)
-		if env.From == "" {
-			continue
-		}
-		// Phase 1/2: identity is derived from the (untrusted) from field.
-		// Phase 3 will replace this with OS-level authentication and compare
-		// from against the verified peer name.
-		peer := peerFromName(env.From)
-		if !peer.Valid() || env.From != peer.Name() {
-			slog.Warn("pipe: dropping message with inconsistent sender", "peer", t.local.Name(), "from", env.From)
+		if env.From != peer.Name() {
+			slog.Warn("pipe: dropping message with mismatched sender",
+				"local", t.local.Name(), "from", env.From, "peer", peer.String())
 			continue
 		}
 		if err := t.core.Dispatch(peer, env.Msg); err != nil {
@@ -293,18 +311,4 @@ func controlSuffix(name string) string {
 		return suffix
 	}
 	return name
-}
-
-// peerFromName derives a peer from the sender-supplied name. This is a
-// placeholder for phase 1; it is NOT a trust boundary and must be replaced by
-// real authentication in phase 3.
-func peerFromName(name string) transport.Peer {
-	switch {
-	case name == transport.PeerDaemonName:
-		return transport.NewPeer(transport.PeerDaemon, name, false)
-	case strings.HasPrefix(name, systemctlUnderscore), strings.HasPrefix(name, systemctlHyphen):
-		return transport.NewPeer(transport.PeerControl, name, true)
-	default:
-		return transport.NewPeer(transport.PeerRunner, name, false)
-	}
 }
