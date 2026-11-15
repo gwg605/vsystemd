@@ -12,7 +12,6 @@ import (
 )
 
 func TestLogStreamerDefault(t *testing.T) {
-	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	logsDir := t.TempDir()
 
 	service := &unit.ServiceUnit{
@@ -24,7 +23,7 @@ func TestLogStreamerDefault(t *testing.T) {
 	}
 	defer streamer.Close()
 
-	manager := NewProcessManager(service)
+	manager := newProcessManager(service)
 	manager.SetLogStreamer(streamer)
 	if err := manager.Start(); err != nil {
 		t.Fatalf("Start() error = %v", err)
@@ -50,7 +49,6 @@ func TestLogStreamerDefault(t *testing.T) {
 }
 
 func TestLogStreamerFileRedirect(t *testing.T) {
-	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	logsDir := t.TempDir()
 	custom := filepath.Join(t.TempDir(), "custom.log")
 
@@ -64,7 +62,7 @@ func TestLogStreamerFileRedirect(t *testing.T) {
 	}
 	defer streamer.Close()
 
-	manager := NewProcessManager(service)
+	manager := newProcessManager(service)
 	manager.SetLogStreamer(streamer)
 	if err := manager.Start(); err != nil {
 		t.Fatalf("Start() error = %v", err)

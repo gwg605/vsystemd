@@ -45,7 +45,6 @@ func waitForFile(t *testing.T, path string) []byte {
 }
 
 func TestSCMHandlerStop(t *testing.T) {
-	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	dir := t.TempDir()
 	stopFile := filepath.Join(dir, "stop.txt")
 
@@ -54,7 +53,7 @@ func TestSCMHandlerStop(t *testing.T) {
 		ExecStop:       helperCommand("record", stopFile, "stopped"),
 		TimeoutStopSec: 100 * time.Millisecond,
 	}
-	process := NewProcessManager(service)
+	process := newProcessManager(service)
 	handler := NewSCMHandler(service, process, NewRestartController(service))
 
 	requests := make(chan svc.ChangeRequest)
@@ -81,12 +80,11 @@ func TestSCMHandlerStop(t *testing.T) {
 }
 
 func TestSCMHandlerInterrogate(t *testing.T) {
-	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	service := &unit.ServiceUnit{
 		ExecStart:      helperCommand("sleep", "5s"),
 		TimeoutStopSec: 100 * time.Millisecond,
 	}
-	process := NewProcessManager(service)
+	process := newProcessManager(service)
 	handler := NewSCMHandler(service, process, NewRestartController(service))
 
 	requests := make(chan svc.ChangeRequest)
@@ -111,14 +109,13 @@ func TestSCMHandlerInterrogate(t *testing.T) {
 }
 
 func TestSCMHandlerExitWithoutRestart(t *testing.T) {
-	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	dir := t.TempDir()
 	exitFile := filepath.Join(dir, "exit.txt")
 
 	service := &unit.ServiceUnit{
 		ExecStart: helperCommand("record", exitFile, "done", "3"),
 	}
-	process := NewProcessManager(service)
+	process := newProcessManager(service)
 	handler := NewSCMHandler(service, process, NewRestartController(service))
 
 	requests := make(chan svc.ChangeRequest)

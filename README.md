@@ -130,9 +130,23 @@ Example:
     "timeout_stop_sec_ms": 45000,
     "start_limit_burst": 5,
     "start_limit_interval_sec_ms": 10000
+  },
+  "environment": {
+    "inherit": "SystemRoot,SystemDrive,windir,PATH,PATHEXT,ComSpec,TEMP,TMP",
+    "vars": {
+      "APP_HOME": "C:\\apps\\%COMPUTERNAME%",
+      "FULL_PATH": "%PATH%;C:\\extra"
+    }
   }
 }
 ```
+
+Service processes do **not** inherit the runner's environment. They get only
+the variables listed in `environment.inherit` (a fixed default list of standard
+Windows variables when the field is omitted), plus `environment.vars`, plus the
+unit's `EnvironmentFile=` and `Environment=` (highest priority). In `vars`,
+`%NAME%` is replaced with the runner's variable value (an undefined name is
+empty; `%%` is a literal `%`; a malformed `%` is left as-is with a warning).
 
 ### 3. Install unit files
 

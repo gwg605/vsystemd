@@ -28,19 +28,10 @@ import (
 var clientCounter atomic.Int64
 
 func TestHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+	args, ok := helperArgs(os.Args)
+	if !ok {
 		return
 	}
-
-	args := os.Args
-	index := 0
-	for index < len(args) && args[index] != "--" {
-		index++
-	}
-	if index+1 >= len(args) {
-		os.Exit(2)
-	}
-	args = args[index+1:]
 
 	switch args[0] {
 	case "sleep":
@@ -72,6 +63,17 @@ func TestHelperProcess(t *testing.T) {
 		os.Exit(1)
 	}
 	os.Exit(2)
+}
+
+func helperArgs(argv []string) ([]string, bool) {
+	index := 0
+	for index < len(argv) && argv[index] != "--" {
+		index++
+	}
+	if index+1 >= len(argv) {
+		return nil, false
+	}
+	return argv[index+1:], true
 }
 
 func helperCommand(args ...string) string {
@@ -124,7 +126,7 @@ func (e *testEnv) newRunner(t *testing.T, name string, service *unit.ServiceUnit
 	if err != nil {
 		t.Fatalf("runner.NewLogStreamer() error = %v", err)
 	}
-	r, err := runner.NewRunner(name, service, logs, e.transportFactory)
+	r, err := runner.NewRunner(name, service, logs, runner.EnvironmentDefaults{}, e.transportFactory)
 	if err != nil {
 		logs.Close()
 		t.Fatalf("runner.NewRunner() error = %v", err)

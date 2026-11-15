@@ -27,7 +27,7 @@ type Runner struct {
 	transport transport.Transport
 }
 
-func NewRunner(name string, service *unit.ServiceUnit, logs *LogStreamer, newTransport TransportFactory) (*Runner, error) {
+func NewRunner(name string, service *unit.ServiceUnit, logs *LogStreamer, env EnvironmentDefaults, newTransport TransportFactory) (*Runner, error) {
 	if newTransport == nil {
 		return nil, errors.New("transport factory is required")
 	}
@@ -36,7 +36,7 @@ func NewRunner(name string, service *unit.ServiceUnit, logs *LogStreamer, newTra
 		return nil, errors.New("log streamer is required")
 	}
 
-	process := NewProcessManager(service)
+	process := NewProcessManager(service, env)
 	process.SetLogStreamer(logs)
 	restart := NewRestartController(service)
 	handler := NewSCMHandler(service, process, restart)

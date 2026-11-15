@@ -16,6 +16,7 @@ import (
 
 type ProcessManager struct {
 	service *unit.ServiceUnit
+	env     EnvironmentDefaults
 
 	mu       sync.Mutex
 	cmd      *exec.Cmd
@@ -23,8 +24,17 @@ type ProcessManager struct {
 	streamer *LogStreamer
 }
 
-func NewProcessManager(service *unit.ServiceUnit) *ProcessManager {
-	return &ProcessManager{service: service}
+// EnvironmentDefaults describes how the clean environment for service
+// processes is built: Inherit lists variables taken from the runner's
+// environment, Vars are extra variables whose values may reference the runner's
+// environment via %NAME% placeholders.
+type EnvironmentDefaults struct {
+	Inherit []string
+	Vars    map[string]string
+}
+
+func NewProcessManager(service *unit.ServiceUnit, env EnvironmentDefaults) *ProcessManager {
+	return &ProcessManager{service: service, env: env}
 }
 
 func (p *ProcessManager) SetLogStreamer(streamer *LogStreamer) {
@@ -34,7 +44,7 @@ func (p *ProcessManager) SetLogStreamer(streamer *LogStreamer) {
 }
 
 func (p *ProcessManager) Start() error {
-	env, err := buildEnvironment(p.service)
+	env, err := buildEnvironment(p.service, p.env)
 	if err != nil {
 		return err
 	}
@@ -233,12 +243,17 @@ func runCommand(cmd command, env []string, dir string, stdout, stderr io.Writer)
 	return c.Run()
 }
 
-func buildEnvironment(service *unit.ServiceUnit) ([]string, error) {
+func buildEnvironment(service *unit.ServiceUnit, defaults EnvironmentDefaults) ([]string, error) {
+	parent := parentEnvironment()
+
 	env := make(map[string]string)
-	for _, entry := range os.Environ() {
-		if key, value, ok := strings.Cut(entry, "="); ok {
-			env[key] = value
+	for _, name := range defaults.Inherit {
+		if value, ok := parent[strings.ToLower(name)]; ok {
+			env[name] = value
 		}
+	}
+	for key, value := range defaults.Vars {
+		env[key] = expandEnv(value, parent)
 	}
 
 	for _, file := range service.EnvironmentFiles {
@@ -277,4 +292,44 @@ func buildEnvironment(service *unit.ServiceUnit) ([]string, error) {
 		result = append(result, key+"="+value)
 	}
 	return result, nil
+}
+
+// parentEnvironment returns the runner's environment keyed case-insensitively.
+func parentEnvironment() map[string]string {
+	env := make(map[string]string)
+	for _, entry := range os.Environ() {
+		if key, value, ok := strings.Cut(entry, "="); ok {
+			env[strings.ToLower(key)] = value
+		}
+	}
+	return env
+}
+
+// expandEnv substitutes %NAME% placeholders from lookup (case-insensitive).
+// "%%" yields a literal "%", an undefined name yields an empty string, and a
+// "%" without a closing "%" is left as-is with a warning.
+func expandEnv(value string, lookup map[string]string) string {
+	var b strings.Builder
+	for i := 0; i < len(value); {
+		if value[i] != '%' {
+			b.WriteByte(value[i])
+			i++
+			continue
+		}
+		if i+1 < len(value) && value[i+1] == '%' {
+			b.WriteByte('%')
+			i += 2
+			continue
+		}
+		end := strings.IndexByte(value[i+1:], '%')
+		if end < 0 {
+			slog.Warn("runner: malformed environment placeholder", "value", value)
+			b.WriteString(value[i:])
+			break
+		}
+		name := value[i+1 : i+1+end]
+		b.WriteString(lookup[strings.ToLower(name)])
+		i += end + 2
+	}
+	return b.String()
 }

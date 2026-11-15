@@ -34,7 +34,7 @@ func newIntegratedRunner(t *testing.T, name string, service *unit.ServiceUnit) (
 	factory := func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
 		return network.New(transport.DefaultConfig(), local, handler), nil
 	}
-	runner, err := NewRunner(name, service, logs, factory)
+	runner, err := NewRunner(name, service, logs, EnvironmentDefaults{}, factory)
 	if err != nil {
 		logs.Close()
 		t.Fatalf("NewRunner() error = %v", err)
@@ -75,7 +75,6 @@ func collectStates(collector *stateCollector) []StateEvent {
 }
 
 func TestRunnerStartStop(t *testing.T) {
-	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	dir := t.TempDir()
 	stopFile := filepath.Join(dir, "stop.txt")
 
@@ -108,7 +107,6 @@ func TestRunnerStartStop(t *testing.T) {
 }
 
 func TestRunnerRestartOnFailure(t *testing.T) {
-	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	marker := filepath.Join(t.TempDir(), "marker")
 
 	service := &unit.ServiceUnit{
@@ -147,7 +145,6 @@ func TestRunnerRestartOnFailure(t *testing.T) {
 }
 
 func TestRunnerStartLimitExhaustion(t *testing.T) {
-	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	attempts := filepath.Join(t.TempDir(), "attempts.txt")
 
 	service := &unit.ServiceUnit{

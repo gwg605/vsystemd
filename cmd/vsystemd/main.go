@@ -190,7 +190,11 @@ func runUnit(name string) error {
 	}
 	defer logs.Close()
 
-	service, err := runner.NewRunner(name, parsed.Service, logs, transportFactory(cfg))
+	envDefaults := runner.EnvironmentDefaults{
+		Inherit: cfg.Environment.InheritList(),
+		Vars:    cfg.Environment.Vars,
+	}
+	service, err := runner.NewRunner(name, parsed.Service, logs, envDefaults, transportFactory(cfg))
 	if err != nil {
 		return err
 	}
