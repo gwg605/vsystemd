@@ -47,8 +47,8 @@ OnCalendar=daily
 	}
 
 	network := transportfake.NewNetwork()
-	daemon, err := New(manager, store, `C:\vsystemd\vsystemd.exe`, t.TempDir(), logwriter.Rotation{}, func(peer string, handler transport.MsgHandler) (transport.Transport, error) {
-		return network.New(transport.DefaultConfig(), peer, handler), nil
+	daemon, err := New(manager, store, `C:\vsystemd\vsystemd.exe`, t.TempDir(), logwriter.Rotation{}, func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
+		return network.New(transport.DefaultConfig(), local, handler), nil
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

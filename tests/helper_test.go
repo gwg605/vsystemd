@@ -17,7 +17,6 @@ import (
 
 	"github.com/gwg605/vsystemd/internal/daemon"
 	"github.com/gwg605/vsystemd/internal/logwriter"
-	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/runner"
 	scmfake "github.com/gwg605/vsystemd/internal/scm/fake"
 	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
@@ -104,8 +103,8 @@ func newTestEnv() *testEnv {
 	}
 }
 
-func (e *testEnv) transportFactory(peer string, handler transport.MsgHandler) (transport.Transport, error) {
-	return e.network.New(transport.DefaultConfig(), peer, handler), nil
+func (e *testEnv) transportFactory(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
+	return e.network.New(transport.DefaultConfig(), local, handler), nil
 }
 
 func (e *testEnv) newDaemon(t *testing.T) *daemon.Daemon {
@@ -136,8 +135,8 @@ func (e *testEnv) newRunner(t *testing.T, name string, service *unit.ServiceUnit
 
 func (e *testEnv) newClient(t *testing.T) *transportfake.Transport {
 	t.Helper()
-	peer := fmt.Sprintf("systemctl-%d", clientCounter.Add(1))
-	client := e.network.New(transport.DefaultConfig(), peer, nil)
+	peer := fmt.Sprintf("systemctl_%d", clientCounter.Add(1))
+	client := e.network.New(transport.DefaultConfig(), transport.NewPeer(transport.PeerControl, peer, true), nil)
 	t.Cleanup(func() { client.Close() })
 	return client
 }
@@ -152,7 +151,7 @@ func daemonRequest(t *testing.T, client transport.Transport, msgType string, pay
 		}
 		raw = data
 	}
-	response, err := client.Req(protocol.DaemonPeer, transport.Message{Type: msgType, Payload: raw})
+	response, err := client.Req(client.Target(transport.PeerDaemon), transport.Message{Type: msgType, Payload: raw})
 	if err != nil {
 		t.Fatalf("%s request: %v", msgType, err)
 	}

@@ -18,8 +18,8 @@ func newTestDaemon(t *testing.T, manager scm.Manager, store storage.Storage) (*D
 	t.Helper()
 
 	network := transportfake.NewNetwork()
-	daemon, err := New(manager, store, `C:\vsystemd\vsystemd.exe`, t.TempDir(), logwriter.Rotation{}, func(peer string, handler transport.MsgHandler) (transport.Transport, error) {
-		return network.New(transport.DefaultConfig(), peer, handler), nil
+	daemon, err := New(manager, store, `C:\vsystemd\vsystemd.exe`, t.TempDir(), logwriter.Rotation{}, func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
+		return network.New(transport.DefaultConfig(), local, handler), nil
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -39,7 +39,7 @@ func TestHandleStateEvent(t *testing.T) {
 	}
 
 	daemon, network := newTestDaemon(t, manager, store)
-	runnerTransport := network.New(transport.DefaultConfig(), "app.service", nil)
+	runnerTransport := network.New(transport.DefaultConfig(), transport.NewPeer(transport.PeerRunner, "app.service", false), nil)
 
 	payload, err := json.Marshal(runner.StateEvent{
 		Unit:         "app.service",
@@ -50,7 +50,7 @@ func TestHandleStateEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal event: %v", err)
 	}
-	if err := runnerTransport.Send(daemonPeer, transport.Message{
+	if err := runnerTransport.Send(runnerTransport.Target(transport.PeerDaemon), transport.Message{
 		Type:    runner.MessageStateEvent,
 		Payload: payload,
 	}); err != nil {
@@ -86,7 +86,7 @@ func TestRequestRunnerStates(t *testing.T) {
 	daemon, network := newTestDaemon(t, manager, store)
 
 	var runnerTransport *transportfake.Transport
-	runnerTransport = network.New(transport.DefaultConfig(), "app.service", func(source string, msg transport.Message) error {
+	runnerTransport = network.New(transport.DefaultConfig(), transport.NewPeer(transport.PeerRunner, "app.service", false), func(source transport.Peer, msg transport.Message) error {
 		if msg.Type != runner.MessageStatusRequest {
 			return nil
 		}
