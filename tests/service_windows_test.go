@@ -16,7 +16,6 @@ import (
 )
 
 func TestServiceLifecycle(t *testing.T) {
-	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	env := newTestEnv()
 	env.store.WriteUnit("app.service", []byte("[Service]\nExecStart=app\n"))
 
@@ -50,7 +49,6 @@ func TestServiceLifecycle(t *testing.T) {
 }
 
 func TestRestartOnFailure(t *testing.T) {
-	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	env := newTestEnv()
 	env.store.WriteUnit("app.service", []byte("[Service]\nExecStart=app\n"))
 	marker := filepath.Join(t.TempDir(), "marker")
@@ -84,7 +82,6 @@ func TestRestartOnFailure(t *testing.T) {
 }
 
 func TestStartLimitExhaustion(t *testing.T) {
-	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	env := newTestEnv()
 	env.store.WriteUnit("app.service", []byte("[Service]\nExecStart=app\n"))
 	attempts := filepath.Join(t.TempDir(), "attempts.txt")

@@ -15,19 +15,10 @@ import (
 )
 
 func TestProcessHelper(t *testing.T) {
-	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+	args, ok := helperArgs(os.Args)
+	if !ok {
 		return
 	}
-
-	args := os.Args
-	index := 0
-	for index < len(args) && args[index] != "--" {
-		index++
-	}
-	if index+1 >= len(args) {
-		os.Exit(2)
-	}
-	args = args[index+1:]
 
 	switch args[0] {
 	case "record":
@@ -79,6 +70,17 @@ func TestProcessHelper(t *testing.T) {
 	os.Exit(2)
 }
 
+func helperArgs(argv []string) ([]string, bool) {
+	index := 0
+	for index < len(argv) && argv[index] != "--" {
+		index++
+	}
+	if index+1 >= len(argv) {
+		return nil, false
+	}
+	return argv[index+1:], true
+}
+
 func helperCommand(args ...string) string {
 	parts := []string{quoteArg(os.Args[0]), "-test.run=TestProcessHelper", "--"}
 	for _, arg := range args {
@@ -94,12 +96,15 @@ func quoteArg(arg string) string {
 	return arg
 }
 
+func newProcessManager(service *unit.ServiceUnit) *ProcessManager {
+	return NewProcessManager(service, EnvironmentDefaults{})
+}
+
 func TestStartSequence(t *testing.T) {
-	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	dir := t.TempDir()
 	orderFile := filepath.Join(dir, "order.txt")
 
-	manager := NewProcessManager(&unit.ServiceUnit{
+	manager := newProcessManager(&unit.ServiceUnit{
 		ExecStartPre:  []string{helperCommand("record", orderFile, "pre")},
 		ExecStart:     helperCommand("sleep", "100ms"),
 		ExecStartPost: []string{helperCommand("record", orderFile, "post")},
@@ -129,11 +134,10 @@ func TestStartSequence(t *testing.T) {
 }
 
 func TestIgnoredExecFailure(t *testing.T) {
-	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	dir := t.TempDir()
 	orderFile := filepath.Join(dir, "order.txt")
 
-	manager := NewProcessManager(&unit.ServiceUnit{
+	manager := newProcessManager(&unit.ServiceUnit{
 		ExecStartPre: []string{"-" + helperCommand("record", orderFile, "pre", "1")},
 		ExecStart:    helperCommand("record", orderFile, "start"),
 	})
@@ -159,11 +163,10 @@ func TestIgnoredExecFailure(t *testing.T) {
 }
 
 func TestExecStartPreFailure(t *testing.T) {
-	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	dir := t.TempDir()
 	orderFile := filepath.Join(dir, "order.txt")
 
-	manager := NewProcessManager(&unit.ServiceUnit{
+	manager := newProcessManager(&unit.ServiceUnit{
 		ExecStartPre: []string{helperCommand("record", orderFile, "pre", "1")},
 		ExecStart:    helperCommand("record", orderFile, "start"),
 	})
@@ -182,7 +185,6 @@ func TestExecStartPreFailure(t *testing.T) {
 }
 
 func TestEnvironment(t *testing.T) {
-	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	dir := t.TempDir()
 	envFile := filepath.Join(dir, "app.env")
 	if err := os.WriteFile(envFile, []byte("FROM_FILE=filevalue\n# comment\n"), 0o644); err != nil {
@@ -191,7 +193,7 @@ func TestEnvironment(t *testing.T) {
 	fileValue := filepath.Join(dir, "file.txt")
 	unitValue := filepath.Join(dir, "unit.txt")
 
-	manager := NewProcessManager(&unit.ServiceUnit{
+	manager := newProcessManager(&unit.ServiceUnit{
 		EnvironmentFiles: []string{envFile, "-" + filepath.Join(dir, "missing.env")},
 		Environment:      map[string]string{"FROM_UNIT": "unitvalue"},
 		ExecStartPre: []string{
@@ -219,7 +221,7 @@ func TestEnvironment(t *testing.T) {
 }
 
 func TestRequiredEnvironmentFileMissing(t *testing.T) {
-	manager := NewProcessManager(&unit.ServiceUnit{
+	manager := newProcessManager(&unit.ServiceUnit{
 		EnvironmentFiles: []string{filepath.Join(t.TempDir(), "missing.env")},
 		ExecStart:        "cmd /c exit 0",
 	})
@@ -231,7 +233,7 @@ func TestRequiredEnvironmentFileMissing(t *testing.T) {
 func TestEnvironmentFileInvalidPathRejected(t *testing.T) {
 	dotdot := t.TempDir() + string(filepath.Separator) + ".." + string(filepath.Separator) + "x.env"
 	for _, file := range []string{"relative.env", "-relative.env", dotdot, "-" + dotdot} {
-		manager := NewProcessManager(&unit.ServiceUnit{
+		manager := newProcessManager(&unit.ServiceUnit{
 			EnvironmentFiles: []string{file},
 			ExecStart:        "x",
 		})
@@ -242,9 +244,8 @@ func TestEnvironmentFileInvalidPathRejected(t *testing.T) {
 }
 
 func TestOptionalEnvironmentFileMissing(t *testing.T) {
-	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	marker := filepath.Join(t.TempDir(), "ran.txt")
-	manager := NewProcessManager(&unit.ServiceUnit{
+	manager := newProcessManager(&unit.ServiceUnit{
 		EnvironmentFiles: []string{"-" + filepath.Join(t.TempDir(), "missing.env")},
 		ExecStart:        helperCommand("record", marker, "ran"),
 	})
@@ -264,11 +265,10 @@ func TestOptionalEnvironmentFileMissing(t *testing.T) {
 }
 
 func TestWorkingDirectory(t *testing.T) {
-	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	dir := t.TempDir()
 	output := filepath.Join(dir, "cwd.txt")
 
-	manager := NewProcessManager(&unit.ServiceUnit{
+	manager := newProcessManager(&unit.ServiceUnit{
 		WorkingDirectory: dir,
 		ExecStart:        helperCommand("recordcwd", output),
 	})
@@ -289,7 +289,7 @@ func TestWorkingDirectory(t *testing.T) {
 }
 
 func TestMissingExecStart(t *testing.T) {
-	manager := NewProcessManager(&unit.ServiceUnit{})
+	manager := newProcessManager(&unit.ServiceUnit{})
 	if err := manager.Start(); err == nil {
 		t.Fatal("Start() error = nil")
 	}
@@ -318,5 +318,63 @@ func TestParseCommand(t *testing.T) {
 	}
 	if !reflect.DeepEqual(cmd.args, []string{"--flag", "hello world"}) {
 		t.Errorf("args = %v", cmd.args)
+	}
+}
+
+func TestExpandEnv(t *testing.T) {
+	lookup := map[string]string{"path": `C:\bin`, "name": "app"}
+	tests := map[string]string{
+		"%PATH%":     `C:\bin`,
+		"x-%NAME%-y": "x-app-y",
+		"%MISSING%":  "",
+		"100%%":      "100%",
+		"%%PATH%%":   "%PATH%",
+		"%PATH":      "%PATH",
+		"plain":      "plain",
+	}
+	for input, want := range tests {
+		if got := expandEnv(input, lookup); got != want {
+			t.Errorf("expandEnv(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestBuildEnvironment(t *testing.T) {
+	t.Setenv("MY_PARENT", "parent-value")
+	service := &unit.ServiceUnit{
+		Environment: map[string]string{"UNIT_VAR": "unit-value", "OVERRIDE": "from-unit"},
+	}
+	defaults := EnvironmentDefaults{
+		Inherit: []string{"MY_PARENT", "NOT_SET_VAR"},
+		Vars: map[string]string{
+			"DERIVED":  "pre-%MY_PARENT%-post",
+			"OVERRIDE": "from-config",
+		},
+	}
+
+	lines, err := buildEnvironment(service, defaults)
+	if err != nil {
+		t.Fatalf("buildEnvironment() error = %v", err)
+	}
+	env := make(map[string]string)
+	for _, line := range lines {
+		key, value, _ := strings.Cut(line, "=")
+		env[key] = value
+	}
+
+	if env["MY_PARENT"] != "parent-value" {
+		t.Errorf("MY_PARENT = %q", env["MY_PARENT"])
+	}
+	if _, ok := env["NOT_SET_VAR"]; ok {
+		t.Errorf("NOT_SET_VAR should not be set")
+	}
+	if env["DERIVED"] != "pre-parent-value-post" {
+		t.Errorf("DERIVED = %q", env["DERIVED"])
+	}
+	if env["OVERRIDE"] != "from-unit" {
+		t.Errorf("OVERRIDE = %q, want unit value to win", env["OVERRIDE"])
+	}
+	if env["UNIT_VAR"] != "unit-value" {
+		t.Errorf("UNIT_VAR = %q", env["UNIT_VAR"])
 	}
 }

@@ -76,3 +76,62 @@ func TestLoadInvalid(t *testing.T) {
 		t.Fatal("Load() error = nil")
 	}
 }
+
+func TestInheritList(t *testing.T) {
+	got := Environment{Inherit: " A , ,B "}.InheritList()
+	if len(got) != 2 || got[0] != "A" || got[1] != "B" {
+		t.Errorf("InheritList() = %v", got)
+	}
+	if len((Environment{}).InheritList()) != 0 {
+		t.Error("empty Inherit should yield no names")
+	}
+}
+
+func TestLoadEnvironmentDefaults(t *testing.T) {
+	t.Setenv(configEnv, filepath.Join(t.TempDir(), "missing.json"))
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.Environment.InheritList()) == 0 {
+		t.Error("default inherit list is empty")
+	}
+}
+
+func TestLoadEnvironmentOverride(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	data := `{"environment":{"inherit":"A,B","vars":{"X":"%A%-y"}}}`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv(configEnv, path)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	got := cfg.Environment.InheritList()
+	if len(got) != 2 || got[0] != "A" || got[1] != "B" {
+		t.Errorf("InheritList() = %v", got)
+	}
+	if cfg.Environment.Vars["X"] != "%A%-y" {
+		t.Errorf("Vars = %v", cfg.Environment.Vars)
+	}
+}
+
+func TestLoadEnvironmentEmptyInherit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"environment":{"inherit":""}}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv(configEnv, path)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.Environment.InheritList()) != 0 {
+		t.Errorf("InheritList() = %v, want empty", cfg.Environment.InheritList())
+	}
+}

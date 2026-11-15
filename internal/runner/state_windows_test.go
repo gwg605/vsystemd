@@ -13,14 +13,13 @@ import (
 )
 
 func TestSCMHandlerReportsStates(t *testing.T) {
-	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	dir := t.TempDir()
 
 	reporter, _, collector := newReporterPair(t, "app.service")
 	service := &unit.ServiceUnit{
 		ExecStart: helperCommand("record", filepath.Join(dir, "exit.txt"), "done", "3"),
 	}
-	process := NewProcessManager(service)
+	process := newProcessManager(service)
 	handler := NewSCMHandler(service, process, NewRestartController(service))
 	handler.SetStateReporter(reporter)
 
