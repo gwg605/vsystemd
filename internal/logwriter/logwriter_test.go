@@ -73,7 +73,7 @@ func TestManagedAgeRotation(t *testing.T) {
 }
 
 func TestExplicitTruncateAndAppend(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "nested", "app.log")
+	path := filepath.Join(t.TempDir(), "app.log")
 
 	writer, err := OpenFile(path, true)
 	if err != nil {
@@ -102,6 +102,13 @@ func TestExplicitTruncateAndAppend(t *testing.T) {
 	}
 	if string(data) != "twothree" {
 		t.Errorf("content = %q", data)
+	}
+}
+
+func TestOpenFileMissingDirectory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing", "app.log")
+	if _, err := OpenFile(path, true); err == nil {
+		t.Fatal("OpenFile() error = nil, want error for a missing directory")
 	}
 }
 
@@ -169,14 +176,15 @@ func TestReadTail(t *testing.T) {
 }
 
 func TestResolveServiceOutputs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "app.log")
+
 	service := &unit.ServiceUnit{
-		WorkingDirectory: `C:\work`,
-		StandardOutput:   `file:logs\app.log`,
-		StandardError:    `append:logs\app.log`,
+		StandardOutput: "file:" + path,
+		StandardError:  "append:" + path,
 	}
-	stdout, stderr, warnings := ResolveServiceOutputs(service)
-	if len(warnings) != 0 {
-		t.Fatalf("warnings = %v", warnings)
+	stdout, stderr, err := ResolveServiceOutputs(service)
+	if err != nil {
+		t.Fatalf("ResolveServiceOutputs() error = %v", err)
 	}
 	if stdout.Kind != OutputFile || stderr.Kind != OutputAppend {
 		t.Errorf("kinds = %v/%v", stdout.Kind, stderr.Kind)
@@ -185,13 +193,28 @@ func TestResolveServiceOutputs(t *testing.T) {
 		t.Errorf("paths differ: %q/%q", stdout.Path, stderr.Path)
 	}
 
-	service.StandardOutput = "journal"
-	service.StandardError = "null"
-	stdout, stderr, warnings = ResolveServiceOutputs(service)
+	service = &unit.ServiceUnit{StandardOutput: "", StandardError: "null"}
+	stdout, stderr, err = ResolveServiceOutputs(service)
+	if err != nil {
+		t.Fatalf("ResolveServiceOutputs() error = %v", err)
+	}
 	if stdout.Kind != OutputDefault || stderr.Kind != OutputNull {
 		t.Errorf("kinds = %v/%v", stdout.Kind, stderr.Kind)
 	}
-	if len(warnings) != 1 {
-		t.Errorf("warnings = %v", warnings)
+}
+
+func TestResolveServiceOutputsErrors(t *testing.T) {
+	dotdot := t.TempDir() + string(filepath.Separator) + ".." + string(filepath.Separator) + "app.log"
+	tests := map[string]string{
+		"unsupported": "journal",
+		"relative":    "file:relative.log",
+		"parent":      "file:" + dotdot,
+		"empty path":  "file:",
+	}
+	for name, value := range tests {
+		service := &unit.ServiceUnit{StandardOutput: value}
+		if _, _, err := ResolveServiceOutputs(service); err == nil {
+			t.Errorf("%s: ResolveServiceOutputs(%q) error = nil, want error", name, value)
+		}
 	}
 }

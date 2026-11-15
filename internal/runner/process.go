@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/gwg605/vsystemd/internal/logwriter"
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
@@ -243,6 +244,9 @@ func buildEnvironment(service *unit.ServiceUnit) ([]string, error) {
 	for _, file := range service.EnvironmentFiles {
 		optional := strings.HasPrefix(file, "-")
 		path := strings.TrimPrefix(file, "-")
+		if err := logwriter.ValidateUnitPath(path); err != nil {
+			return nil, fmt.Errorf("invalid EnvironmentFile: %w", err)
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			if optional && errors.Is(err, os.ErrNotExist) {

@@ -16,6 +16,7 @@ import (
 
 	vsystemd "github.com/gwg605/vsystemd"
 	"github.com/gwg605/vsystemd/internal/config"
+	"github.com/gwg605/vsystemd/internal/logwriter"
 	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/scm"
 	"github.com/gwg605/vsystemd/internal/storage"
@@ -244,6 +245,9 @@ func enableService(name, password string) error {
 	for _, warning := range parsed.Warnings {
 		fmt.Fprintf(os.Stderr, "warning: %s: %s\n", name, warning)
 	}
+	for _, warning := range unitPathWarnings(parsed) {
+		fmt.Fprintf(os.Stderr, "warning: %s: %s\n", name, warning)
+	}
 
 	executable, err := vsystemdPath()
 	if err != nil {
@@ -271,6 +275,43 @@ func enableService(name, password string) error {
 		return manager.CreateService(serviceConfig)
 	}
 	return manager.UpdateService(serviceConfig)
+}
+
+// unitPathWarnings checks the custom output and environment file paths of a
+// service unit and returns warnings for invalid, missing, or inaccessible
+// paths. It never fails: problems are reported to the user as warnings.
+func unitPathWarnings(parsed *unit.UnitFile) []string {
+	var warnings []string
+
+	stdout, stderr, err := logwriter.ResolveServiceOutputs(parsed.Service)
+	if err != nil {
+		warnings = append(warnings, err.Error())
+	} else {
+		for _, target := range []logwriter.OutputTarget{stdout, stderr} {
+			if target.Kind != logwriter.OutputFile && target.Kind != logwriter.OutputAppend {
+				continue
+			}
+			if err := logwriter.CheckOutputWritable(target.Path); err != nil {
+				warnings = append(warnings, fmt.Sprintf("output %s: %v", target.Path, err))
+			}
+		}
+	}
+
+	for _, file := range parsed.Service.EnvironmentFiles {
+		optional := strings.HasPrefix(file, "-")
+		path := strings.TrimPrefix(file, "-")
+		if err := logwriter.ValidateUnitPath(path); err != nil {
+			warnings = append(warnings, err.Error())
+			continue
+		}
+		if err := logwriter.CheckEnvReadable(path); err != nil {
+			if optional && os.IsNotExist(err) {
+				continue
+			}
+			warnings = append(warnings, fmt.Sprintf("environment file %s: %v", path, err))
+		}
+	}
+	return warnings
 }
 
 func statusCommand(cfg config.Config, name string) error {

@@ -60,9 +60,6 @@ func OpenManaged(dir, prefix string, createdAt time.Time, rotation Rotation) (*W
 
 func OpenFile(path string, truncate bool) (*Writer, error) {
 	path = filepath.Clean(path)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, fmt.Errorf("create log directory for %s: %w", path, err)
-	}
 
 	flags := os.O_CREATE | os.O_WRONLY
 	if truncate {

@@ -2,7 +2,6 @@ package runner
 
 import (
 	"io"
-	"log/slog"
 	"time"
 
 	"github.com/gwg605/vsystemd/internal/logwriter"
@@ -16,9 +15,9 @@ type LogStreamer struct {
 }
 
 func NewLogStreamer(serviceName string, service *unit.ServiceUnit, logsDir string, rotation logwriter.Rotation, startTime time.Time) (*LogStreamer, error) {
-	stdoutTarget, stderrTarget, warnings := logwriter.ResolveServiceOutputs(service)
-	for _, warning := range warnings {
-		slog.Warn("log: "+warning, "unit", serviceName)
+	stdoutTarget, stderrTarget, err := logwriter.ResolveServiceOutputs(service)
+	if err != nil {
+		return nil, err
 	}
 
 	defaultPath := logwriter.ManagedPath(logwriter.ServiceLogDir(logsDir, serviceName), "", startTime)

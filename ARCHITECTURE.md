@@ -33,7 +33,7 @@ Supported unit types: `.service`, `.timer`
 - `WorkingDirectory=`
 - `Environment=`, `EnvironmentFile=`
 - `User=`
-- `StandardOutput=`, `StandardError=` (только `file:` в v1)
+- `StandardOutput=`, `StandardError=` (`null`, `file:<abs>`, `append:<abs>`; custom paths must be absolute, no `..`, parent directory must exist)
 - `After=`, `Requires=` (mapped to SCM dependencies)
 - `StartLimitBurst=`, `StartLimitIntervalSec=`
 

@@ -237,9 +237,10 @@ func (d *Daemon) logTail(unitName string) []string {
 		return nil
 	}
 
-	stdout, stderr, warnings := logwriter.ResolveServiceOutputs(parsed.Service)
-	for _, warning := range warnings {
-		slog.Warn("daemon: log output warning", "unit", unitName, "warning", warning)
+	stdout, stderr, err := logwriter.ResolveServiceOutputs(parsed.Service)
+	if err != nil {
+		slog.Warn("daemon: invalid log output config", "unit", unitName, "error", err)
+		return nil
 	}
 
 	target := logwriter.StatusTarget(stdout, stderr)

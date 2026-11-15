@@ -327,7 +327,8 @@ SCM stop → SERVICE_CONTROL_STOP → ExecStop → Runner exit
 
 ### EnvironmentFile=
 
-Поведение как в systemd:
+Путь должен быть **абсолютным** и не содержать компонент `..`; иначе — ошибка
+запуска (префикс `-` это не отменяет). Реакция на отсутствие файла — как в systemd:
 
 - `EnvironmentFile=/path` — файл обязателен; отсутствие → `failed`
 - `EnvironmentFile=-/path` — файл опциональный; отсутствие игнорируется
@@ -420,10 +421,12 @@ SCM stop → SERVICE_CONTROL_STOP → ExecStop → Runner exit
 - `StandardOutput=file:<path>` / `StandardError=file:<path>` — truncate, без ротации
 - `StandardOutput=append:<path>` / `StandardError=append:<path>` — append, без ротации
 - `null` — поток отбрасывается
-- прочие значения — warning и дефолтный лог
+- кастомный путь (`file:`/`append:`) должен быть **абсолютным** и не содержать `..`;
+  **родительская папка должна существовать** и быть доступной на запись, файл
+  создаётся внутри неё; иначе — ошибка запуска (каталоги автоматически не создаются)
+- любое другое значение (`journal`, мусор) — ошибка запуска
 - одинаковый канонический путь для stdout/stderr → один writer
 - `file:` + `append:` на один путь → append для обоих
-- относительные пути считаются от `WorkingDirectory`; родительские каталоги создаются
 
 ### Собственные логи vsystemd
 
