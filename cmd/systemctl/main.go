@@ -65,6 +65,8 @@ func run(args []string) error {
 	enableCmd := parser.NewCommand("enable", "Enable unit")
 	enableUnit := enableCmd.StringPositional(&argparse.Options{Help: "unit name"})
 	password := enableCmd.String("p", "password", &argparse.Options{Help: "password for the service account"})
+	passwordFile := enableCmd.String("", "password-file", &argparse.Options{Help: "read the service account password from a file"})
+	passwordStdin := enableCmd.Flag("", "password-stdin", &argparse.Options{Help: "read the service account password from stdin"})
 
 	var unitCommands []unitCommand
 	for _, name := range []string{"disable", "start", "stop", "restart", "status"} {
@@ -97,7 +99,7 @@ func run(args []string) error {
 		if strings.HasSuffix(name, ".timer") {
 			return timerCommand(protocol.TypeTimerEnable, protocol.TimerRequest{Unit: name, Enabled: true})
 		}
-		return enableService(name, *password)
+		return enableService(name, *password, *passwordFile, *passwordStdin)
 	}
 
 	for _, command := range unitCommands {
@@ -218,7 +220,7 @@ func timerCommand(msgType string, request protocol.TimerRequest) error {
 	return nil
 }
 
-func enableService(name, password string) error {
+func enableService(name, password, passwordFile string, passwordStdin bool) error {
 	if !strings.HasSuffix(name, ".service") {
 		return fmt.Errorf("%s is not a service unit", name)
 	}
@@ -255,7 +257,7 @@ func enableService(name, password string) error {
 	}
 	serviceName := strings.TrimSuffix(name, ".service")
 	account := unitUser(parsed.Service.User, serviceName)
-	resolvedPassword, err := resolvePassword(account, password)
+	resolvedPassword, err := resolvePassword(account, password, passwordFile, passwordStdin)
 	if err != nil {
 		return err
 	}
@@ -583,9 +585,32 @@ func unitUser(user, serviceName string) string {
 	return `NT SERVICE\` + serviceName
 }
 
-func resolvePassword(account, provided string) (string, error) {
-	if provided != "" || !passwordRequired(account) {
+func resolvePassword(account, provided, passwordFile string, stdin bool) (string, error) {
+	sources := 0
+	if provided != "" {
+		sources++
+	}
+	if passwordFile != "" {
+		sources++
+	}
+	if stdin {
+		sources++
+	}
+	if sources > 1 {
+		return "", errors.New("specify only one of --password, --password-file, --password-stdin")
+	}
+
+	switch {
+	case provided != "":
 		return provided, nil
+	case passwordFile != "":
+		return readPasswordFile(passwordFile)
+	case stdin:
+		return readPassword(os.Stdin)
+	}
+
+	if !passwordRequired(account) {
+		return "", nil
 	}
 
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -600,6 +625,26 @@ func resolvePassword(account, provided string) (string, error) {
 		return "", fmt.Errorf("read password: %w", err)
 	}
 	return string(password), nil
+}
+
+func readPasswordFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read password file: %w", err)
+	}
+	return trimPassword(string(data)), nil
+}
+
+func readPassword(r io.Reader) (string, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return "", fmt.Errorf("read password: %w", err)
+	}
+	return trimPassword(string(data)), nil
+}
+
+func trimPassword(value string) string {
+	return strings.TrimRight(value, "\r\n")
 }
 
 func passwordRequired(account string) bool {
