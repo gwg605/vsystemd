@@ -2,6 +2,7 @@ package runner
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -73,7 +74,7 @@ func (r *StateReporter) Report(event StateEvent) error {
 		"pid", event.PID,
 		"exit_code", event.ExitCode,
 		"restart_count", event.RestartCount)
-	if err := r.transport.Send(daemonPeer, transport.Message{
+	if err := r.transport.Send(r.transport.Target(transport.PeerDaemon), transport.Message{
 		Type:    MessageStateEvent,
 		Payload: payload,
 	}); err != nil {
@@ -89,23 +90,26 @@ func (r *StateReporter) State() StateEvent {
 	return r.state
 }
 
-func (r *StateReporter) Handle(sourcePeer string, msg transport.Message) error {
+func (r *StateReporter) Handle(source transport.Peer, msg transport.Message) error {
+	if source.Type() != transport.PeerDaemon {
+		return fmt.Errorf("forbidden: %s is not the daemon", source)
+	}
 	if msg.Type != MessageStatusRequest {
 		return nil
 	}
-	slog.Debug("runner: status request received", "source", sourcePeer)
+	slog.Debug("runner: status request received", "source", source.String())
 
 	payload, err := json.Marshal(r.State())
 	if err != nil {
 		slog.Error("runner: encode status response failed", "error", err)
 		return err
 	}
-	if err := r.transport.Send(sourcePeer, transport.Message{
+	if err := r.transport.Send(source, transport.Message{
 		Type:      MessageStateEvent,
 		RequestID: msg.ID,
 		Payload:   payload,
 	}); err != nil {
-		slog.Warn("runner: status response failed", "source", sourcePeer, "error", err)
+		slog.Warn("runner: status response failed", "source", source.String(), "error", err)
 		return err
 	}
 	return nil

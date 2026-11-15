@@ -21,7 +21,7 @@ import (
 func newControlClient(t *testing.T, manager scm.Manager, store storage.Storage) (*Daemon, *transportfake.Transport) {
 	t.Helper()
 	daemon, network := newTestDaemon(t, manager, store)
-	client := network.New(transport.DefaultConfig(), "systemctl-1", nil)
+	client := network.New(transport.DefaultConfig(), transport.NewPeer(transport.PeerControl, "systemctl_1", true), nil)
 	t.Cleanup(func() { client.Close() })
 	return daemon, client
 }
@@ -36,7 +36,7 @@ func controlRequest(t *testing.T, client transport.Transport, msgType string, pa
 		}
 		raw = data
 	}
-	response, err := client.Req(daemonPeer, transport.Message{Type: msgType, Payload: raw})
+	response, err := client.Req(client.Target(transport.PeerDaemon), transport.Message{Type: msgType, Payload: raw})
 	if err != nil {
 		t.Fatalf("%s request: %v", msgType, err)
 	}

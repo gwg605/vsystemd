@@ -15,57 +15,58 @@ import (
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
-func (d *Daemon) handleStatusRequest(sourcePeer string, msg transport.Message) error {
+func (d *Daemon) handleStatusRequest(source transport.Peer, msg transport.Message) error {
 	var request protocol.StatusRequest
 	if err := json.Unmarshal(msg.Payload, &request); err != nil {
-		return d.respondError(sourcePeer, msg.ID, err)
+		return d.respondError(source, msg.ID, err)
 	}
-	slog.Debug("daemon: status request", "from", sourcePeer, "unit", request.Unit)
+	slog.Debug("daemon: status request", "from", source.String(), "unit", request.Unit)
 
 	response, err := d.status(request.Unit)
 	if err != nil {
-		return d.respondError(sourcePeer, msg.ID, err)
+		return d.respondError(source, msg.ID, err)
 	}
-	return d.respond(sourcePeer, protocol.TypeStatusResponse, msg.ID, response)
+	return d.respond(source, protocol.TypeStatusResponse, msg.ID, response)
 }
 
-func (d *Daemon) handleListUnits(sourcePeer string, msg transport.Message) error {
-	slog.Debug("daemon: list units request", "from", sourcePeer)
+func (d *Daemon) handleListUnits(source transport.Peer, msg transport.Message) error {
+	slog.Debug("daemon: list units request", "from", source.String())
 	response, err := d.listUnits()
 	if err != nil {
-		return d.respondError(sourcePeer, msg.ID, err)
+		return d.respondError(source, msg.ID, err)
 	}
-	return d.respond(sourcePeer, protocol.TypeListUnitsResponse, msg.ID, response)
+	return d.respond(source, protocol.TypeListUnitsResponse, msg.ID, response)
 }
 
-func (d *Daemon) handleDaemonReload(sourcePeer string, msg transport.Message) error {
-	slog.Info("daemon: reload request", "from", sourcePeer)
+func (d *Daemon) handleDaemonReload(source transport.Peer, msg transport.Message) error {
+	slog.Info("daemon: reload request", "from", source.String())
 	if err := d.reload(); err != nil {
-		return d.respondError(sourcePeer, msg.ID, err)
+		return d.respondError(source, msg.ID, err)
 	}
-	return d.respond(sourcePeer, protocol.TypeReloadResult, msg.ID, protocol.ReloadResult{Success: true})
+	return d.respond(source, protocol.TypeReloadResult, msg.ID, protocol.ReloadResult{Success: true})
 }
 
-func (d *Daemon) respond(targetPeer, msgType, requestID string, payload any) error {
+func (d *Daemon) respond(target transport.Peer, msgType, requestID string, payload any) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		slog.Error("daemon: encode response failed", "type", msgType, "error", err)
 		return fmt.Errorf("encode %s: %w", msgType, err)
 	}
-	if err := d.transport.Send(targetPeer, transport.Message{
+	if err := d.transport.Send(target, transport.Message{
 		Type:      msgType,
 		RequestID: requestID,
 		Payload:   data,
 	}); err != nil {
-		slog.Warn("daemon: send response failed", "to", targetPeer, "type", msgType, "error", err)
+		slog.Warn("daemon: send response failed", "to", target.String(), "type", msgType, "error", err)
 		return err
 	}
+	slog.Debug("daemon: response sent", "to", target.String(), "type", msgType, "request_id", requestID)
 	return nil
 }
 
-func (d *Daemon) respondError(targetPeer, requestID string, err error) error {
-	slog.Warn("daemon: request failed", "to", targetPeer, "request_id", requestID, "error", err)
-	return d.respond(targetPeer, protocol.TypeErrorResponse, requestID, protocol.ErrorResponse{Error: err.Error()})
+func (d *Daemon) respondError(target transport.Peer, requestID string, err error) error {
+	slog.Warn("daemon: request failed", "to", target.String(), "request_id", requestID, "error", err)
+	return d.respond(target, protocol.TypeErrorResponse, requestID, protocol.ErrorResponse{Error: err.Error()})
 }
 
 func (d *Daemon) status(name string) (protocol.StatusResponse, error) {

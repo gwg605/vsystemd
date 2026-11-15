@@ -22,7 +22,7 @@ func newIntegratedRunner(t *testing.T, name string, service *unit.ServiceUnit) (
 
 	network := transportfake.NewNetwork()
 	collector := newStateCollector()
-	daemon := network.New(transport.DefaultConfig(), daemonPeer, collector.handler)
+	daemon := network.New(transport.DefaultConfig(), transport.NewPeer(transport.PeerDaemon, daemonPeer, false), collector.handler)
 	t.Cleanup(func() { daemon.Close() })
 
 	serviceName := strings.TrimSuffix(name, filepath.Ext(name))
@@ -31,8 +31,8 @@ func newIntegratedRunner(t *testing.T, name string, service *unit.ServiceUnit) (
 		t.Fatalf("NewLogStreamer() error = %v", err)
 	}
 
-	factory := func(peer string, handler transport.MsgHandler) (transport.Transport, error) {
-		return network.New(transport.DefaultConfig(), peer, handler), nil
+	factory := func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
+		return network.New(transport.DefaultConfig(), local, handler), nil
 	}
 	runner, err := NewRunner(name, service, logs, factory)
 	if err != nil {

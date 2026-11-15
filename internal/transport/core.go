@@ -10,7 +10,14 @@ import (
 
 var ErrClosed = errors.New("transport closed")
 
-type SendFunc func(targetPeer string, msg Message, opts ...Opt) error
+// SendFunc is the low-level send used by Core. It must deliver msg to target
+// and set the sender identity itself.
+type SendFunc func(target Peer, msg Message, opts ...Opt) error
+
+type pendingRequest struct {
+	expected Peer
+	response chan Message
+}
 
 type Core struct {
 	config  Config
@@ -18,7 +25,7 @@ type Core struct {
 	send    SendFunc
 
 	mu      sync.Mutex
-	pending map[string]chan Message
+	pending map[string]*pendingRequest
 	closed  bool
 	done    chan struct{}
 }
@@ -28,12 +35,22 @@ func NewCore(config Config, handler MsgHandler, send SendFunc) *Core {
 		config:  config.WithDefaults(),
 		handler: handler,
 		send:    send,
-		pending: make(map[string]chan Message),
+		pending: make(map[string]*pendingRequest),
 		done:    make(chan struct{}),
 	}
 }
 
-func (c *Core) Send(targetPeer string, msg Message, opts ...Opt) error {
+// Target builds an outbound target peer from the given type and options.
+func (c *Core) Target(typ PeerType, opts ...PeerOption) Peer {
+	options := resolvePeerOptions(opts...)
+	name := options.name
+	if name == "" && typ == PeerDaemon {
+		name = PeerDaemonName
+	}
+	return NewPeer(typ, name, false)
+}
+
+func (c *Core) Send(target Peer, msg Message, opts ...Opt) error {
 	if msg.ID == "" {
 		id, err := newID()
 		if err != nil {
@@ -49,10 +66,10 @@ func (c *Core) Send(targetPeer string, msg Message, opts ...Opt) error {
 		return ErrClosed
 	}
 
-	return c.send(targetPeer, msg, opts...)
+	return c.send(target, msg, opts...)
 }
 
-func (c *Core) Request(targetPeer string, msg Message, opts ...Opt) (Message, error) {
+func (c *Core) Request(target Peer, msg Message, opts ...Opt) (Message, error) {
 	if msg.ID == "" {
 		id, err := newID()
 		if err != nil {
@@ -73,7 +90,7 @@ func (c *Core) Request(targetPeer string, msg Message, opts ...Opt) (Message, er
 		c.mu.Unlock()
 		return Message{}, ErrClosed
 	}
-	c.pending[msg.ID] = response
+	c.pending[msg.ID] = &pendingRequest{expected: target, response: response}
 	c.mu.Unlock()
 
 	defer func() {
@@ -82,7 +99,7 @@ func (c *Core) Request(targetPeer string, msg Message, opts ...Opt) (Message, er
 		c.mu.Unlock()
 	}()
 
-	if err := c.Send(targetPeer, msg, opts...); err != nil {
+	if err := c.Send(target, msg, opts...); err != nil {
 		return Message{}, err
 	}
 
@@ -97,30 +114,34 @@ func (c *Core) Request(targetPeer string, msg Message, opts ...Opt) (Message, er
 	case resp := <-response:
 		return resp, nil
 	case <-timeoutCh:
-		return Message{}, fmt.Errorf("request %s to %s timed out after %s", msg.Type, targetPeer, timeout)
+		return Message{}, fmt.Errorf("request %s to %s timed out after %s", msg.Type, target, timeout)
 	case <-c.done:
 		return Message{}, ErrClosed
 	}
 }
 
-func (c *Core) Dispatch(sourcePeer string, msg Message) error {
+func (c *Core) Dispatch(source Peer, msg Message) error {
 	if msg.RequestID != "" {
 		c.mu.Lock()
-		response, ok := c.pending[msg.RequestID]
+		pending, ok := c.pending[msg.RequestID]
 		c.mu.Unlock()
-		if ok {
-			select {
-			case response <- msg:
-			default:
-			}
+		if !ok {
 			return nil
+		}
+		// Only the peer the request was sent to may answer it.
+		if !source.equal(pending.expected) {
+			return nil
+		}
+		select {
+		case pending.response <- msg:
+		default:
 		}
 		return nil
 	}
 	if c.handler == nil {
 		return nil
 	}
-	return c.handler(sourcePeer, msg)
+	return c.handler(source, msg)
 }
 
 func (c *Core) Close() {

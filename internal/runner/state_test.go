@@ -16,7 +16,7 @@ func newStateCollector() *stateCollector {
 	return &stateCollector{events: make(chan StateEvent, 16)}
 }
 
-func (c *stateCollector) handler(_ string, msg transport.Message) error {
+func (c *stateCollector) handler(_ transport.Peer, msg transport.Message) error {
 	if msg.Type != MessageStateEvent {
 		return nil
 	}
@@ -33,11 +33,11 @@ func newReporterPair(t *testing.T, unitName string) (*StateReporter, *fake.Trans
 	network := fake.NewNetwork()
 
 	collector := newStateCollector()
-	daemon := network.New(transport.DefaultConfig(), daemonPeer, collector.handler)
+	daemon := network.New(transport.DefaultConfig(), transport.NewPeer(transport.PeerDaemon, daemonPeer, false), collector.handler)
 	t.Cleanup(func() { daemon.Close() })
 
 	var reporter *StateReporter
-	runnerTransport := network.New(transport.DefaultConfig(), unitName, func(source string, msg transport.Message) error {
+	runnerTransport := network.New(transport.DefaultConfig(), transport.NewPeer(transport.PeerRunner, unitName, false), func(source transport.Peer, msg transport.Message) error {
 		return reporter.Handle(source, msg)
 	})
 	t.Cleanup(func() { runnerTransport.Close() })
@@ -73,7 +73,7 @@ func TestStateReporterStatusRequest(t *testing.T) {
 		t.Fatalf("Report() error = %v", err)
 	}
 
-	resp, err := daemon.Req("app.service", transport.Message{Type: MessageStatusRequest})
+	resp, err := daemon.Req(daemon.Target(transport.PeerRunner, transport.WithName("app.service")), transport.Message{Type: MessageStatusRequest})
 	if err != nil {
 		t.Fatalf("Req() error = %v", err)
 	}

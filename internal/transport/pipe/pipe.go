@@ -4,27 +4,41 @@ package pipe
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Microsoft/go-winio"
+	"golang.org/x/sys/windows"
+
 	"github.com/gwg605/vsystemd/internal/transport"
 )
 
+// errnoFileNotFound is ERROR_FILE_NOT_FOUND and errnoPipeBusy is ERROR_PIPE_BUSY.
 const (
-	daemonPeer        = "daemon"
-	systemctlPrefix   = "systemctl-"
-	daemonPipeName    = `\\.\pipe\vsystemd-in`
+	errnoFileNotFound = syscall.Errno(2)
+	errnoPipeBusy     = syscall.Errno(231)
+)
+
+const (
 	servicePipePrefix = `\\.\pipe\vsystemd-svc-`
 	controlPipePrefix = `\\.\pipe\vsystemd-ctl-`
 
 	pipeACL       = "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;OW)"
 	daemonPipeACL = "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;OW)(A;;GA;;;S-1-5-80-0)"
+
+	systemctlUnderscore = "systemctl_"
+	systemctlHyphen     = "systemctl-"
 )
+
+// daemonPipeName is a variable so tests can avoid clashing with a running daemon.
+var daemonPipeName = `\\.\pipe\vsystemd-in`
 
 type envelope struct {
 	From string            `json:"from"`
@@ -32,50 +46,59 @@ type envelope struct {
 }
 
 type Transport struct {
-	peerName string
+	local    transport.Peer
 	config   transport.Config
 	core     *transport.Core
-	listener net.Listener
+	listener *pipeListener
+	auth     authenticator
 
 	mu       sync.Mutex
 	outbound map[string]*outbound
-	inbound  map[net.Conn]struct{}
+	inbound  map[conn]struct{}
 	closed   bool
 }
 
 type outbound struct {
-	conn  net.Conn
+	conn  *pipeConn
 	mu    sync.Mutex
 	timer *time.Timer
 }
 
-func New(config transport.Config, peerName string, handler transport.MsgHandler) (transport.Transport, error) {
+func New(config transport.Config, local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
+	return newWithAuth(config, local, handler, authenticatorFor(local))
+}
+
+func newWithAuth(config transport.Config, local transport.Peer, handler transport.MsgHandler, auth authenticator) (transport.Transport, error) {
 	config = config.WithDefaults()
-	listener, err := winio.ListenPipe(pipeName(peerName), &winio.PipeConfig{
-		SecurityDescriptor: pipeACLFor(peerName),
-	})
+	listener, err := listenPipe(pipeName(local), pipeACLFor(local))
 	if err != nil {
-		return nil, fmt.Errorf("listen on pipe for %s: %w", peerName, err)
+		return nil, fmt.Errorf("listen on pipe for %s: %w", local, err)
 	}
 
 	t := &Transport{
-		peerName: peerName,
+		local:    local,
 		config:   config,
 		listener: listener,
+		auth:     auth,
 		outbound: make(map[string]*outbound),
-		inbound:  make(map[net.Conn]struct{}),
+		inbound:  make(map[conn]struct{}),
 	}
 	t.core = transport.NewCore(config, handler, t.send)
+	slog.Info("pipe: listening", "local", local.String(), "pipe", pipeName(local))
 	go t.acceptLoop()
 	return t, nil
 }
 
-func (t *Transport) Send(targetPeer string, msg transport.Message, opts ...transport.Opt) error {
-	return t.core.Send(targetPeer, msg, opts...)
+func (t *Transport) Target(typ transport.PeerType, opts ...transport.PeerOption) transport.Peer {
+	return t.core.Target(typ, opts...)
 }
 
-func (t *Transport) Req(targetPeer string, msg transport.Message, opts ...transport.Opt) (transport.Message, error) {
-	return t.core.Request(targetPeer, msg, opts...)
+func (t *Transport) Send(target transport.Peer, msg transport.Message, opts ...transport.Opt) error {
+	return t.core.Send(target, msg, opts...)
+}
+
+func (t *Transport) Req(target transport.Peer, msg transport.Message, opts ...transport.Opt) (transport.Message, error) {
+	return t.core.Request(target, msg, opts...)
 }
 
 func (t *Transport) Close() error {
@@ -92,7 +115,7 @@ func (t *Transport) Close() error {
 		connections = append(connections, conn)
 		delete(t.outbound, target)
 	}
-	inbound := make([]net.Conn, 0, len(t.inbound))
+	inbound := make([]conn, 0, len(t.inbound))
 	for conn := range t.inbound {
 		inbound = append(inbound, conn)
 		delete(t.inbound, conn)
@@ -114,31 +137,32 @@ func (t *Transport) Close() error {
 	return err
 }
 
-func (t *Transport) send(targetPeer string, msg transport.Message, opts ...transport.Opt) error {
-	conn, err := t.outboundFor(targetPeer, opts...)
+func (t *Transport) send(target transport.Peer, msg transport.Message, opts ...transport.Opt) error {
+	conn, err := t.outboundFor(target, opts...)
 	if err != nil {
-		slog.Debug("pipe: connect failed", "peer", t.peerName, "target", targetPeer, "error", err)
+		slog.Debug("pipe: connect failed", "local", t.local.Name(), "target", target.Name(), "error", err)
 		return err
 	}
 
 	conn.mu.Lock()
 	defer conn.mu.Unlock()
-	if err := writeEnvelope(conn.conn, envelope{From: t.peerName, Msg: msg}); err != nil {
-		slog.Warn("pipe: write failed", "peer", t.peerName, "target", targetPeer, "error", err)
-		t.dropOutbound(targetPeer, conn)
-		return fmt.Errorf("send to %s: %w", targetPeer, err)
+	if err := writeEnvelope(conn.conn, envelope{From: t.local.Name(), Msg: msg}); err != nil {
+		slog.Warn(pipeMsg(conn.conn.tag(), "write failed"), "local", t.local.Name(), "target", target.Name(), "error", err)
+		t.dropOutbound(target.Name(), conn)
+		return fmt.Errorf("send to %s: %w", target, err)
 	}
-	t.resetIdle(targetPeer, conn)
+	slog.Debug(pipeMsg(conn.conn.tag(), "sent"), "local", t.local.Name(), "to", target.String(), "type", msg.Type, "id", msg.ID, "request_id", msg.RequestID)
+	t.resetIdle(target.Name(), conn)
 	return nil
 }
 
-func (t *Transport) outboundFor(targetPeer string, opts ...transport.Opt) (*outbound, error) {
+func (t *Transport) outboundFor(target transport.Peer, opts ...transport.Opt) (*outbound, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.closed {
 		return nil, transport.ErrClosed
 	}
-	if conn, ok := t.outbound[targetPeer]; ok {
+	if conn, ok := t.outbound[target.Name()]; ok {
 		return conn, nil
 	}
 
@@ -147,17 +171,67 @@ func (t *Transport) outboundFor(targetPeer string, opts ...transport.Opt) (*outb
 	if options.ConnectTimeout > 0 {
 		timeout = options.ConnectTimeout
 	}
-	conn, err := winio.DialPipe(pipeName(targetPeer), &timeout)
+	conn, err := dialPipe(pipeName(target), timeout)
 	if err != nil {
-		return nil, fmt.Errorf("connect to %s: %w", targetPeer, err)
+		return nil, fmt.Errorf("connect to %s: %w", target, err)
 	}
+	slog.Debug(pipeMsg(conn.tag(), "dialed"), "local", t.local.Name(), "to", target.String(), "pipe", pipeName(target))
 
 	out := &outbound{conn: conn}
-	t.outbound[targetPeer] = out
+	t.outbound[target.Name()] = out
 	return out, nil
 }
 
-func (t *Transport) resetIdle(targetPeer string, conn *outbound) {
+// dialPipe connects to a named pipe, retrying until timeout while the server is
+// momentarily between pipe instances (ERROR_FILE_NOT_FOUND) or busy.
+func dialPipe(path string, timeout time.Duration) (*pipeConn, error) {
+	namePtr, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return nil, err
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		handle, err := windows.CreateFile(
+			namePtr,
+			windows.GENERIC_READ|windows.GENERIC_WRITE,
+			0,
+			nil,
+			windows.OPEN_EXISTING,
+			windows.FILE_FLAG_OVERLAPPED,
+			0,
+		)
+		if err == nil {
+			file, fileErr := winio.NewOpenFile(handle)
+			if fileErr != nil {
+				windows.CloseHandle(handle)
+				return nil, fileErr
+			}
+			return newPipeConn(handle, file), nil
+		}
+		if time.Now().After(deadline) || !isRetryableDialError(err) {
+			return nil, err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func isRetryableDialError(err error) bool {
+	if errors.Is(err, winio.ErrTimeout) {
+		return true
+	}
+	var errno syscall.Errno
+	if !errors.As(err, &errno) {
+		return false
+	}
+	switch errno {
+	case errnoFileNotFound, errnoPipeBusy:
+		return true
+	default:
+		return false
+	}
+}
+
+func (t *Transport) resetIdle(target string, conn *outbound) {
 	if t.config.IdleTimeout <= 0 {
 		return
 	}
@@ -165,14 +239,14 @@ func (t *Transport) resetIdle(targetPeer string, conn *outbound) {
 		conn.timer.Stop()
 	}
 	conn.timer = time.AfterFunc(t.config.IdleTimeout, func() {
-		t.closeIdle(targetPeer, conn)
+		t.closeIdle(target, conn)
 	})
 }
 
-func (t *Transport) closeIdle(targetPeer string, conn *outbound) {
+func (t *Transport) closeIdle(target string, conn *outbound) {
 	t.mu.Lock()
-	if t.outbound[targetPeer] == conn {
-		delete(t.outbound, targetPeer)
+	if t.outbound[target] == conn {
+		delete(t.outbound, target)
 	}
 	t.mu.Unlock()
 
@@ -181,10 +255,10 @@ func (t *Transport) closeIdle(targetPeer string, conn *outbound) {
 	conn.mu.Unlock()
 }
 
-func (t *Transport) dropOutbound(targetPeer string, conn *outbound) {
+func (t *Transport) dropOutbound(target string, conn *outbound) {
 	t.mu.Lock()
-	if t.outbound[targetPeer] == conn {
-		delete(t.outbound, targetPeer)
+	if t.outbound[target] == conn {
+		delete(t.outbound, target)
 	}
 	t.mu.Unlock()
 
@@ -196,70 +270,113 @@ func (t *Transport) dropOutbound(targetPeer string, conn *outbound) {
 
 func (t *Transport) acceptLoop() {
 	for {
-		conn, err := t.listener.Accept()
+		c, err := t.listener.Accept()
 		if err != nil {
-			slog.Debug("pipe: accept loop stopped", "peer", t.peerName, "error", err)
-			return
+			if errors.Is(err, net.ErrClosed) {
+				slog.Debug("pipe: accept loop stopped", "peer", t.local.Name(), "error", err)
+				return
+			}
+			slog.Warn("pipe: accept failed", "peer", t.local.Name(), "error", err)
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
+		peer, err := t.authenticate(c)
+		if err != nil {
+			slog.Warn(pipeMsg(c.tag(), "authentication failed"), "local", t.local.Name(), "error", err)
+			c.Close()
+			continue
 		}
 		t.mu.Lock()
 		if t.closed {
 			t.mu.Unlock()
-			conn.Close()
+			c.Close()
 			return
 		}
-		t.inbound[conn] = struct{}{}
+		t.inbound[c] = struct{}{}
 		t.mu.Unlock()
-		go t.serve(conn)
+		slog.Debug(pipeMsg(c.tag(), "accepted"), "local", t.local.Name(), "peer", peer.String())
+		go t.serve(c, peer)
 	}
 }
 
-func (t *Transport) serve(conn net.Conn) {
+func (t *Transport) authenticate(c conn) (transport.Peer, error) {
+	if t.auth == nil {
+		return transport.Peer{}, errors.New("transport has no authenticator")
+	}
+	return t.auth.authenticate(c.Handle(), time.Now())
+}
+
+func (t *Transport) serve(c conn, peer transport.Peer) {
 	defer func() {
-		conn.Close()
+		c.Close()
 		t.mu.Lock()
-		delete(t.inbound, conn)
+		delete(t.inbound, c)
 		t.mu.Unlock()
 	}()
 
-	decoder := json.NewDecoder(conn)
+	slog.Debug(pipeMsg(c.tag(), "serve started"), "local", t.local.Name(), "peer", peer.String())
+	decoder := json.NewDecoder(c)
 	for {
 		var env envelope
 		if err := decoder.Decode(&env); err != nil {
+			slog.Debug(pipeMsg(c.tag(), "connection closed"), "local", t.local.Name(), "error", err)
 			return
 		}
-		if env.From == "" {
+		slog.Debug(pipeMsg(c.tag(), "received"), "local", t.local.Name(),
+			"from", env.From, "type", env.Msg.Type, "id", env.Msg.ID, "request_id", env.Msg.RequestID)
+		if env.From != peer.Name() {
+			slog.Warn(pipeMsg(c.tag(), "dropping message with mismatched sender"),
+				"local", t.local.Name(), "from", env.From, "peer", peer.String())
 			continue
 		}
-		if err := t.core.Dispatch(env.From, env.Msg); err != nil {
-			slog.Error("pipe: message handler failed", "peer", t.peerName, "from", env.From, "type", env.Msg.Type, "error", err)
+		if err := t.core.Dispatch(peer, env.Msg); err != nil {
+			slog.Error(pipeMsg(c.tag(), "message handler failed"), "local", t.local.Name(), "from", peer.String(), "type", env.Msg.Type, "error", err)
 		}
 	}
 }
 
-func writeEnvelope(conn net.Conn, env envelope) error {
+func writeEnvelope(w io.Writer, env envelope) error {
 	data, err := json.Marshal(env)
 	if err != nil {
 		return err
 	}
 	data = append(data, '\n')
-	_, err = conn.Write(data)
+	_, err = w.Write(data)
 	return err
 }
 
-func pipeName(peer string) string {
-	switch {
-	case peer == daemonPeer:
+// pipeMsg prefixes a transport log message with a "[client->server]" pid tag.
+func pipeMsg(tag, msg string) string {
+	if tag == "" {
+		return "pipe: " + msg
+	}
+	return fmt.Sprintf("pipe: %s %s", tag, msg)
+}
+
+func pipeName(peer transport.Peer) string {
+	switch peer.Type() {
+	case transport.PeerDaemon:
 		return daemonPipeName
-	case strings.HasPrefix(peer, systemctlPrefix):
-		return controlPipePrefix + strings.TrimPrefix(peer, systemctlPrefix)
+	case transport.PeerControl:
+		return controlPipePrefix + controlSuffix(peer.Name())
 	default:
-		return servicePipePrefix + peer
+		return servicePipePrefix + peer.Name()
 	}
 }
 
-func pipeACLFor(peer string) string {
-	if peer == daemonPeer {
+func pipeACLFor(local transport.Peer) string {
+	if local.Type() == transport.PeerDaemon {
 		return daemonPipeACL
 	}
 	return pipeACL
+}
+
+func controlSuffix(name string) string {
+	if suffix, ok := strings.CutPrefix(name, systemctlUnderscore); ok {
+		return suffix
+	}
+	if suffix, ok := strings.CutPrefix(name, systemctlHyphen); ok {
+		return suffix
+	}
+	return name
 }

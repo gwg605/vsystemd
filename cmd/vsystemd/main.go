@@ -229,8 +229,8 @@ func applyServiceDefaults(service *unit.ServiceUnit, cfg config.Config) {
 	}
 }
 
-func transportFactory(cfg config.Config) func(string, transport.MsgHandler) (transport.Transport, error) {
-	return func(peerName string, handler transport.MsgHandler) (transport.Transport, error) {
-		return pipe.New(cfg.TransportConfig(), peerName, handler)
+func transportFactory(cfg config.Config) func(transport.Peer, transport.MsgHandler) (transport.Transport, error) {
+	return func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
+		return pipe.New(cfg.TransportConfig(), local, handler)
 	}
 }

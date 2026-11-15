@@ -73,7 +73,7 @@ func TestDaemonRestartStateRecovery(t *testing.T) {
 	}
 
 	var runnerTransport *transportfake.Transport
-	runnerTransport = env.network.New(transport.DefaultConfig(), "app.service", func(source string, msg transport.Message) error {
+	runnerTransport = env.network.New(transport.DefaultConfig(), transport.NewPeer(transport.PeerRunner, "app.service", false), func(source transport.Peer, msg transport.Message) error {
 		if msg.Type != runner.MessageStatusRequest {
 			return nil
 		}

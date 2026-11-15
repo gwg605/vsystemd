@@ -17,7 +17,7 @@ import (
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
-type TransportFactory func(peerName string, handler transport.MsgHandler) (transport.Transport, error)
+type TransportFactory func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error)
 
 type Runner struct {
 	name      string
@@ -47,7 +47,7 @@ func NewRunner(name string, service *unit.ServiceUnit, logs *LogStreamer, newTra
 		handler: handler,
 	}
 
-	tr, err := newTransport(name, runner.handle)
+	tr, err := newTransport(transport.NewPeer(transport.PeerRunner, name, false), runner.handle)
 	if err != nil {
 		slog.Error("runner: create transport failed", "unit", name, "error", err)
 		logs.Close()
@@ -65,8 +65,8 @@ func NewRunner(name string, service *unit.ServiceUnit, logs *LogStreamer, newTra
 	return runner, nil
 }
 
-func (r *Runner) handle(sourcePeer string, msg transport.Message) error {
-	return r.reporter.Handle(sourcePeer, msg)
+func (r *Runner) handle(source transport.Peer, msg transport.Message) error {
+	return r.reporter.Handle(source, msg)
 }
 
 func (r *Runner) Run() error {

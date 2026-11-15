@@ -13,75 +13,75 @@ import (
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
-func (d *Daemon) handleTimerEnable(sourcePeer string, msg transport.Message) error {
+func (d *Daemon) handleTimerEnable(source transport.Peer, msg transport.Message) error {
 	var request protocol.TimerRequest
 	if err := json.Unmarshal(msg.Payload, &request); err != nil {
-		return d.respondError(sourcePeer, msg.ID, err)
+		return d.respondError(source, msg.ID, err)
 	}
 	if err := d.validateTimer(request.Unit); err != nil {
-		return d.respondError(sourcePeer, msg.ID, err)
+		return d.respondError(source, msg.ID, err)
 	}
 	slog.Info("daemon: timer enable", "unit", request.Unit, "enabled", request.Enabled)
 
 	state, err := d.store.ReadTimerState(request.Unit)
 	if err != nil {
-		return d.respondError(sourcePeer, msg.ID, err)
+		return d.respondError(source, msg.ID, err)
 	}
 	state.Enabled = request.Enabled
 	if err := d.store.WriteTimerState(request.Unit, state); err != nil {
-		return d.respondError(sourcePeer, msg.ID, err)
+		return d.respondError(source, msg.ID, err)
 	}
 
 	response, err := d.timerResult(request.Unit)
 	if err != nil {
-		return d.respondError(sourcePeer, msg.ID, err)
+		return d.respondError(source, msg.ID, err)
 	}
-	return d.respond(sourcePeer, protocol.TypeTimerResult, msg.ID, response)
+	return d.respond(source, protocol.TypeTimerResult, msg.ID, response)
 }
 
-func (d *Daemon) handleTimerStart(sourcePeer string, msg transport.Message) error {
+func (d *Daemon) handleTimerStart(source transport.Peer, msg transport.Message) error {
 	var request protocol.TimerRequest
 	if err := json.Unmarshal(msg.Payload, &request); err != nil {
-		return d.respondError(sourcePeer, msg.ID, err)
+		return d.respondError(source, msg.ID, err)
 	}
 
 	definition, err := d.timerDefinition(request.Unit)
 	if err != nil {
-		return d.respondError(sourcePeer, msg.ID, err)
+		return d.respondError(source, msg.ID, err)
 	}
 	slog.Info("daemon: timer start", "unit", request.Unit, "service", definition.Service)
 	if !d.sched.Has(definition.Name) {
 		if err := d.sched.Add(definition); err != nil {
-			return d.respondError(sourcePeer, msg.ID, err)
+			return d.respondError(source, msg.ID, err)
 		}
 	}
 
 	response, err := d.timerResult(request.Unit)
 	if err != nil {
-		return d.respondError(sourcePeer, msg.ID, err)
+		return d.respondError(source, msg.ID, err)
 	}
-	return d.respond(sourcePeer, protocol.TypeTimerResult, msg.ID, response)
+	return d.respond(source, protocol.TypeTimerResult, msg.ID, response)
 }
 
-func (d *Daemon) handleTimerStop(sourcePeer string, msg transport.Message) error {
+func (d *Daemon) handleTimerStop(source transport.Peer, msg transport.Message) error {
 	var request protocol.TimerRequest
 	if err := json.Unmarshal(msg.Payload, &request); err != nil {
-		return d.respondError(sourcePeer, msg.ID, err)
+		return d.respondError(source, msg.ID, err)
 	}
 	if err := d.validateTimer(request.Unit); err != nil {
-		return d.respondError(sourcePeer, msg.ID, err)
+		return d.respondError(source, msg.ID, err)
 	}
 	slog.Info("daemon: timer stop", "unit", request.Unit)
 
 	if err := d.sched.Stop(request.Unit); err != nil {
-		return d.respondError(sourcePeer, msg.ID, err)
+		return d.respondError(source, msg.ID, err)
 	}
 
 	response, err := d.timerResult(request.Unit)
 	if err != nil {
-		return d.respondError(sourcePeer, msg.ID, err)
+		return d.respondError(source, msg.ID, err)
 	}
-	return d.respond(sourcePeer, protocol.TypeTimerResult, msg.ID, response)
+	return d.respond(source, protocol.TypeTimerResult, msg.ID, response)
 }
 
 func (d *Daemon) timerResult(name string) (protocol.TimerResult, error) {

@@ -24,15 +24,15 @@ func (l *link) add(name string, core *Core) {
 	l.cores[name] = core
 }
 
-func (l *link) sender(from string) SendFunc {
-	return func(target string, msg Message, _ ...Opt) error {
+func (l *link) sender(local Peer) SendFunc {
+	return func(target Peer, msg Message, _ ...Opt) error {
 		l.mu.Lock()
-		core := l.cores[target]
+		core := l.cores[target.Name()]
 		l.mu.Unlock()
 		if core == nil {
-			return fmt.Errorf("unknown peer %s", target)
+			return fmt.Errorf("unknown peer %s", target.Name())
 		}
-		return core.Dispatch(from, msg)
+		return core.Dispatch(local, msg)
 	}
 }
 
@@ -40,14 +40,14 @@ func newEchoPair(t *testing.T) (*Core, *Core) {
 	t.Helper()
 	l := newLink()
 	var responder *Core
-	responder = NewCore(DefaultConfig(), func(source string, msg Message) error {
+	responder = NewCore(DefaultConfig(), func(source Peer, msg Message) error {
 		return responder.Send(source, Message{
 			Type:      "pong",
 			RequestID: msg.ID,
 			Payload:   msg.Payload,
 		})
-	}, l.sender("b"))
-	requester := NewCore(DefaultConfig(), nil, l.sender("a"))
+	}, l.sender(NewPeer(PeerRunner, "b", false)))
+	requester := NewCore(DefaultConfig(), nil, l.sender(NewPeer(PeerRunner, "a", false)))
 	l.add("a", requester)
 	l.add("b", responder)
 	t.Cleanup(func() {
@@ -60,7 +60,7 @@ func newEchoPair(t *testing.T) (*Core, *Core) {
 func TestRequest(t *testing.T) {
 	requester, _ := newEchoPair(t)
 
-	resp, err := requester.Request("b", Message{
+	resp, err := requester.Request(NewPeer(PeerRunner, "b", false), Message{
 		Type:    "ping",
 		Payload: json.RawMessage(`{"n":1}`),
 	})
@@ -89,7 +89,7 @@ func TestConcurrentRequests(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			payload := fmt.Sprintf(`{"n":%d}`, n)
-			resp, err := requester.Request("b", Message{
+			resp, err := requester.Request(NewPeer(PeerRunner, "b", false), Message{
 				Type:    "ping",
 				Payload: json.RawMessage(payload),
 			})
@@ -111,10 +111,10 @@ func TestConcurrentRequests(t *testing.T) {
 
 func TestRequestTimeout(t *testing.T) {
 	l := newLink()
-	responder := NewCore(DefaultConfig(), func(string, Message) error {
+	responder := NewCore(DefaultConfig(), func(Peer, Message) error {
 		return nil
-	}, l.sender("b"))
-	requester := NewCore(DefaultConfig(), nil, l.sender("a"))
+	}, l.sender(NewPeer(PeerRunner, "b", false)))
+	requester := NewCore(DefaultConfig(), nil, l.sender(NewPeer(PeerRunner, "a", false)))
 	l.add("a", requester)
 	l.add("b", responder)
 	t.Cleanup(func() {
@@ -122,21 +122,43 @@ func TestRequestTimeout(t *testing.T) {
 		responder.Close()
 	})
 
-	_, err := requester.Request("b", Message{Type: "ping"}, WithTimeout(50*time.Millisecond))
+	_, err := requester.Request(NewPeer(PeerRunner, "b", false), Message{Type: "ping"}, WithTimeout(50*time.Millisecond))
 	if err == nil {
 		t.Fatal("Request() error = nil")
 	}
 }
 
+func TestResponseFromWrongPeerDropped(t *testing.T) {
+	l := newLink()
+	requester := NewCore(DefaultConfig(), nil, l.sender(NewPeer(PeerRunner, "a", false)))
+	l.add("a", requester)
+	t.Cleanup(requester.Close)
+
+	// A response whose source does not match the request target must be dropped.
+	requester.mu.Lock()
+	response := make(chan Message, 1)
+	requester.pending["req-1"] = &pendingRequest{expected: NewPeer(PeerRunner, "b", false), response: response}
+	requester.mu.Unlock()
+
+	if err := requester.Dispatch(NewPeer(PeerRunner, "c", false), Message{RequestID: "req-1", Type: "pong"}); err != nil {
+		t.Fatalf("Dispatch() error = %v", err)
+	}
+	select {
+	case <-response:
+		t.Error("response from wrong peer was delivered")
+	default:
+	}
+}
+
 func TestSendAssignsID(t *testing.T) {
 	var sent Message
-	core := NewCore(DefaultConfig(), nil, func(_ string, msg Message, _ ...Opt) error {
+	core := NewCore(DefaultConfig(), nil, func(_ Peer, msg Message, _ ...Opt) error {
 		sent = msg
 		return nil
 	})
 	t.Cleanup(core.Close)
 
-	if err := core.Send("peer", Message{Type: "state_event"}); err != nil {
+	if err := core.Send(NewPeer(PeerRunner, "peer", false), Message{Type: "state_event"}); err != nil {
 		t.Fatalf("Send() error = %v", err)
 	}
 	first := sent.ID
@@ -144,7 +166,7 @@ func TestSendAssignsID(t *testing.T) {
 		t.Fatal("Send() did not assign an id")
 	}
 
-	if err := core.Send("peer", Message{Type: "state_event"}); err != nil {
+	if err := core.Send(NewPeer(PeerRunner, "peer", false), Message{Type: "state_event"}); err != nil {
 		t.Fatalf("Send() error = %v", err)
 	}
 	if sent.ID == first {
@@ -152,16 +174,31 @@ func TestSendAssignsID(t *testing.T) {
 	}
 }
 
+func TestTargetDefaultsDaemonName(t *testing.T) {
+	core := NewCore(DefaultConfig(), nil, func(Peer, Message, ...Opt) error { return nil })
+	t.Cleanup(core.Close)
+
+	daemon := core.Target(PeerDaemon)
+	if daemon.Type() != PeerDaemon || daemon.Name() != PeerDaemonName || !daemon.Valid() {
+		t.Errorf("Target(PeerDaemon) = %+v", daemon)
+	}
+
+	runner := core.Target(PeerRunner, WithName("app.service"))
+	if runner.Type() != PeerRunner || runner.Name() != "app.service" || !runner.Valid() {
+		t.Errorf("Target(PeerRunner) = %+v", runner)
+	}
+}
+
 func TestClose(t *testing.T) {
-	core := NewCore(DefaultConfig(), nil, func(string, Message, ...Opt) error {
+	core := NewCore(DefaultConfig(), nil, func(Peer, Message, ...Opt) error {
 		return nil
 	})
 	core.Close()
 
-	if err := core.Send("peer", Message{Type: "state_event"}); !errors.Is(err, ErrClosed) {
+	if err := core.Send(NewPeer(PeerRunner, "peer", false), Message{Type: "state_event"}); !errors.Is(err, ErrClosed) {
 		t.Errorf("Send() error = %v", err)
 	}
-	if _, err := core.Request("peer", Message{Type: "status_request"}); !errors.Is(err, ErrClosed) {
+	if _, err := core.Request(NewPeer(PeerRunner, "peer", false), Message{Type: "status_request"}); !errors.Is(err, ErrClosed) {
 		t.Errorf("Request() error = %v", err)
 	}
 }

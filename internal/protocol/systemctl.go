@@ -6,8 +6,6 @@ import (
 	"github.com/gwg605/vsystemd/internal/scm"
 )
 
-const DaemonPeer = "daemon"
-
 const (
 	TypeStatusRequest     = "status_request"
 	TypeStatusResponse    = "status_response"
