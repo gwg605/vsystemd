@@ -51,6 +51,7 @@ type Transport struct {
 	core     *transport.Core
 	listener *pipeListener
 	auth     authenticator
+	verify   serverVerifier
 
 	mu       sync.Mutex
 	outbound map[string]*outbound
@@ -65,10 +66,10 @@ type outbound struct {
 }
 
 func New(config transport.Config, local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
-	return newWithAuth(config, local, handler, authenticatorFor(local))
+	return newTransport(config, local, handler, authenticatorFor(local), pipeServerVerifier{})
 }
 
-func newWithAuth(config transport.Config, local transport.Peer, handler transport.MsgHandler, auth authenticator) (transport.Transport, error) {
+func newTransport(config transport.Config, local transport.Peer, handler transport.MsgHandler, auth authenticator, verify serverVerifier) (transport.Transport, error) {
 	config = config.WithDefaults()
 	listener, err := listenPipe(pipeName(local), pipeACLFor(local))
 	if err != nil {
@@ -80,6 +81,7 @@ func newWithAuth(config transport.Config, local transport.Peer, handler transpor
 		config:   config,
 		listener: listener,
 		auth:     auth,
+		verify:   verify,
 		outbound: make(map[string]*outbound),
 		inbound:  make(map[conn]struct{}),
 	}
@@ -174,6 +176,12 @@ func (t *Transport) outboundFor(target transport.Peer, opts ...transport.Opt) (*
 	conn, err := dialPipe(pipeName(target), timeout)
 	if err != nil {
 		return nil, fmt.Errorf("connect to %s: %w", target, err)
+	}
+	if err := t.verify.verify(target, conn.serverPID); err != nil {
+		slog.Warn(pipeMsg(conn.tag(), "server rejected"),
+			"local", t.local.Name(), "target", target.String(), "error", err)
+		conn.Close()
+		return nil, fmt.Errorf("verify server for %s: %w", target, err)
 	}
 	slog.Debug(pipeMsg(conn.tag(), "dialed"), "local", t.local.Name(), "to", target.String(), "pipe", pipeName(target))
 
