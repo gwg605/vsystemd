@@ -4,6 +4,7 @@ package pipe
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -18,20 +19,38 @@ import (
 // errnoPipeClosing is ERROR_PIPE_CLOSING.
 const errnoPipeClosing = syscall.Errno(230)
 
-// conn is the minimal inbound stream interface. serverConn also exposes the
-// underlying pipe handle so a later phase can authenticate the client.
+// conn is the inbound/outbound pipe stream. It exposes the pipe handle and a
+// "[client->server]" pid tag for logging.
 type conn interface {
 	io.Reader
 	io.Writer
 	io.Closer
+	Handle() windows.Handle
+	tag() string
 }
 
-type serverConn struct {
-	handle windows.Handle
+type pipeConn struct {
+	handle    windows.Handle
+	clientPID int
+	serverPID int
 	io.ReadWriteCloser
 }
 
-func (c *serverConn) Handle() windows.Handle { return c.handle }
+func newPipeConn(handle windows.Handle, rwc io.ReadWriteCloser) *pipeConn {
+	c := &pipeConn{handle: handle, ReadWriteCloser: rwc}
+	var pid uint32
+	if windows.GetNamedPipeClientProcessId(handle, &pid) == nil {
+		c.clientPID = int(pid)
+	}
+	if windows.GetNamedPipeServerProcessId(handle, &pid) == nil {
+		c.serverPID = int(pid)
+	}
+	return c
+}
+
+func (c *pipeConn) Handle() windows.Handle { return c.handle }
+
+func (c *pipeConn) tag() string { return fmt.Sprintf("[%d->%d]", c.clientPID, c.serverPID) }
 
 // pipeListener is a small Windows named-pipe server that exposes the handle of
 // every accepted connection (go-winio's listener hides it).
@@ -189,7 +208,6 @@ func (l *pipeListener) acceptOne() (conn, error) {
 	}
 
 	l.clearConnecting(h)
-	slog.Debug("pipe: connected", "path", l.path, "handle", uintptr(h))
 
 	// Reserve the next instance before serving this one so the pipe name stays
 	// available for subsequent clients.
@@ -211,7 +229,9 @@ func (l *pipeListener) acceptOne() (conn, error) {
 		windows.CloseHandle(h)
 		return nil, err
 	}
-	return &serverConn{handle: h, ReadWriteCloser: file}, nil
+	c := newPipeConn(h, file)
+	slog.Debug(pipeMsg(c.tag(), "connected"), "path", l.path)
+	return c, nil
 }
 
 func (l *pipeListener) clearConnecting(h windows.Handle) {
