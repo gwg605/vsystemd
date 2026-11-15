@@ -14,7 +14,7 @@ func TestDaemonControlEcho(t *testing.T) {
 	t.Cleanup(func() { daemonPipeName = old })
 
 	var daemon transport.Transport
-	daemon, err := newWithAuth(transport.DefaultConfig(), transport.NewPeer(transport.PeerDaemon, "daemon", false), func(source transport.Peer, msg transport.Message) error {
+	daemon, err := newTestTransport(transport.DefaultConfig(), transport.NewPeer(transport.PeerDaemon, "daemon", false), func(source transport.Peer, msg transport.Message) error {
 		return daemon.Send(source, transport.Message{Type: "pong", RequestID: msg.ID, Payload: msg.Payload})
 	}, fixedAuth{transport.NewPeer(transport.PeerControl, "systemctl_1", true)})
 	if err != nil {
@@ -22,7 +22,7 @@ func TestDaemonControlEcho(t *testing.T) {
 	}
 	defer daemon.Close()
 
-	control, err := newWithAuth(transport.DefaultConfig(), transport.NewPeer(transport.PeerControl, "systemctl_1", false), nil,
+	control, err := newTestTransport(transport.DefaultConfig(), transport.NewPeer(transport.PeerControl, "systemctl_1", false), nil,
 		fixedAuth{transport.NewPeer(transport.PeerDaemon, "daemon", false)})
 	if err != nil {
 		t.Fatalf("control New: %v", err)

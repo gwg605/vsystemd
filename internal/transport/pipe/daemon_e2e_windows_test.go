@@ -30,14 +30,14 @@ func TestDaemonRealHandlerOverPipe(t *testing.T) {
 
 	d, err := daemon.New(manager, store, `C:\vsystemd\vsystemd.exe`, t.TempDir(), logwriter.Rotation{},
 		func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
-			return newWithAuth(transport.DefaultConfig(), local, handler, fixedAuth{controlPeer})
+			return newTestTransport(transport.DefaultConfig(), local, handler, fixedAuth{controlPeer})
 		})
 	if err != nil {
 		t.Fatalf("daemon.New: %v", err)
 	}
 	t.Cleanup(func() { d.Close() })
 
-	control, err := newWithAuth(transport.DefaultConfig(), transport.NewPeer(transport.PeerControl, controlName, false), nil,
+	control, err := newTestTransport(transport.DefaultConfig(), transport.NewPeer(transport.PeerControl, controlName, false), nil,
 		fixedAuth{transport.NewPeer(transport.PeerDaemon, transport.PeerDaemonName, false)})
 	if err != nil {
 		t.Fatalf("control New: %v", err)

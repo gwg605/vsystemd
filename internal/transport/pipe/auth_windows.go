@@ -5,6 +5,7 @@ package pipe
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unsafe"
@@ -15,8 +16,12 @@ import (
 	"github.com/gwg605/vsystemd/internal/transport"
 )
 
-// maxSIDSize is SECURITY_MAX_SID_SIZE.
-const maxSIDSize = 68
+const (
+	// maxSIDSize is SECURITY_MAX_SID_SIZE.
+	maxSIDSize = 68
+	// daemonServiceName is the SCM name of the daemon service.
+	daemonServiceName = "vsystemd"
+)
 
 // authenticator verifies the OS identity of an inbound connection and returns
 // the trusted peer for it.
@@ -106,6 +111,69 @@ func (daemonOnlyAuthenticator) authenticate(handle windows.Handle, acceptTime ti
 	return transport.NewPeer(transport.PeerDaemon, transport.PeerDaemonName, false), nil
 }
 
+// serverVerifier verifies the process on the server end of an outbound pipe so
+// that a squatter on the pipe name cannot impersonate a peer.
+type serverVerifier interface {
+	verify(target transport.Peer, serverPID int) error
+}
+
+type pipeServerVerifier struct{}
+
+func (pipeServerVerifier) verify(target transport.Peer, serverPID int) error {
+	if serverPID <= 0 {
+		return errors.New("server pid is unavailable")
+	}
+	pid := uint32(serverPID)
+	switch target.Type() {
+	case transport.PeerControl:
+		expected, ok := controlPID(target.Name())
+		if !ok {
+			return fmt.Errorf("invalid control peer %q", target.Name())
+		}
+		if expected != pid {
+			return fmt.Errorf("control pipe server pid %d, want %d", pid, expected)
+		}
+	case transport.PeerRunner:
+		name, isService, err := serviceNameByPID(pid)
+		if err != nil {
+			return fmt.Errorf("resolve server service: %w", err)
+		}
+		if !isService || name+".service" != target.Name() {
+			return fmt.Errorf("runner pipe server is not service %s", target.Name())
+		}
+		info, err := resolveProcess(pid)
+		if err != nil {
+			return err
+		}
+		defer info.close()
+		if _, err := info.verifyRunner(name); err != nil {
+			return err
+		}
+	case transport.PeerDaemon:
+		info, err := resolveProcess(pid)
+		if err != nil {
+			return fmt.Errorf("resolve daemon server: %w", err)
+		}
+		defer info.close()
+		if !info.isSystem && !info.elevated {
+			return errors.New("daemon pipe server is not the daemon")
+		}
+	default:
+		return fmt.Errorf("unsupported target %s", target)
+	}
+	return nil
+}
+
+// controlPID extracts the process id encoded in a control peer name
+// ("systemctl_<pid>").
+func controlPID(name string) (uint32, bool) {
+	pid, err := strconv.ParseUint(controlSuffix(name), 10, 32)
+	if err != nil {
+		return 0, false
+	}
+	return uint32(pid), true
+}
+
 type clientInfo struct {
 	pid       uint32
 	proc      windows.Handle
@@ -114,6 +182,7 @@ type clientInfo struct {
 	imagePath string
 	elevated  bool
 	isSystem  bool
+	created   windows.Filetime
 }
 
 func (c *clientInfo) close() {
@@ -130,20 +199,30 @@ func resolveClient(handle windows.Handle, acceptTime time.Time) (*clientInfo, er
 	if err := windows.GetNamedPipeClientProcessId(handle, &pid); err != nil {
 		return nil, fmt.Errorf("client pid: %w", err)
 	}
+	info, err := resolveProcess(pid)
+	if err != nil {
+		return nil, err
+	}
+	if info.created.Nanoseconds() >= acceptTime.UnixNano() {
+		info.close()
+		return nil, errors.New("process created after the connection (possible pid reuse)")
+	}
+	return info, nil
+}
+
+// resolveProcess opens a process and gathers its identity: image path, token
+// SID, elevation and system-ness.
+func resolveProcess(pid uint32) (*clientInfo, error) {
 	proc, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
 	if err != nil {
 		return nil, fmt.Errorf("open process %d: %w", pid, err)
 	}
 	info := &clientInfo{pid: pid, proc: proc}
 
-	var creation, exit, kernel, user windows.Filetime
-	if err := windows.GetProcessTimes(proc, &creation, &exit, &kernel, &user); err != nil {
+	var exit, kernel, user windows.Filetime
+	if err := windows.GetProcessTimes(proc, &info.created, &exit, &kernel, &user); err != nil {
 		info.close()
 		return nil, fmt.Errorf("process times: %w", err)
-	}
-	if creation.Nanoseconds() >= acceptTime.UnixNano() {
-		info.close()
-		return nil, errors.New("process created after the connection (possible pid reuse)")
 	}
 
 	if info.imagePath, err = processImagePath(proc); err != nil {
