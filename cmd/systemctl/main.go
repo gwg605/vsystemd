@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,14 +31,35 @@ type unitCommand struct {
 }
 
 func main() {
+	configureLogging("none")
 	if err := run(os.Args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
+// configureLogging enables diagnostic logging to stdout or stderr. The default
+// "none" discards all logs.
+func configureLogging(target string) {
+	var out io.Writer
+	switch target {
+	case "stdout":
+		out = os.Stdout
+	case "stderr":
+		out = os.Stderr
+	default:
+		out = io.Discard
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{Level: slog.LevelDebug})))
+}
+
 func run(args []string) error {
 	parser := argparse.NewParser("systemctl", "Control vsystemd units")
+
+	logTarget := parser.Selector("", "log", []string{"none", "stdout", "stderr"}, &argparse.Options{
+		Default: "none",
+		Help:    "enable diagnostic logging",
+	})
 
 	enableCmd := parser.NewCommand("enable", "Enable unit")
 	enableUnit := enableCmd.StringPositional(&argparse.Options{Help: "unit name"})
@@ -57,6 +80,8 @@ func run(args []string) error {
 	if err := parser.Parse(args); err != nil {
 		return errors.New(parser.Usage(err))
 	}
+
+	configureLogging(*logTarget)
 
 	if versionCmd.Happened() {
 		fmt.Printf("systemctl %s\n%s\n", vsystemd.Version, vsystemd.FeatureFlags)
@@ -327,8 +352,8 @@ func daemonReloadCommand() error {
 }
 
 func daemonRequest(cfg config.Config, msgType string, payload any) (transport.Message, error) {
-	peerName := fmt.Sprintf("systemctl-%d", os.Getpid())
-	tr, err := pipe.New(cfg.TransportConfig(), peerName, nil)
+	local := transport.NewPeer(transport.PeerControl, fmt.Sprintf("systemctl_%d", os.Getpid()), false)
+	tr, err := pipe.New(cfg.TransportConfig(), local, nil)
 	if err != nil {
 		return transport.Message{}, fmt.Errorf("create transport: %w", err)
 	}
@@ -343,10 +368,13 @@ func daemonRequest(cfg config.Config, msgType string, payload any) (transport.Me
 		raw = data
 	}
 
-	response, err := tr.Req(protocol.DaemonPeer, transport.Message{Type: msgType, Payload: raw})
+	slog.Debug("systemctl: sending request", "type", msgType, "local", local.String())
+	response, err := tr.Req(tr.Target(transport.PeerDaemon), transport.Message{Type: msgType, Payload: raw})
 	if err != nil {
+		slog.Error("systemctl: request failed", "type", msgType, "error", err)
 		return transport.Message{}, fmt.Errorf("daemon is not available: %w", err)
 	}
+	slog.Debug("systemctl: response received", "type", response.Type, "request_id", response.RequestID)
 	return response, nil
 }
 

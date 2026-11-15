@@ -18,7 +18,7 @@ import (
 
 const daemonPeer = "daemon"
 
-type TransportFactory func(peerName string, handler transport.MsgHandler) (transport.Transport, error)
+type TransportFactory func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error)
 
 type Daemon struct {
 	manager     scm.Manager
@@ -57,7 +57,7 @@ func New(manager scm.Manager, store storage.Storage, binaryPath, logsDir string,
 		cleanupStop: make(chan struct{}),
 		cleanupDone: make(chan struct{}),
 	}
-	tr, err := newTransport(daemonPeer, daemon.handle)
+	tr, err := newTransport(transport.NewPeer(transport.PeerDaemon, daemonPeer, false), daemon.handle)
 	if err != nil {
 		slog.Error("daemon: create transport failed", "error", err)
 		return nil, fmt.Errorf("create transport: %w", err)

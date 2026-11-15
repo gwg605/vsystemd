@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -14,35 +15,74 @@ import (
 	"github.com/gwg605/vsystemd/internal/transport"
 )
 
-func (d *Daemon) handle(sourcePeer string, msg transport.Message) error {
-	slog.Debug("daemon: message received", "from", sourcePeer, "type", msg.Type)
+func (d *Daemon) handle(source transport.Peer, msg transport.Message) error {
+	slog.Debug("daemon: message received", "from", source.String(), "type", msg.Type)
 	switch msg.Type {
 	case runner.MessageStateEvent:
-		var event runner.StateEvent
-		if err := json.Unmarshal(msg.Payload, &event); err != nil {
-			slog.Error("daemon: decode state event failed", "from", sourcePeer, "error", err)
-			return fmt.Errorf("decode state event: %w", err)
-		}
-		if event.Unit == "" {
-			event.Unit = sourcePeer
-		}
-		d.updateFromEvent(event)
-		return nil
+		return d.handleStateEvent(source, msg)
 	case protocol.TypeStatusRequest:
-		return d.handleStatusRequest(sourcePeer, msg)
+		if err := authorizeControl(source); err != nil {
+			return d.respondError(source, msg.ID, err)
+		}
+		return d.handleStatusRequest(source, msg)
 	case protocol.TypeDaemonReload:
-		return d.handleDaemonReload(sourcePeer, msg)
+		if err := authorizeControl(source); err != nil {
+			return d.respondError(source, msg.ID, err)
+		}
+		return d.handleDaemonReload(source, msg)
 	case protocol.TypeListUnits:
-		return d.handleListUnits(sourcePeer, msg)
+		if err := authorizeControl(source); err != nil {
+			return d.respondError(source, msg.ID, err)
+		}
+		return d.handleListUnits(source, msg)
 	case protocol.TypeTimerEnable:
-		return d.handleTimerEnable(sourcePeer, msg)
+		if err := authorizeControl(source); err != nil {
+			return d.respondError(source, msg.ID, err)
+		}
+		return d.handleTimerEnable(source, msg)
 	case protocol.TypeTimerStart:
-		return d.handleTimerStart(sourcePeer, msg)
+		if err := authorizeControl(source); err != nil {
+			return d.respondError(source, msg.ID, err)
+		}
+		return d.handleTimerStart(source, msg)
 	case protocol.TypeTimerStop:
-		return d.handleTimerStop(sourcePeer, msg)
+		if err := authorizeControl(source); err != nil {
+			return d.respondError(source, msg.ID, err)
+		}
+		return d.handleTimerStop(source, msg)
 	default:
 		return nil
 	}
+}
+
+// authorizeControl requires a control peer with administrative rights.
+func authorizeControl(source transport.Peer) error {
+	if source.Type() != transport.PeerControl {
+		return fmt.Errorf("forbidden: %s is not a control peer", source)
+	}
+	if !source.Elevated() {
+		return errors.New("forbidden: control operation requires elevation")
+	}
+	return nil
+}
+
+func (d *Daemon) handleStateEvent(source transport.Peer, msg transport.Message) error {
+	if source.Type() != transport.PeerRunner {
+		return fmt.Errorf("forbidden: state event from %s", source)
+	}
+	var event runner.StateEvent
+	if err := json.Unmarshal(msg.Payload, &event); err != nil {
+		slog.Error("daemon: decode state event failed", "from", source.String(), "error", err)
+		return fmt.Errorf("decode state event: %w", err)
+	}
+	if event.Unit == "" {
+		event.Unit = source.Name()
+	}
+	if event.Unit != source.Name() {
+		return fmt.Errorf("forbidden: state event for %q from %q", event.Unit, source.Name())
+	}
+	d.updateFromEvent(event)
+	return nil
 }
 
 func (d *Daemon) requestRunnerStates() error {
@@ -61,9 +101,10 @@ func (d *Daemon) requestRunnerStates() error {
 		go func(unit string) {
 			defer wg.Done()
 
-			response, err := d.transport.Req(unit, transport.Message{
-				Type: runner.MessageStatusRequest,
-			})
+			response, err := d.transport.Req(
+				d.transport.Target(transport.PeerRunner, transport.WithName(unit)),
+				transport.Message{Type: runner.MessageStatusRequest},
+			)
 			if err != nil {
 				slog.Debug("daemon: runner state request failed", "unit", unit, "error", err)
 				return
