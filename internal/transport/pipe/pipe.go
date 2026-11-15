@@ -10,10 +10,17 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Microsoft/go-winio"
 	"github.com/gwg605/vsystemd/internal/transport"
+)
+
+// errnoFileNotFound is ERROR_FILE_NOT_FOUND and errnoPipeBusy is ERROR_PIPE_BUSY.
+const (
+	errnoFileNotFound = syscall.Errno(2)
+	errnoPipeBusy     = syscall.Errno(231)
 )
 
 const (
@@ -161,7 +168,7 @@ func (t *Transport) outboundFor(target transport.Peer, opts ...transport.Opt) (*
 	if options.ConnectTimeout > 0 {
 		timeout = options.ConnectTimeout
 	}
-	conn, err := winio.DialPipe(pipeName(target), &timeout)
+	conn, err := dialPipe(pipeName(target), timeout)
 	if err != nil {
 		return nil, fmt.Errorf("connect to %s: %w", target, err)
 	}
@@ -170,6 +177,39 @@ func (t *Transport) outboundFor(target transport.Peer, opts ...transport.Opt) (*
 	out := &outbound{conn: conn}
 	t.outbound[target.Name()] = out
 	return out, nil
+}
+
+// dialPipe connects to a named pipe, retrying until timeout while the server is
+// momentarily between pipe instances (ERROR_FILE_NOT_FOUND) or busy.
+func dialPipe(path string, timeout time.Duration) (net.Conn, error) {
+	deadline := time.Now().Add(timeout)
+	attempt := 100 * time.Millisecond
+	for {
+		conn, err := winio.DialPipe(path, &attempt)
+		if err == nil {
+			return conn, nil
+		}
+		if time.Now().After(deadline) || !isRetryableDialError(err) {
+			return nil, err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func isRetryableDialError(err error) bool {
+	if errors.Is(err, winio.ErrTimeout) {
+		return true
+	}
+	var errno syscall.Errno
+	if !errors.As(err, &errno) {
+		return false
+	}
+	switch errno {
+	case errnoFileNotFound, errnoPipeBusy:
+		return true
+	default:
+		return false
+	}
 }
 
 func (t *Transport) resetIdle(target string, conn *outbound) {
@@ -213,8 +253,13 @@ func (t *Transport) acceptLoop() {
 	for {
 		c, err := t.listener.Accept()
 		if err != nil {
-			slog.Debug("pipe: accept loop stopped", "peer", t.local.Name(), "error", err)
-			return
+			if errors.Is(err, net.ErrClosed) {
+				slog.Debug("pipe: accept loop stopped", "peer", t.local.Name(), "error", err)
+				return
+			}
+			slog.Warn("pipe: accept failed", "peer", t.local.Name(), "error", err)
+			time.Sleep(10 * time.Millisecond)
+			continue
 		}
 		peer, err := t.authenticate(c)
 		if err != nil {

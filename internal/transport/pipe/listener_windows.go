@@ -8,11 +8,15 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"syscall"
 	"unsafe"
 
 	"github.com/Microsoft/go-winio"
 	"golang.org/x/sys/windows"
 )
+
+// errnoPipeClosing is ERROR_PIPE_CLOSING.
+const errnoPipeClosing = syscall.Errno(230)
 
 // conn is the minimal inbound stream interface. serverConn also exposes the
 // underlying pipe handle so a later phase can authenticate the client.
@@ -85,6 +89,38 @@ func (l *pipeListener) newInstance() (windows.Handle, error) {
 }
 
 func (l *pipeListener) Accept() (conn, error) {
+	for {
+		c, err := l.acceptOne()
+		if err == nil {
+			return c, nil
+		}
+		if errors.Is(err, net.ErrClosed) {
+			return nil, err
+		}
+		if isTransientConnectError(err) {
+			slog.Debug("pipe: retrying accept after transient connect error", "path", l.path, "error", err)
+			continue
+		}
+		return nil, err
+	}
+}
+
+// isTransientConnectError reports connect errors caused by a client that
+// connected and disconnected before the server completed ConnectNamedPipe.
+func isTransientConnectError(err error) bool {
+	var errno syscall.Errno
+	if !errors.As(err, &errno) {
+		return false
+	}
+	switch errno {
+	case errnoPipeClosing, windows.ERROR_NO_DATA, windows.ERROR_IO_INCOMPLETE:
+		return true
+	default:
+		return false
+	}
+}
+
+func (l *pipeListener) acceptOne() (conn, error) {
 	l.mu.Lock()
 	if l.closed {
 		l.mu.Unlock()
@@ -131,13 +167,8 @@ func (l *pipeListener) Accept() (conn, error) {
 		if closed {
 			_ = windows.CancelIoEx(h, overlapped)
 		}
-		if _, waitErr := windows.WaitForSingleObject(event, windows.INFINITE); waitErr != nil {
-			l.clearConnecting(h)
-			windows.CloseHandle(h)
-			return nil, waitErr
-		}
 		var done uint32
-		if resultErr := windows.GetOverlappedResult(h, overlapped, &done, false); resultErr != nil {
+		if resultErr := windows.GetOverlappedResult(h, overlapped, &done, true); resultErr != nil {
 			l.clearConnecting(h)
 			windows.CloseHandle(h)
 			if errors.Is(resultErr, windows.ERROR_OPERATION_ABORTED) {
@@ -154,7 +185,6 @@ func (l *pipeListener) Accept() (conn, error) {
 		if closed {
 			return nil, net.ErrClosed
 		}
-		slog.Warn("pipe: connect failed", "path", l.path, "error", err)
 		return nil, err
 	}
 
@@ -173,7 +203,7 @@ func (l *pipeListener) Accept() (conn, error) {
 			l.mu.Unlock()
 		}
 	} else {
-		slog.Debug("pipe: pre-create instance failed", "path", l.path, "error", nextErr)
+		slog.Warn("pipe: pre-create instance failed", "path", l.path, "error", nextErr)
 	}
 
 	file, err := winio.NewOpenFile(h)
