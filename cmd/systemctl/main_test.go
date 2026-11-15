@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gwg605/vsystemd/internal/unit"
@@ -30,7 +31,7 @@ func TestPasswordRequired(t *testing.T) {
 }
 
 func TestResolvePasswordProvided(t *testing.T) {
-	password, err := resolvePassword(`CONTOSO\alice`, "secret")
+	password, err := resolvePassword(`CONTOSO\alice`, "secret", "", false)
 	if err != nil {
 		t.Fatalf("resolvePassword() error = %v", err)
 	}
@@ -38,11 +39,44 @@ func TestResolvePasswordProvided(t *testing.T) {
 		t.Errorf("password = %q", password)
 	}
 
-	password, err = resolvePassword("LocalSystem", "")
+	password, err = resolvePassword("LocalSystem", "", "", false)
 	if err != nil {
 		t.Fatalf("resolvePassword() error = %v", err)
 	}
 	if password != "" {
+		t.Errorf("password = %q", password)
+	}
+}
+
+func TestResolvePasswordConflict(t *testing.T) {
+	if _, err := resolvePassword(`CONTOSO\alice`, "secret", "file", false); err == nil {
+		t.Error("expected error for --password with --password-file")
+	}
+	if _, err := resolvePassword(`CONTOSO\alice`, "", "file", true); err == nil {
+		t.Error("expected error for --password-file with --password-stdin")
+	}
+}
+
+func TestResolvePasswordFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pw.txt")
+	if err := os.WriteFile(path, []byte("secret\r\n"), 0o600); err != nil {
+		t.Fatalf("write password file: %v", err)
+	}
+	password, err := resolvePassword(`CONTOSO\alice`, "", path, false)
+	if err != nil {
+		t.Fatalf("resolvePassword() error = %v", err)
+	}
+	if password != "secret" {
+		t.Errorf("password = %q", password)
+	}
+}
+
+func TestReadPasswordStdin(t *testing.T) {
+	password, err := readPassword(strings.NewReader("secret\n"))
+	if err != nil {
+		t.Fatalf("readPassword() error = %v", err)
+	}
+	if password != "secret" {
 		t.Errorf("password = %q", password)
 	}
 }
