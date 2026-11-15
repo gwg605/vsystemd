@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gwg605/vsystemd/internal/logwriter"
@@ -17,6 +18,34 @@ const (
 	defaultRoot = `C:\ProgramData\vsystemd`
 	configEnv   = "VSYSTEMD_CONFIG"
 )
+
+// defaultInheritEnv is the comma-separated list of environment variables
+// inherited from the runner when building a clean service environment.
+const defaultInheritEnv = "SystemRoot,SystemDrive,windir,PATH,PATHEXT,ComSpec,TEMP,TMP," +
+	"NUMBER_OF_PROCESSORS,PROCESSOR_ARCHITECTURE,PROCESSOR_IDENTIFIER,OS," +
+	"USERPROFILE,APPDATA,LOCALAPPDATA,HOMEDRIVE,HOMEPATH,ProgramData," +
+	"ProgramFiles,ProgramFiles(x86),ProgramW6432,CommonProgramFiles,CommonProgramFiles(x86)," +
+	"PUBLIC,ALLUSERSPROFILE,USERNAME,USERDOMAIN,USERDNSDOMAIN,COMPUTERNAME,LOGONSERVER,SESSIONNAME"
+
+// Environment describes how the clean environment for service processes is
+// built: Inherit lists variables taken from the runner's environment, Vars are
+// extra variables whose values may reference the runner's environment via
+// %NAME% placeholders.
+type Environment struct {
+	Inherit string            `json:"inherit"`
+	Vars    map[string]string `json:"vars"`
+}
+
+// InheritList returns the inherited variable names.
+func (e Environment) InheritList() []string {
+	var names []string
+	for _, name := range strings.Split(e.Inherit, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
 
 type IPC struct {
 	ConnectTimeoutMS int `json:"connect_timeout_ms"`
@@ -37,13 +66,14 @@ type Logs struct {
 }
 
 type Config struct {
-	SystemDir       string   `json:"system_dir"`
-	LogsDir         string   `json:"logs_dir"`
-	TimersStateFile string   `json:"timers_state_file"`
-	LogLevel        string   `json:"log_level"`
-	IPC             IPC      `json:"ipc"`
-	Defaults        Defaults `json:"defaults"`
-	Logs            Logs     `json:"logs"`
+	SystemDir       string      `json:"system_dir"`
+	LogsDir         string      `json:"logs_dir"`
+	TimersStateFile string      `json:"timers_state_file"`
+	LogLevel        string      `json:"log_level"`
+	IPC             IPC         `json:"ipc"`
+	Defaults        Defaults    `json:"defaults"`
+	Logs            Logs        `json:"logs"`
+	Environment     Environment `json:"environment"`
 }
 
 func Default() Config {
@@ -66,6 +96,9 @@ func Default() Config {
 		Logs: Logs{
 			MaxSizeMB:  10,
 			MaxAgeDays: 7,
+		},
+		Environment: Environment{
+			Inherit: defaultInheritEnv,
 		},
 	}
 }

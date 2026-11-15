@@ -193,7 +193,7 @@ func (h *SCMHandler) beginStop() {
 			slog.Warn("runner: ExecStop is empty")
 			return
 		}
-		env, err := buildEnvironment(h.service)
+		env, err := buildEnvironment(h.service, h.process.env)
 		if err != nil {
 			slog.Error("runner: build ExecStop environment failed", "error", err)
 			return
