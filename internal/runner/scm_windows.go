@@ -173,13 +173,15 @@ func (h *SCMHandler) report(state string, pid uint32, exitCode int, lastError st
 	if h.reporter == nil {
 		return
 	}
-	_ = h.reporter.Report(StateEvent{
+	if err := h.reporter.Report(StateEvent{
 		State:        state,
 		PID:          pid,
 		ExitCode:     exitCode,
 		RestartCount: h.restart.RestartCount(),
 		LastError:    lastError,
-	})
+	}); err != nil {
+		slog.Warn("runner: report state failed", "state", state, "error", err)
+	}
 }
 
 func (h *SCMHandler) beginStop() {
