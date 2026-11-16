@@ -125,10 +125,34 @@ func (s *fileStorage) saveTimerStates(states map[string]TimerState) error {
 	if err != nil {
 		return fmt.Errorf("encode timer state: %w", err)
 	}
-	if err := os.WriteFile(s.paths.TimersFile, data, 0o644); err != nil {
+	if err := writeFileAtomic(s.paths.TimersFile, data, 0o644); err != nil {
 		return fmt.Errorf("write timer state: %w", err)
 	}
 	return nil
+}
+
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".timers-*.json.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
 
 func validateName(name string) error {

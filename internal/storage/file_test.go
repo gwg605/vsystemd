@@ -139,6 +139,50 @@ func TestTimerStateStoredInUTC(t *testing.T) {
 	}
 }
 
+func TestTimerStateWriteLeavesNoTempFile(t *testing.T) {
+	st, paths := newTestStorage(t)
+
+	if err := st.WriteTimerState("job.timer", TimerState{Enabled: true}); err != nil {
+		t.Fatalf("WriteTimerState() error = %v", err)
+	}
+
+	entries, err := os.ReadDir(filepath.Dir(paths.TimersFile))
+	if err != nil {
+		t.Fatalf("read timer dir: %v", err)
+	}
+	var names []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		names = append(names, entry.Name())
+	}
+	if !reflect.DeepEqual(names, []string{"timers.json"}) {
+		t.Errorf("timer dir = %v, want [timers.json]", names)
+	}
+}
+
+func TestTimerStateWriteReplacesExisting(t *testing.T) {
+	st, _ := newTestStorage(t)
+
+	first := TimerState{Enabled: true, LastRun: time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)}
+	if err := st.WriteTimerState("job.timer", first); err != nil {
+		t.Fatalf("WriteTimerState() error = %v", err)
+	}
+	second := TimerState{Enabled: true, LastRun: time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)}
+	if err := st.WriteTimerState("job.timer", second); err != nil {
+		t.Fatalf("WriteTimerState() error = %v", err)
+	}
+
+	got, err := st.ReadTimerState("job.timer")
+	if err != nil {
+		t.Fatalf("ReadTimerState() error = %v", err)
+	}
+	if got != second {
+		t.Errorf("ReadTimerState() = %+v, want %+v", got, second)
+	}
+}
+
 func TestNewRequiresPaths(t *testing.T) {
 	if _, err := New(Paths{}); err == nil {
 		t.Error("New() error = nil for empty paths")
