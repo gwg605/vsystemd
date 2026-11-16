@@ -2,8 +2,10 @@ package logwriter
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -172,6 +174,31 @@ func TestReadTail(t *testing.T) {
 	}
 	if len(lines) != 2 || lines[0] != "two" || lines[1] != "three" {
 		t.Errorf("lines = %v", lines)
+	}
+}
+
+func TestReadTailAcrossChunks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "big.log")
+	var content bytes.Buffer
+	for i := 0; i < 20000; i++ {
+		fmt.Fprintf(&content, "line-%05d-%s\n", i, strings.Repeat("x", 32))
+	}
+	if err := os.WriteFile(path, content.Bytes(), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	lines, err := ReadTail(path, 3)
+	if err != nil {
+		t.Fatalf("ReadTail() error = %v", err)
+	}
+	if len(lines) != 3 {
+		t.Fatalf("lines = %d, want 3", len(lines))
+	}
+	want := []string{"line-19997", "line-19998", "line-19999"}
+	for i, prefix := range want {
+		if !strings.HasPrefix(lines[i], prefix) {
+			t.Errorf("lines[%d] = %q, want prefix %q", i, lines[i], prefix)
+		}
 	}
 }
 
