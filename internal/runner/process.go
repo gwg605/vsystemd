@@ -218,7 +218,9 @@ func (p *ProcessManager) Kill() {
 		return
 	}
 	slog.Warn("process: killing process", "pid", cmd.Process.Pid)
-	_ = cmd.Process.Kill()
+	if err := cmd.Process.Kill(); err != nil {
+		slog.Warn("process: kill failed", "pid", cmd.Process.Pid, "error", err)
+	}
 }
 
 func (p *ProcessManager) logWriters() (io.Writer, io.Writer) {

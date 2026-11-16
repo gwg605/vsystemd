@@ -234,7 +234,9 @@ func (d *Daemon) reloadTimers() error {
 	for name := range known {
 		if !names[name] {
 			slog.Info("daemon: deleting removed timer state", "unit", name)
-			_ = d.store.DeleteTimerState(name)
+			if err := d.store.DeleteTimerState(name); err != nil {
+				slog.Warn("daemon: delete timer state failed", "unit", name, "error", err)
+			}
 		}
 	}
 	slog.Info("daemon: timers reloaded", "count", len(desired))
