@@ -19,6 +19,36 @@ var (
 	procSetConsoleCtrlHandler = kernel32.NewProc("SetConsoleCtrlHandler")
 )
 
+type processHandle windows.Handle
+
+const stillActive = 259
+
+func openProcessHandle(pid int) (processHandle, error) {
+	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return 0, err
+	}
+	return processHandle(handle), nil
+}
+
+func (h *processHandle) close() {
+	if *h != 0 {
+		windows.CloseHandle(windows.Handle(*h))
+		*h = 0
+	}
+}
+
+func (h processHandle) alive() bool {
+	if h == 0 {
+		return true
+	}
+	var code uint32
+	if err := windows.GetExitCodeProcess(windows.Handle(h), &code); err != nil {
+		return false
+	}
+	return code == stillActive
+}
+
 func configureCommand(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		CreationFlags: windows.CREATE_NEW_CONSOLE,

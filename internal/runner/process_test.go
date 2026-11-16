@@ -100,6 +100,13 @@ func newProcessManager(service *unit.ServiceUnit) *ProcessManager {
 	return NewProcessManager(service, EnvironmentDefaults{})
 }
 
+func TestInterruptNotRunning(t *testing.T) {
+	manager := newProcessManager(&unit.ServiceUnit{ExecStart: helperCommand("sleep", "100ms")})
+	if err := manager.Interrupt(); err == nil {
+		t.Error("Interrupt() error = nil for a non-running process")
+	}
+}
+
 func TestStartSequence(t *testing.T) {
 	dir := t.TempDir()
 	orderFile := filepath.Join(dir, "order.txt")

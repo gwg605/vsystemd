@@ -22,6 +22,7 @@ type ProcessManager struct {
 	cmd      *exec.Cmd
 	stdin    io.WriteCloser
 	streamer *LogStreamer
+	proc     processHandle
 }
 
 // EnvironmentDefaults describes how the clean environment for service
@@ -107,6 +108,11 @@ func (p *ProcessManager) Start() error {
 	p.mu.Lock()
 	p.cmd = cmd
 	p.stdin = stdin
+	proc, err := openProcessHandle(cmd.Process.Pid)
+	if err != nil {
+		slog.Warn("process: open process handle failed", "pid", cmd.Process.Pid, "error", err)
+	}
+	p.proc = proc
 	p.mu.Unlock()
 	slog.Info("process: ExecStart started", "pid", cmd.Process.Pid)
 
@@ -139,6 +145,7 @@ func (p *ProcessManager) Wait() (int, error) {
 			p.stdin.Close()
 			p.stdin = nil
 		}
+		p.proc.close()
 	}
 	p.mu.Unlock()
 
@@ -165,19 +172,27 @@ func (p *ProcessManager) PID() uint32 {
 }
 
 func (p *ProcessManager) Interrupt() error {
-	pid := p.PID()
-	if pid == 0 {
+	p.mu.Lock()
+	if p.cmd == nil || p.cmd.Process == nil {
+		p.mu.Unlock()
 		return errors.New("process is not running")
 	}
+	pid := p.cmd.Process.Pid
+	if !p.proc.alive() {
+		p.mu.Unlock()
+		return fmt.Errorf("process %d is not running", pid)
+	}
+
 	slog.Info("process: sending console ctrl-c", "pid", pid)
-	if err := sendConsoleInterrupt(int(pid)); err != nil {
+	err := sendConsoleInterrupt(pid)
+	stdin := p.stdin
+	p.mu.Unlock()
+
+	if err != nil {
 		slog.Warn("process: console ctrl-c failed", "pid", pid, "error", err)
 		return err
 	}
 
-	p.mu.Lock()
-	stdin := p.stdin
-	p.mu.Unlock()
 	if stdin == nil {
 		slog.Warn("process: child stdin is not available", "pid", pid)
 		return nil
@@ -221,6 +236,7 @@ func (p *ProcessManager) terminate() {
 	stdin := p.stdin
 	p.cmd = nil
 	p.stdin = nil
+	p.proc.close()
 	p.mu.Unlock()
 
 	if stdin != nil {
