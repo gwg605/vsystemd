@@ -1,14 +1,18 @@
 package logwriter
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sync"
 	"time"
 )
+
+const tailChunk = 64 * 1024
 
 const TimestampLayout = "2006-01-02_15-04-05.000"
 
@@ -245,15 +249,35 @@ func ReadTail(path string, n int) ([]string, error) {
 	if n <= 0 {
 		return nil, nil
 	}
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read log %s: %w", path, err)
 	}
+	defer file.Close()
 
-	text := stringsTrimRightNewlines(string(data))
+	info, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("read log %s: %w", path, err)
+	}
+
+	var buf []byte
+	for offset := info.Size(); offset > 0; {
+		chunk := min(offset, int64(tailChunk))
+		offset -= chunk
+		part := make([]byte, chunk)
+		if _, err := file.ReadAt(part, offset); err != nil && !errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("read log %s: %w", path, err)
+		}
+		buf = append(part, buf...)
+		if bytes.Count(buf, []byte{'\n'}) > n {
+			break
+		}
+	}
+
+	text := stringsTrimRightNewlines(string(buf))
 	if text == "" {
 		return nil, nil
 	}
