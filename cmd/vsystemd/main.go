@@ -24,8 +24,6 @@ import (
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
-const daemonServiceName = "vsystemd"
-
 func main() {
 	if err := run(os.Args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -105,7 +103,7 @@ func runDaemon() error {
 	}
 	defer service.Close()
 
-	err = daemon.RunService(daemonServiceName, service)
+	err = daemon.RunService(config.ManagerServiceName, service)
 	if err != nil {
 		slog.Error("vsystemd daemon exited with error", "error", err)
 	} else {

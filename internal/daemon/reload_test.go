@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/logwriter"
 	"github.com/gwg605/vsystemd/internal/scm"
 	scmfake "github.com/gwg605/vsystemd/internal/scm/fake"
@@ -83,5 +84,26 @@ OnCalendar=daily
 	}
 	if _, err := manager.QueryStatus("new"); err == nil {
 		t.Error("new service was created")
+	}
+}
+
+func TestReloadKeepsManagerService(t *testing.T) {
+	store := storagefake.New()
+	store.WriteUnit("app.service", []byte("[Service]\nExecStart=x\n"))
+
+	manager := scmfake.New()
+	if err := manager.CreateService(scm.ServiceConfig{Name: "app"}); err != nil {
+		t.Fatalf("CreateService(app) error = %v", err)
+	}
+	if err := manager.CreateService(scm.ServiceConfig{Name: config.ManagerServiceName}); err != nil {
+		t.Fatalf("CreateService(manager) error = %v", err)
+	}
+
+	daemon, _ := newTestDaemon(t, manager, store)
+	if err := daemon.reload(); err != nil {
+		t.Fatalf("reload() error = %v", err)
+	}
+	if _, err := manager.QueryStatus(config.ManagerServiceName); err != nil {
+		t.Errorf("manager service was removed by reload: %v", err)
 	}
 }

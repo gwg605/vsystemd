@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/scheduler"
 	"github.com/gwg605/vsystemd/internal/transport"
@@ -133,9 +134,13 @@ func (d *Daemon) timerDefinition(name string) (scheduler.Timer, error) {
 	}
 
 	target := timerTarget(parsed.Timer, name)
+	service := strings.TrimSuffix(target, filepath.Ext(target))
+	if service == config.ManagerServiceName {
+		return scheduler.Timer{}, fmt.Errorf("timer %s targets the vsystemd manager service", name)
+	}
 	return scheduler.Timer{
 		Name:       name,
-		Service:    strings.TrimSuffix(target, filepath.Ext(target)),
+		Service:    service,
 		OnCalendar: parsed.Timer.OnCalendar,
 	}, nil
 }

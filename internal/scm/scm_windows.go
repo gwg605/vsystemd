@@ -250,6 +250,9 @@ func connect() (*mgr.Mgr, error) {
 func openManaged(m *mgr.Mgr, name string) (*mgr.Service, mgr.Config, error) {
 	service, err := m.OpenService(name)
 	if err != nil {
+		if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+			return nil, mgr.Config{}, ErrNotFound
+		}
 		return nil, mgr.Config{}, fmt.Errorf("open service %s: %w", name, err)
 	}
 
@@ -308,6 +311,7 @@ func serviceConfigFrom(name string, config mgr.Config) ServiceConfig {
 		StartType:    serviceStartType(config.StartType),
 		Dependencies: config.Dependencies,
 		User:         config.ServiceStartName,
+		DisplayName:  config.DisplayName,
 		Description:  config.Description,
 	}
 }
@@ -499,6 +503,10 @@ func splitBinaryPath(binaryPath string) (string, []string, error) {
 }
 
 func windowsServiceConfig(cfg ServiceConfig) mgr.Config {
+	displayName := cfg.DisplayName
+	if displayName == "" {
+		displayName = cfg.Name
+	}
 	return mgr.Config{
 		ServiceType:      windows.SERVICE_WIN32_OWN_PROCESS,
 		StartType:        windowsStartType(cfg.StartType),
@@ -507,7 +515,7 @@ func windowsServiceConfig(cfg ServiceConfig) mgr.Config {
 		LoadOrderGroup:   managedServiceGroup,
 		Dependencies:     cfg.Dependencies,
 		ServiceStartName: cfg.User,
-		DisplayName:      cfg.Name,
+		DisplayName:      displayName,
 		Password:         cfg.Password,
 		Description:      cfg.Description,
 	}

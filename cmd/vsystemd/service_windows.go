@@ -3,10 +3,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 
-	"golang.org/x/sys/windows"
-	"golang.org/x/sys/windows/svc/mgr"
+	"github.com/gwg605/vsystemd/internal/config"
+	"github.com/gwg605/vsystemd/internal/scm"
 )
 
 const (
@@ -15,43 +16,34 @@ const (
 )
 
 func startDaemonService(executable string) error {
-	manager, err := mgr.Connect()
-	if err != nil {
-		return fmt.Errorf("connect to SCM: %w", err)
-	}
-	defer manager.Disconnect()
-
-	service, err := manager.OpenService(daemonServiceName)
-	created := false
-	if err != nil {
-		service, err = manager.CreateService(daemonServiceName, executable, mgr.Config{
-			ServiceType:  windows.SERVICE_WIN32_OWN_PROCESS,
-			StartType:    windows.SERVICE_AUTO_START,
-			ErrorControl: windows.SERVICE_ERROR_NORMAL,
-			DisplayName:  daemonDisplayName,
-			Description:  daemonDescription,
-		}, "--mode=daemon")
-		if err != nil {
-			return fmt.Errorf("create service %s: %w", daemonServiceName, err)
-		}
-		created = true
-	}
-	defer service.Close()
-
-	if !created {
-		config, err := service.Config()
-		if err != nil {
-			return fmt.Errorf("get service config %s: %w", daemonServiceName, err)
-		}
-		config.DisplayName = daemonDisplayName
-		config.Description = daemonDescription
-		if err := service.UpdateConfig(config); err != nil {
-			return fmt.Errorf("update service config %s: %w", daemonServiceName, err)
-		}
+	manager := scm.New()
+	cfg := scm.ServiceConfig{
+		Name:        config.ManagerServiceName,
+		BinaryPath:  `"` + executable + `" --mode=daemon`,
+		StartType:   scm.StartTypeAutomatic,
+		User:        "LocalSystem",
+		DisplayName: daemonDisplayName,
+		Description: daemonDescription,
 	}
 
-	if err := service.Start(); err != nil && err != windows.ERROR_SERVICE_ALREADY_RUNNING {
-		return fmt.Errorf("start service %s: %w", daemonServiceName, err)
+	_, err := manager.QueryStatus(config.ManagerServiceName)
+	switch {
+	case err == nil:
+		if err := manager.UpdateService(cfg); err != nil {
+			return fmt.Errorf("update service %s: %w", config.ManagerServiceName, err)
+		}
+	case errors.Is(err, scm.ErrNotFound):
+		if err := manager.CreateService(cfg); err != nil {
+			return fmt.Errorf("create service %s: %w", config.ManagerServiceName, err)
+		}
+	case errors.Is(err, scm.ErrNotManaged):
+		return fmt.Errorf("service %s already exists but is not managed by vsystemd; remove it and retry", config.ManagerServiceName)
+	default:
+		return fmt.Errorf("query service %s: %w", config.ManagerServiceName, err)
+	}
+
+	if err := manager.StartService(config.ManagerServiceName); err != nil {
+		return fmt.Errorf("start service %s: %w", config.ManagerServiceName, err)
 	}
 	return nil
 }

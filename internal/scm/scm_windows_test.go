@@ -100,6 +100,13 @@ func TestWindowsServiceConfig(t *testing.T) {
 	}
 }
 
+func TestWindowsServiceConfigDisplayName(t *testing.T) {
+	got := windowsServiceConfig(ServiceConfig{Name: "app", DisplayName: "App Service"})
+	if got.DisplayName != "App Service" {
+		t.Errorf("DisplayName = %q", got.DisplayName)
+	}
+}
+
 func TestServiceStartType(t *testing.T) {
 	tests := []struct {
 		startType uint32
@@ -124,6 +131,7 @@ func TestServiceConfigFrom(t *testing.T) {
 		StartType:        windows.SERVICE_AUTO_START,
 		Dependencies:     []string{"db"},
 		ServiceStartName: `NT SERVICE\app`,
+		DisplayName:      "App Service",
 		Description:      "Example",
 	})
 
@@ -136,8 +144,8 @@ func TestServiceConfigFrom(t *testing.T) {
 	if !reflect.DeepEqual(got.Dependencies, []string{"db"}) {
 		t.Errorf("Dependencies = %v", got.Dependencies)
 	}
-	if got.User != `NT SERVICE\app` || got.Description != "Example" {
-		t.Errorf("user/description = %q/%q", got.User, got.Description)
+	if got.User != `NT SERVICE\app` || got.DisplayName != "App Service" || got.Description != "Example" {
+		t.Errorf("user/display/description = %q/%q/%q", got.User, got.DisplayName, got.Description)
 	}
 	if got.Password != "" {
 		t.Errorf("Password = %q", got.Password)

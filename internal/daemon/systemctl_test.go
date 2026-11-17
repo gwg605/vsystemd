@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/logwriter"
 	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/runner"
@@ -247,5 +248,34 @@ func TestDaemonReloadRequest(t *testing.T) {
 	}
 	if config.BinaryPath == "old" {
 		t.Error("service config was not updated")
+	}
+}
+
+func TestListUnitsExcludesManagerService(t *testing.T) {
+	store := storagefake.New()
+	store.WriteUnit("app.service", []byte("[Service]\nExecStart=x\n"))
+
+	manager := scmfake.New()
+	if err := manager.CreateService(scm.ServiceConfig{Name: "app"}); err != nil {
+		t.Fatalf("CreateService(app) error = %v", err)
+	}
+	if err := manager.CreateService(scm.ServiceConfig{Name: config.ManagerServiceName}); err != nil {
+		t.Fatalf("CreateService(manager) error = %v", err)
+	}
+
+	_, client := newControlClient(t, manager, store)
+	response := controlRequest(t, client, protocol.TypeListUnits, nil)
+	if response.Type != protocol.TypeListUnitsResponse {
+		t.Fatalf("response type = %q", response.Type)
+	}
+
+	var list protocol.ListUnitsResponse
+	if err := json.Unmarshal(response.Payload, &list); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	for _, entry := range list.Units {
+		if entry.Unit == config.ManagerServiceName+".service" {
+			t.Error("manager service is listed")
+		}
 	}
 }

@@ -141,6 +141,10 @@ func dispatch(command, name string) error {
 	manager := scm.New()
 	serviceName := strings.TrimSuffix(name, ".service")
 
+	if serviceName == config.ManagerServiceName {
+		return fmt.Errorf("service %s is the vsystemd manager and cannot be controlled by systemctl", serviceName)
+	}
+
 	switch command {
 	case "disable":
 		if _, err := manager.QueryStatus(serviceName); err != nil {
@@ -223,6 +227,9 @@ func timerCommand(msgType string, request protocol.TimerRequest) error {
 func enableService(name, password, passwordFile string, passwordStdin bool) error {
 	if !strings.HasSuffix(name, ".service") {
 		return fmt.Errorf("%s is not a service unit", name)
+	}
+	if strings.TrimSuffix(name, ".service") == config.ManagerServiceName {
+		return fmt.Errorf("service %s is the vsystemd manager and cannot be enabled by systemctl", config.ManagerServiceName)
 	}
 
 	cfg, err := config.Load()
