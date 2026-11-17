@@ -47,9 +47,6 @@ func (s *fileStorage) ListUnits() ([]string, error) {
 }
 
 func (s *fileStorage) ReadUnit(name string) ([]byte, error) {
-	if err := validateName(name); err != nil {
-		return nil, err
-	}
 	data, err := os.ReadFile(filepath.Join(s.paths.SystemDir, name))
 	if err != nil {
 		return nil, fmt.Errorf("read unit %s: %w", name, err)
@@ -155,9 +152,3 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	return os.Rename(tmpName, path)
 }
 
-func validateName(name string) error {
-	if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
-		return fmt.Errorf("invalid name %q", name)
-	}
-	return nil
-}

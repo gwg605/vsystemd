@@ -12,6 +12,7 @@ import (
 
 	"github.com/gwg605/vsystemd/internal/scm"
 	"github.com/gwg605/vsystemd/internal/transport"
+	"github.com/gwg605/vsystemd/internal/unit"
 )
 
 // authenticator verifies the OS identity of an inbound connection and returns
@@ -36,7 +37,8 @@ func (a clientAuthenticator) authenticate(handle windows.Handle, acceptTime time
 	cfg, err := a.services.GetServiceByHandle(scm.ProcessHandle(client.proc))
 	switch {
 	case err == nil:
-		return transport.NewPeer(transport.PeerRunner, cfg.Name+".service", false).WithService(cfg), nil
+		name := unit.ID{Name: cfg.Name, Type: unit.TypeService}.String()
+		return transport.NewPeer(transport.PeerRunner, name, false).WithService(cfg), nil
 	case errors.Is(err, scm.ErrNotService):
 		if !client.elevated {
 			return transport.Peer{}, errors.New("control client is not elevated")

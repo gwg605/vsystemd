@@ -11,7 +11,7 @@ const (
 )
 
 type UnitFile struct {
-	Name        string
+	Name        ID
 	Description string
 	After       []string
 	Requires    []string

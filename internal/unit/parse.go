@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -12,14 +11,13 @@ import (
 	systemdtime "gitlab.com/allddd/go-systemd-time"
 )
 
-func Parse(name string, data []byte) (*UnitFile, error) {
-	unitType := strings.ToLower(filepath.Ext(name))
-	if unitType != ".service" && unitType != ".timer" {
-		return nil, fmt.Errorf("%s: unsupported unit type %q", name, unitType)
+func Parse(id ID, data []byte) (*UnitFile, error) {
+	if err := id.Validate(); err != nil {
+		return nil, err
 	}
 
-	file := &UnitFile{Name: name}
-	if unitType == ".service" {
+	file := &UnitFile{Name: id}
+	if id.Type == TypeService {
 		file.Service = &ServiceUnit{
 			Restart:     RestartNo,
 			Environment: make(map[string]string),
@@ -43,18 +41,18 @@ func Parse(name string, data []byte) (*UnitFile, error) {
 
 		if line[0] == '[' {
 			if !strings.HasSuffix(line, "]") {
-				return nil, fmt.Errorf("%s:%d: malformed section header", name, lineNo)
+				return nil, fmt.Errorf("%s:%d: malformed section header", id, lineNo)
 			}
 			section = strings.ToLower(strings.TrimSpace(line[1 : len(line)-1]))
 			switch section {
 			case "service":
-				if unitType != ".service" {
-					return nil, fmt.Errorf("%s:%d: [Service] is not allowed in a timer unit", name, lineNo)
+				if id.Type != TypeService {
+					return nil, fmt.Errorf("%s:%d: [Service] is not allowed in a timer unit", id, lineNo)
 				}
 				seenService = true
 			case "timer":
-				if unitType != ".timer" {
-					return nil, fmt.Errorf("%s:%d: [Timer] is not allowed in a service unit", name, lineNo)
+				if id.Type != TypeTimer {
+					return nil, fmt.Errorf("%s:%d: [Timer] is not allowed in a service unit", id, lineNo)
 				}
 				seenTimer = true
 			}
@@ -63,21 +61,21 @@ func Parse(name string, data []byte) (*UnitFile, error) {
 
 		key, value, ok := strings.Cut(line, "=")
 		if !ok {
-			return nil, fmt.Errorf("%s:%d: expected key=value", name, lineNo)
+			return nil, fmt.Errorf("%s:%d: expected key=value", id, lineNo)
 		}
 		if err := file.apply(section, strings.TrimSpace(key), strings.TrimSpace(value)); err != nil {
-			return nil, fmt.Errorf("%s:%d: %w", name, lineNo, err)
+			return nil, fmt.Errorf("%s:%d: %w", id, lineNo, err)
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
 
-	if unitType == ".service" && !seenService {
-		return nil, fmt.Errorf("%s: missing [Service] section", name)
+	if id.Type == TypeService && !seenService {
+		return nil, fmt.Errorf("%s: missing [Service] section", id)
 	}
-	if unitType == ".timer" && !seenTimer {
-		return nil, fmt.Errorf("%s: missing [Timer] section", name)
+	if id.Type == TypeTimer && !seenTimer {
+		return nil, fmt.Errorf("%s: missing [Timer] section", id)
 	}
 	return file, nil
 }

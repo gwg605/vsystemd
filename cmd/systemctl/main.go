@@ -95,11 +95,14 @@ func run(args []string) error {
 		if *enableUnit == "" {
 			return errors.New(parser.Usage("unit name is required"))
 		}
-		name := normalizeUnit(*enableUnit)
-		if strings.HasSuffix(name, ".timer") {
-			return timerCommand(protocol.TypeTimerEnable, protocol.TimerRequest{Unit: name, Enabled: true})
+		id, err := parseUnit(*enableUnit)
+		if err != nil {
+			return err
 		}
-		return enableService(name, *password, *passwordFile, *passwordStdin)
+		if id.Type == unit.TypeTimer {
+			return timerCommand(protocol.TypeTimerEnable, protocol.TimerRequest{Unit: id.String(), Enabled: true})
+		}
+		return enableService(id, *password, *passwordFile, *passwordStdin)
 	}
 
 	for _, command := range unitCommands {
@@ -107,7 +110,11 @@ func run(args []string) error {
 			if *command.unit == "" {
 				return errors.New(parser.Usage("unit name is required"))
 			}
-			return dispatch(command.name, normalizeUnit(*command.unit))
+			id, err := parseUnit(*command.unit)
+			if err != nil {
+				return err
+			}
+			return dispatch(command.name, id)
 		}
 	}
 
@@ -123,23 +130,20 @@ func run(args []string) error {
 	}
 }
 
-func normalizeUnit(name string) string {
+func parseUnit(name string) (unit.ID, error) {
 	if filepath.Ext(name) == "" {
-		return name + ".service"
+		name += unit.TypeService.Extension()
 	}
-	return name
+	return unit.ParseID(name)
 }
 
-func dispatch(command, name string) error {
-	if strings.HasSuffix(name, ".timer") {
-		return dispatchTimer(command, name)
-	}
-	if !strings.HasSuffix(name, ".service") {
-		return fmt.Errorf("unsupported unit type")
+func dispatch(command string, id unit.ID) error {
+	if id.Type == unit.TypeTimer {
+		return dispatchTimer(command, id)
 	}
 
 	manager := scm.New()
-	serviceName := strings.TrimSuffix(name, ".service")
+	serviceName := id.Name
 
 	if serviceName == config.ManagerServiceName {
 		return fmt.Errorf("service %s is the vsystemd manager and cannot be controlled by systemctl", serviceName)
@@ -174,28 +178,28 @@ func dispatch(command, name string) error {
 		if err != nil {
 			return err
 		}
-		return statusCommand(cfg, name)
+		return statusCommand(cfg, id)
 	default:
 		return fmt.Errorf("unknown command %s", command)
 	}
 }
 
-func dispatchTimer(command, name string) error {
+func dispatchTimer(command string, id unit.ID) error {
 	switch command {
 	case "enable":
-		return timerCommand(protocol.TypeTimerEnable, protocol.TimerRequest{Unit: name, Enabled: true})
+		return timerCommand(protocol.TypeTimerEnable, protocol.TimerRequest{Unit: id.String(), Enabled: true})
 	case "disable":
-		return timerCommand(protocol.TypeTimerEnable, protocol.TimerRequest{Unit: name, Enabled: false})
+		return timerCommand(protocol.TypeTimerEnable, protocol.TimerRequest{Unit: id.String(), Enabled: false})
 	case "start":
-		return timerCommand(protocol.TypeTimerStart, protocol.TimerRequest{Unit: name})
+		return timerCommand(protocol.TypeTimerStart, protocol.TimerRequest{Unit: id.String()})
 	case "stop":
-		return timerCommand(protocol.TypeTimerStop, protocol.TimerRequest{Unit: name})
+		return timerCommand(protocol.TypeTimerStop, protocol.TimerRequest{Unit: id.String()})
 	case "status":
 		cfg, err := config.Load()
 		if err != nil {
 			return err
 		}
-		return statusCommand(cfg, name)
+		return statusCommand(cfg, id)
 	default:
 		return fmt.Errorf("command %s is not supported for timer units", command)
 	}
@@ -224,11 +228,8 @@ func timerCommand(msgType string, request protocol.TimerRequest) error {
 	return nil
 }
 
-func enableService(name, password, passwordFile string, passwordStdin bool) error {
-	if !strings.HasSuffix(name, ".service") {
-		return fmt.Errorf("%s is not a service unit", name)
-	}
-	if strings.TrimSuffix(name, ".service") == config.ManagerServiceName {
+func enableService(id unit.ID, password, passwordFile string, passwordStdin bool) error {
+	if id.Name == config.ManagerServiceName {
 		return fmt.Errorf("service %s is the vsystemd manager and cannot be enabled by systemctl", config.ManagerServiceName)
 	}
 
@@ -240,38 +241,34 @@ func enableService(name, password, passwordFile string, passwordStdin bool) erro
 	if err != nil {
 		return err
 	}
-	data, err := store.ReadUnit(name)
+	data, err := store.ReadUnit(id.String())
 	if err != nil {
 		return err
 	}
-	parsed, err := unit.Parse(name, data)
+	parsed, err := unit.Parse(id, data)
 	if err != nil {
 		return err
-	}
-	if parsed.Service == nil {
-		return fmt.Errorf("%s is not a service unit", name)
 	}
 	for _, warning := range parsed.Warnings {
-		fmt.Fprintf(os.Stderr, "warning: %s: %s\n", name, warning)
+		fmt.Fprintf(os.Stderr, "warning: %s: %s\n", id, warning)
 	}
 	for _, warning := range unitPathWarnings(parsed) {
-		fmt.Fprintf(os.Stderr, "warning: %s: %s\n", name, warning)
+		fmt.Fprintf(os.Stderr, "warning: %s: %s\n", id, warning)
 	}
 
 	executable, err := vsystemdPath()
 	if err != nil {
 		return err
 	}
-	serviceName := strings.TrimSuffix(name, ".service")
-	account := unitUser(parsed.Service.User, serviceName)
+	account := unitUser(parsed.Service.User, id.Name)
 	resolvedPassword, err := resolvePassword(account, password, passwordFile, passwordStdin)
 	if err != nil {
 		return err
 	}
 
 	serviceConfig := scm.ServiceConfig{
-		Name:         serviceName,
-		BinaryPath:   `"` + executable + `" --mode=run --unit=` + name,
+		Name:         id.Name,
+		BinaryPath:   `"` + executable + `" --mode=run --unit=` + id.String(),
 		StartType:    scm.StartTypeAutomatic,
 		Dependencies: unitDependencies(parsed),
 		User:         account,
@@ -280,7 +277,7 @@ func enableService(name, password, passwordFile string, passwordStdin bool) erro
 	}
 
 	manager := scm.New()
-	if _, err := manager.QueryStatus(serviceName); err != nil {
+	if _, err := manager.QueryStatus(id.Name); err != nil {
 		return manager.CreateService(serviceConfig)
 	}
 	return manager.UpdateService(serviceConfig)
@@ -323,8 +320,8 @@ func unitPathWarnings(parsed *unit.UnitFile) []string {
 	return warnings
 }
 
-func statusCommand(cfg config.Config, name string) error {
-	response, err := daemonRequest(cfg, protocol.TypeStatusRequest, protocol.StatusRequest{Unit: name})
+func statusCommand(cfg config.Config, id unit.ID) error {
+	response, err := daemonRequest(cfg, protocol.TypeStatusRequest, protocol.StatusRequest{Unit: id.String()})
 	if err != nil {
 		return err
 	}
@@ -571,15 +568,15 @@ func unitDependencies(file *unit.UnitFile) []string {
 	var dependencies []string
 	for _, names := range [][]string{file.Requires, file.After} {
 		for _, name := range names {
-			if !strings.HasSuffix(name, ".service") {
+			id, err := unit.ParseID(name)
+			if err != nil || id.Type != unit.TypeService {
 				continue
 			}
-			dependency := strings.TrimSuffix(name, ".service")
-			if _, ok := seen[dependency]; ok {
+			if _, ok := seen[id.Name]; ok {
 				continue
 			}
-			seen[dependency] = struct{}{}
-			dependencies = append(dependencies, dependency)
+			seen[id.Name] = struct{}{}
+			dependencies = append(dependencies, id.Name)
 		}
 	}
 	return dependencies

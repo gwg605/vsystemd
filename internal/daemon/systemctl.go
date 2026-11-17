@@ -4,9 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/logwriter"
@@ -21,9 +19,13 @@ func (d *Daemon) handleStatusRequest(source transport.Peer, msg transport.Messag
 	if err := json.Unmarshal(msg.Payload, &request); err != nil {
 		return d.respondError(source, msg.ID, err)
 	}
-	slog.Debug("daemon: status request", "from", source.String(), "unit", request.Unit)
+	id, err := unit.ParseID(request.Unit)
+	if err != nil {
+		return d.respondError(source, msg.ID, err)
+	}
+	slog.Debug("daemon: status request", "from", source.String(), "unit", id)
 
-	response, err := d.status(request.Unit)
+	response, err := d.status(id)
 	if err != nil {
 		return d.respondError(source, msg.ID, err)
 	}
@@ -70,14 +72,14 @@ func (d *Daemon) respondError(target transport.Peer, requestID string, err error
 	return d.respond(target, protocol.TypeErrorResponse, requestID, protocol.ErrorResponse{Error: err.Error()})
 }
 
-func (d *Daemon) status(name string) (protocol.StatusResponse, error) {
-	if strings.HasSuffix(name, ".timer") {
-		return d.timerStatus(name)
+func (d *Daemon) status(id unit.ID) (protocol.StatusResponse, error) {
+	if id.Type == unit.TypeTimer {
+		return d.timerStatus(id)
 	}
 
+	name := id.String()
 	cached, hasCached := d.State(name)
-	serviceName := strings.TrimSuffix(name, filepath.Ext(name))
-	scmStatus, scmErr := d.manager.QueryStatus(serviceName)
+	scmStatus, scmErr := d.manager.QueryStatus(id.Name)
 
 	if scmErr != nil && !hasCached {
 		if _, err := d.store.ReadUnit(name); err != nil {
@@ -99,7 +101,7 @@ func (d *Daemon) status(name string) (protocol.StatusResponse, error) {
 		state.SCMState = 0
 	}
 
-	logTail := d.logTail(name)
+	logTail := d.logTail(id)
 
 	return protocol.StatusResponse{
 		Unit:           name,
@@ -136,31 +138,37 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 	seen := make(map[string]bool)
 	units := make([]protocol.UnitStatus, 0, len(unitNames)+len(configs))
 	for _, name := range unitNames {
-		if name == config.ManagerServiceName+".service" {
+		id, err := unit.ParseID(name)
+		if err != nil {
+			return protocol.ListUnitsResponse{}, fmt.Errorf("unit %s: %w", name, err)
+		}
+		if id.Name == config.ManagerServiceName {
 			continue
 		}
-		seen[name] = true
+		seen[id.String()] = true
 
-		data, err := d.store.ReadUnit(name)
+		data, err := d.store.ReadUnit(id.String())
 		if err != nil {
-			return protocol.ListUnitsResponse{}, fmt.Errorf("read unit %s: %w", name, err)
+			return protocol.ListUnitsResponse{}, fmt.Errorf("read unit %s: %w", id, err)
 		}
-		parsed, err := unit.Parse(name, data)
+		parsed, err := unit.Parse(id, data)
 		if err != nil {
-			return protocol.ListUnitsResponse{}, fmt.Errorf("parse unit %s: %w", name, err)
+			return protocol.ListUnitsResponse{}, fmt.Errorf("parse unit %s: %w", id, err)
 		}
 
-		entry := protocol.UnitStatus{Unit: name, Description: parsed.Description}
-		if strings.HasSuffix(name, ".timer") {
+		entry := protocol.UnitStatus{Unit: id.String(), Description: parsed.Description}
+		if id.Type == unit.TypeTimer {
 			entry.Type = "timer"
-			entry.Activates = timerTarget(parsed.Timer, name)
-			fillTimerState(&entry, d, name)
+			if target, err := timerTarget(parsed.Timer, id); err == nil {
+				entry.Activates = target.String()
+			}
+			fillTimerState(&entry, d, id)
 			units = append(units, entry)
 			continue
 		}
 
 		entry.Type = "service"
-		state := d.serviceState(name, scmByName)
+		state := d.serviceState(id, scmByName)
 		entry.SystemdState = string(state.Status())
 		entry.SCMState = state.SCMState
 		units = append(units, entry)
@@ -170,13 +178,13 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 		if cfg.Name == config.ManagerServiceName {
 			continue
 		}
-		name := cfg.Name + ".service"
-		if seen[name] {
+		id := unit.ID{Name: cfg.Name, Type: unit.TypeService}
+		if seen[id.String()] {
 			continue
 		}
-		state := d.serviceState(name, scmByName)
+		state := d.serviceState(id, scmByName)
 		units = append(units, protocol.UnitStatus{
-			Unit:         name,
+			Unit:         id.String(),
 			Type:         "service",
 			SystemdState: string(state.Status()),
 			SCMState:     state.SCMState,
@@ -190,21 +198,22 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 	return protocol.ListUnitsResponse{Units: units}, nil
 }
 
-func (d *Daemon) serviceState(name string, services map[string]scm.ServiceStatus) ServiceState {
-	state, _ := d.State(name)
-	state.Unit = name
-	if service, ok := services[strings.TrimSuffix(name, ".service")]; ok {
+func (d *Daemon) serviceState(id unit.ID, services map[string]scm.ServiceStatus) ServiceState {
+	state, _ := d.State(id.String())
+	state.Unit = id.String()
+	if service, ok := services[id.Name]; ok {
 		state.SCMState = service.State
 	}
 	return state
 }
 
-func (d *Daemon) timerStatus(name string) (protocol.StatusResponse, error) {
+func (d *Daemon) timerStatus(id unit.ID) (protocol.StatusResponse, error) {
+	name := id.String()
 	data, err := d.store.ReadUnit(name)
 	if err != nil {
 		return protocol.StatusResponse{}, fmt.Errorf("unit %s not found", name)
 	}
-	parsed, err := unit.Parse(name, data)
+	parsed, err := unit.Parse(id, data)
 	if err != nil {
 		return protocol.StatusResponse{}, fmt.Errorf("parse unit %s: %w", name, err)
 	}
@@ -226,7 +235,9 @@ func (d *Daemon) timerStatus(name string) (protocol.StatusResponse, error) {
 		SystemdState: string(systemdState),
 		Enabled:      &enabled,
 		Running:      &running,
-		Activates:    timerTarget(parsed.Timer, name),
+	}
+	if target, err := timerTarget(parsed.Timer, id); err == nil {
+		response.Activates = target.String()
 	}
 	if !state.LastRun.IsZero() {
 		lastRun := state.LastRun
@@ -239,19 +250,20 @@ func (d *Daemon) timerStatus(name string) (protocol.StatusResponse, error) {
 	return response, nil
 }
 
-func (d *Daemon) logTail(unitName string) []string {
-	data, err := d.store.ReadUnit(unitName)
+func (d *Daemon) logTail(id unit.ID) []string {
+	name := id.String()
+	data, err := d.store.ReadUnit(name)
 	if err != nil {
 		return nil
 	}
-	parsed, err := unit.Parse(unitName, data)
+	parsed, err := unit.Parse(id, data)
 	if err != nil || parsed.Service == nil {
 		return nil
 	}
 
 	stdout, stderr, err := logwriter.ResolveServiceOutputs(parsed.Service)
 	if err != nil {
-		slog.Warn("daemon: invalid log output config", "unit", unitName, "error", err)
+		slog.Warn("daemon: invalid log output config", "unit", name, "error", err)
 		return nil
 	}
 
@@ -262,15 +274,14 @@ func (d *Daemon) logTail(unitName string) []string {
 	case logwriter.OutputFile, logwriter.OutputAppend:
 		lines, err := logwriter.ReadTail(target.Path, 10)
 		if err != nil {
-			slog.Warn("daemon: read log tail failed", "unit", unitName, "path", target.Path, "error", err)
+			slog.Warn("daemon: read log tail failed", "unit", name, "path", target.Path, "error", err)
 			return nil
 		}
 		return lines
 	default:
-		serviceName := strings.TrimSuffix(unitName, filepath.Ext(unitName))
-		path, err := logwriter.LatestFile(logwriter.ServiceLogDir(d.logsDir, serviceName))
+		path, err := logwriter.LatestFile(logwriter.ServiceLogDir(d.logsDir, id.Name))
 		if err != nil {
-			slog.Warn("daemon: find latest log failed", "unit", unitName, "error", err)
+			slog.Warn("daemon: find latest log failed", "unit", name, "error", err)
 			return nil
 		}
 		if path == "" {
@@ -278,21 +289,21 @@ func (d *Daemon) logTail(unitName string) []string {
 		}
 		lines, err := logwriter.ReadTail(path, 10)
 		if err != nil {
-			slog.Warn("daemon: read log tail failed", "unit", unitName, "path", path, "error", err)
+			slog.Warn("daemon: read log tail failed", "unit", name, "path", path, "error", err)
 			return nil
 		}
 		return lines
 	}
 }
 
-func fillTimerState(entry *protocol.UnitStatus, d *Daemon, name string) {
-	timerState, err := d.store.ReadTimerState(name)
+func fillTimerState(entry *protocol.UnitStatus, d *Daemon, id unit.ID) {
+	timerState, err := d.store.ReadTimerState(id.String())
 	if err != nil {
 		return
 	}
 
 	enabled := timerState.Enabled
-	running := d.sched.Has(name)
+	running := d.sched.Has(id.String())
 	entry.Enabled = &enabled
 	entry.Running = &running
 	if running {

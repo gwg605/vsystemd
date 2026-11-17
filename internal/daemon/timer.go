@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"path/filepath"
-	"strings"
 
 	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/protocol"
@@ -19,21 +17,25 @@ func (d *Daemon) handleTimerEnable(source transport.Peer, msg transport.Message)
 	if err := json.Unmarshal(msg.Payload, &request); err != nil {
 		return d.respondError(source, msg.ID, err)
 	}
-	if err := d.validateTimer(request.Unit); err != nil {
+	id, err := unit.ParseID(request.Unit)
+	if err != nil {
 		return d.respondError(source, msg.ID, err)
 	}
-	slog.Info("daemon: timer enable", "unit", request.Unit, "enabled", request.Enabled)
+	if err := d.validateTimer(id); err != nil {
+		return d.respondError(source, msg.ID, err)
+	}
+	slog.Info("daemon: timer enable", "unit", id, "enabled", request.Enabled)
 
-	state, err := d.store.ReadTimerState(request.Unit)
+	state, err := d.store.ReadTimerState(id.String())
 	if err != nil {
 		return d.respondError(source, msg.ID, err)
 	}
 	state.Enabled = request.Enabled
-	if err := d.store.WriteTimerState(request.Unit, state); err != nil {
+	if err := d.store.WriteTimerState(id.String(), state); err != nil {
 		return d.respondError(source, msg.ID, err)
 	}
 
-	response, err := d.timerResult(request.Unit)
+	response, err := d.timerResult(id.String())
 	if err != nil {
 		return d.respondError(source, msg.ID, err)
 	}
@@ -45,19 +47,23 @@ func (d *Daemon) handleTimerStart(source transport.Peer, msg transport.Message) 
 	if err := json.Unmarshal(msg.Payload, &request); err != nil {
 		return d.respondError(source, msg.ID, err)
 	}
-
-	definition, err := d.timerDefinition(request.Unit)
+	id, err := unit.ParseID(request.Unit)
 	if err != nil {
 		return d.respondError(source, msg.ID, err)
 	}
-	slog.Info("daemon: timer start", "unit", request.Unit, "service", definition.Service)
+
+	definition, err := d.timerDefinition(id)
+	if err != nil {
+		return d.respondError(source, msg.ID, err)
+	}
+	slog.Info("daemon: timer start", "unit", id, "service", definition.Service)
 	if !d.sched.Has(definition.Name) {
 		if err := d.sched.Add(definition); err != nil {
 			return d.respondError(source, msg.ID, err)
 		}
 	}
 
-	response, err := d.timerResult(request.Unit)
+	response, err := d.timerResult(id.String())
 	if err != nil {
 		return d.respondError(source, msg.ID, err)
 	}
@@ -69,16 +75,20 @@ func (d *Daemon) handleTimerStop(source transport.Peer, msg transport.Message) e
 	if err := json.Unmarshal(msg.Payload, &request); err != nil {
 		return d.respondError(source, msg.ID, err)
 	}
-	if err := d.validateTimer(request.Unit); err != nil {
+	id, err := unit.ParseID(request.Unit)
+	if err != nil {
 		return d.respondError(source, msg.ID, err)
 	}
-	slog.Info("daemon: timer stop", "unit", request.Unit)
+	if err := d.validateTimer(id); err != nil {
+		return d.respondError(source, msg.ID, err)
+	}
+	slog.Info("daemon: timer stop", "unit", id)
 
-	if err := d.sched.Stop(request.Unit); err != nil {
+	if err := d.sched.Stop(id.String()); err != nil {
 		return d.respondError(source, msg.ID, err)
 	}
 
-	response, err := d.timerResult(request.Unit)
+	response, err := d.timerResult(id.String())
 	if err != nil {
 		return d.respondError(source, msg.ID, err)
 	}
@@ -100,56 +110,60 @@ func (d *Daemon) timerResult(name string) (protocol.TimerResult, error) {
 	}, nil
 }
 
-func (d *Daemon) validateTimer(name string) error {
-	if !strings.HasSuffix(name, ".timer") {
-		return fmt.Errorf("unit %s is not a timer", name)
+func (d *Daemon) validateTimer(id unit.ID) error {
+	if id.Type != unit.TypeTimer {
+		return fmt.Errorf("unit %s is not a timer", id)
 	}
-	data, err := d.store.ReadUnit(name)
+	data, err := d.store.ReadUnit(id.String())
 	if err != nil {
-		return fmt.Errorf("timer %s not found", name)
+		return fmt.Errorf("timer %s not found", id)
 	}
-	if _, err := unit.Parse(name, data); err != nil {
-		return fmt.Errorf("parse timer %s: %w", name, err)
+	if _, err := unit.Parse(id, data); err != nil {
+		return fmt.Errorf("parse timer %s: %w", id, err)
 	}
 	return nil
 }
 
-func (d *Daemon) timerDefinition(name string) (scheduler.Timer, error) {
-	if !strings.HasSuffix(name, ".timer") {
-		return scheduler.Timer{}, fmt.Errorf("unit %s is not a timer", name)
+func (d *Daemon) timerDefinition(id unit.ID) (scheduler.Timer, error) {
+	if id.Type != unit.TypeTimer {
+		return scheduler.Timer{}, fmt.Errorf("unit %s is not a timer", id)
 	}
-	data, err := d.store.ReadUnit(name)
+	data, err := d.store.ReadUnit(id.String())
 	if err != nil {
-		return scheduler.Timer{}, fmt.Errorf("timer %s not found", name)
+		return scheduler.Timer{}, fmt.Errorf("timer %s not found", id)
 	}
-	parsed, err := unit.Parse(name, data)
+	parsed, err := unit.Parse(id, data)
 	if err != nil {
-		return scheduler.Timer{}, fmt.Errorf("parse timer %s: %w", name, err)
+		return scheduler.Timer{}, fmt.Errorf("parse timer %s: %w", id, err)
 	}
 	for _, warning := range parsed.Warnings {
-		slog.Warn("daemon: ignored timer directive", "unit", name, "warning", warning)
+		slog.Warn("daemon: ignored timer directive", "unit", id, "warning", warning)
 	}
 	if len(parsed.Timer.OnCalendar) == 0 {
-		return scheduler.Timer{}, fmt.Errorf("timer %s has no OnCalendar", name)
+		return scheduler.Timer{}, fmt.Errorf("timer %s has no OnCalendar", id)
 	}
 
-	target := timerTarget(parsed.Timer, name)
-	service := strings.TrimSuffix(target, filepath.Ext(target))
-	if service == config.ManagerServiceName {
-		return scheduler.Timer{}, fmt.Errorf("timer %s targets the vsystemd manager service", name)
+	target, err := timerTarget(parsed.Timer, id)
+	if err != nil {
+		return scheduler.Timer{}, err
+	}
+	if target.Name == config.ManagerServiceName {
+		return scheduler.Timer{}, fmt.Errorf("timer %s targets the vsystemd manager service", id)
 	}
 	return scheduler.Timer{
-		Name:       name,
-		Service:    service,
+		Name:       id.String(),
+		Service:    target.Name,
 		OnCalendar: parsed.Timer.OnCalendar,
 	}, nil
 }
 
-func timerTarget(timer *unit.TimerUnit, name string) string {
+// timerTarget returns the service a timer activates, defaulting to a service
+// with the same name as the timer.
+func timerTarget(timer *unit.TimerUnit, id unit.ID) (unit.ID, error) {
 	if timer.Unit != "" {
-		return timer.Unit
+		return unit.ParseID(timer.Unit)
 	}
-	return strings.TrimSuffix(name, ".timer") + ".service"
+	return unit.ID{Name: id.Name, Type: unit.TypeService}, nil
 }
 
 func (d *Daemon) startTimers() error {
@@ -165,23 +179,28 @@ func (d *Daemon) startTimers() error {
 
 	known := make(map[string]bool)
 	for _, name := range units {
-		if !strings.HasSuffix(name, ".timer") {
-			continue
-		}
-		known[name] = true
-		if !states[name].Enabled {
-			continue
-		}
-		definition, err := d.timerDefinition(name)
+		id, err := unit.ParseID(name)
 		if err != nil {
 			slog.Warn("daemon: skip timer", "unit", name, "error", err)
 			continue
 		}
-		if err := d.sched.Add(definition); err != nil {
-			slog.Warn("daemon: add timer to scheduler failed", "unit", name, "error", err)
+		if id.Type != unit.TypeTimer {
 			continue
 		}
-		slog.Info("daemon: timer started", "unit", name, "service", definition.Service)
+		known[id.String()] = true
+		if !states[id.String()].Enabled {
+			continue
+		}
+		definition, err := d.timerDefinition(id)
+		if err != nil {
+			slog.Warn("daemon: skip timer", "unit", id, "error", err)
+			continue
+		}
+		if err := d.sched.Add(definition); err != nil {
+			slog.Warn("daemon: add timer to scheduler failed", "unit", id, "error", err)
+			continue
+		}
+		slog.Info("daemon: timer started", "unit", id, "service", definition.Service)
 	}
 
 	d.timerMu.Lock()
@@ -204,13 +223,18 @@ func (d *Daemon) reloadTimers() error {
 	names := make(map[string]bool)
 	var definitions []scheduler.Timer
 	for _, name := range units {
-		if !strings.HasSuffix(name, ".timer") {
-			continue
-		}
-		names[name] = true
-		definition, err := d.timerDefinition(name)
+		id, err := unit.ParseID(name)
 		if err != nil {
 			slog.Warn("daemon: skip timer", "unit", name, "error", err)
+			continue
+		}
+		if id.Type != unit.TypeTimer {
+			continue
+		}
+		names[id.String()] = true
+		definition, err := d.timerDefinition(id)
+		if err != nil {
+			slog.Warn("daemon: skip timer", "unit", id, "error", err)
 			continue
 		}
 		definitions = append(definitions, definition)
