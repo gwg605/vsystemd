@@ -14,17 +14,19 @@ type service struct {
 }
 
 type Manager struct {
-	mu       sync.Mutex
-	services map[string]*service
-	nextPID  uint32
+	mu              sync.Mutex
+	services        map[string]*service
+	processServices map[scm.ProcessHandle]string
+	nextPID         uint32
 }
 
 var _ scm.Manager = (*Manager)(nil)
 
 func New() *Manager {
 	return &Manager{
-		services: make(map[string]*service),
-		nextPID:  1000,
+		services:        make(map[string]*service),
+		processServices: make(map[scm.ProcessHandle]string),
+		nextPID:         1000,
 	}
 }
 
@@ -119,7 +121,7 @@ func (m *Manager) QueryStatus(name string) (scm.ServiceStatus, error) {
 	return svc.status, nil
 }
 
-func (m *Manager) ListServices() ([]scm.ServiceStatus, error) {
+func (m *Manager) QueryStatuses() ([]scm.ServiceStatus, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	statuses := make([]scm.ServiceStatus, 0, len(m.services))
@@ -130,4 +132,44 @@ func (m *Manager) ListServices() ([]scm.ServiceStatus, error) {
 		return statuses[i].Name < statuses[j].Name
 	})
 	return statuses, nil
+}
+
+func (m *Manager) ListServices() ([]scm.ServiceConfig, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	configs := make([]scm.ServiceConfig, 0, len(m.services))
+	for _, svc := range m.services {
+		configs = append(configs, readConfig(svc.config))
+	}
+	sort.Slice(configs, func(i, j int) bool {
+		return configs[i].Name < configs[j].Name
+	})
+	return configs, nil
+}
+
+func (m *Manager) GetServiceByHandle(handle scm.ProcessHandle) (scm.ServiceConfig, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	name, ok := m.processServices[handle]
+	if !ok {
+		return scm.ServiceConfig{}, scm.ErrNotService
+	}
+	svc, ok := m.services[name]
+	if !ok {
+		return scm.ServiceConfig{}, scm.ErrNotService
+	}
+	return readConfig(svc.config), nil
+}
+
+// SetProcessService registers a process handle as belonging to a service so
+// that GetServiceByHandle can resolve it.
+func (m *Manager) SetProcessService(handle scm.ProcessHandle, name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.processServices[handle] = name
+}
+
+func readConfig(config scm.ServiceConfig) scm.ServiceConfig {
+	config.Password = ""
+	return config
 }

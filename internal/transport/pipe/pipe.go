@@ -17,6 +17,7 @@ import (
 	"github.com/Microsoft/go-winio"
 	"golang.org/x/sys/windows"
 
+	"github.com/gwg605/vsystemd/internal/scm"
 	"github.com/gwg605/vsystemd/internal/transport"
 )
 
@@ -65,8 +66,8 @@ type outbound struct {
 	timer *time.Timer
 }
 
-func New(config transport.Config, local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
-	return newTransport(config, local, handler, authenticatorFor(local), pipeServerVerifier{})
+func New(config transport.Config, local transport.Peer, handler transport.MsgHandler, services scm.Manager) (transport.Transport, error) {
+	return newTransport(config, local, handler, authenticatorFor(local, services), pipeServerVerifier{services: services})
 }
 
 func newTransport(config transport.Config, local transport.Peer, handler transport.MsgHandler, auth authenticator, verify serverVerifier) (transport.Transport, error) {

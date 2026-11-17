@@ -118,18 +118,22 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 	if err != nil {
 		return protocol.ListUnitsResponse{}, fmt.Errorf("list units: %w", err)
 	}
-	services, err := d.manager.ListServices()
+	configs, err := d.manager.ListServices()
 	if err != nil {
 		return protocol.ListUnitsResponse{}, fmt.Errorf("list services: %w", err)
 	}
+	statuses, err := d.manager.QueryStatuses()
+	if err != nil {
+		return protocol.ListUnitsResponse{}, fmt.Errorf("query service statuses: %w", err)
+	}
 
-	scmByName := make(map[string]scm.ServiceStatus, len(services))
-	for _, service := range services {
-		scmByName[service.Name] = service
+	scmByName := make(map[string]scm.ServiceStatus, len(statuses))
+	for _, status := range statuses {
+		scmByName[status.Name] = status
 	}
 
 	seen := make(map[string]bool)
-	units := make([]protocol.UnitStatus, 0, len(unitNames)+len(services))
+	units := make([]protocol.UnitStatus, 0, len(unitNames)+len(configs))
 	for _, name := range unitNames {
 		seen[name] = true
 
@@ -158,8 +162,8 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 		units = append(units, entry)
 	}
 
-	for _, service := range services {
-		name := service.Name + ".service"
+	for _, config := range configs {
+		name := config.Name + ".service"
 		if seen[name] {
 			continue
 		}
@@ -169,6 +173,7 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 			Type:         "service",
 			SystemdState: string(state.Status()),
 			SCMState:     state.SCMState,
+			Description:  config.Description,
 		})
 	}
 

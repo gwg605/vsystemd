@@ -57,12 +57,20 @@ func TestServiceLifecycle(t *testing.T) {
 		t.Fatalf("UpdateService() error = %v", err)
 	}
 
-	statuses, err := m.ListServices()
+	configs, err := m.ListServices()
 	if err != nil {
 		t.Fatalf("ListServices() error = %v", err)
 	}
+	if len(configs) != 1 || configs[0].Name != "app" {
+		t.Errorf("ListServices() = %v", configs)
+	}
+
+	statuses, err := m.QueryStatuses()
+	if err != nil {
+		t.Fatalf("QueryStatuses() error = %v", err)
+	}
 	if len(statuses) != 1 || statuses[0].Name != "app" {
-		t.Errorf("ListServices() = %v", statuses)
+		t.Errorf("QueryStatuses() = %v", statuses)
 	}
 
 	if err := m.DeleteService("app"); err != nil {

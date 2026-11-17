@@ -3,25 +3,21 @@
 package scm
 
 import (
+	"errors"
 	"fmt"
+	"strings"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
-const managedServiceGroup = "vsystemd"
-
-func requireWin32Service(service *mgr.Service, name string) error {
-	config, err := service.Config()
-	if err != nil {
-		return fmt.Errorf("query config %s: %w", name, err)
-	}
-	if config.ServiceType&windows.SERVICE_WIN32 == 0 {
-		return fmt.Errorf("service %s is not a Win32 service (type 0x%X)", name, config.ServiceType)
-	}
-	return nil
-}
+const (
+	managedServiceGroup = "vsystemd"
+	// maxSIDSize is SECURITY_MAX_SID_SIZE.
+	maxSIDSize = 68
+)
 
 type windowsManager struct{}
 
@@ -35,9 +31,9 @@ func (windowsManager) CreateService(cfg ServiceConfig) error {
 		return fmt.Errorf("parse binary path for %s: %w", cfg.Name, err)
 	}
 
-	m, err := mgr.Connect()
+	m, err := connect()
 	if err != nil {
-		return fmt.Errorf("connect to SCM: %w", err)
+		return err
 	}
 	defer m.Disconnect()
 
@@ -49,21 +45,17 @@ func (windowsManager) CreateService(cfg ServiceConfig) error {
 }
 
 func (windowsManager) UpdateService(cfg ServiceConfig) error {
-	m, err := mgr.Connect()
+	m, err := connect()
 	if err != nil {
-		return fmt.Errorf("connect to SCM: %w", err)
+		return err
 	}
 	defer m.Disconnect()
 
-	service, err := m.OpenService(cfg.Name)
+	service, _, err := openManaged(m, cfg.Name)
 	if err != nil {
-		return fmt.Errorf("open service %s: %w", cfg.Name, err)
-	}
-	defer service.Close()
-
-	if err := requireWin32Service(service, cfg.Name); err != nil {
 		return err
 	}
+	defer service.Close()
 
 	config := windowsServiceConfig(cfg)
 	if cfg.StartType == 0 {
@@ -76,15 +68,15 @@ func (windowsManager) UpdateService(cfg ServiceConfig) error {
 }
 
 func (windowsManager) DeleteService(name string) error {
-	m, err := mgr.Connect()
+	m, err := connect()
 	if err != nil {
-		return fmt.Errorf("connect to SCM: %w", err)
+		return err
 	}
 	defer m.Disconnect()
 
-	service, err := m.OpenService(name)
+	service, _, err := openManaged(m, name)
 	if err != nil {
-		return fmt.Errorf("open service %s: %w", name, err)
+		return err
 	}
 	defer service.Close()
 
@@ -95,21 +87,17 @@ func (windowsManager) DeleteService(name string) error {
 }
 
 func (windowsManager) StartService(name string) error {
-	m, err := mgr.Connect()
+	m, err := connect()
 	if err != nil {
-		return fmt.Errorf("connect to SCM: %w", err)
+		return err
 	}
 	defer m.Disconnect()
 
-	service, err := m.OpenService(name)
+	service, _, err := openManaged(m, name)
 	if err != nil {
-		return fmt.Errorf("open service %s: %w", name, err)
-	}
-	defer service.Close()
-
-	if err := requireWin32Service(service, name); err != nil {
 		return err
 	}
+	defer service.Close()
 
 	status, err := service.Query()
 	if err != nil {
@@ -125,21 +113,17 @@ func (windowsManager) StartService(name string) error {
 }
 
 func (windowsManager) StopService(name string) error {
-	m, err := mgr.Connect()
+	m, err := connect()
 	if err != nil {
-		return fmt.Errorf("connect to SCM: %w", err)
+		return err
 	}
 	defer m.Disconnect()
 
-	service, err := m.OpenService(name)
+	service, _, err := openManaged(m, name)
 	if err != nil {
-		return fmt.Errorf("open service %s: %w", name, err)
-	}
-	defer service.Close()
-
-	if err := requireWin32Service(service, name); err != nil {
 		return err
 	}
+	defer service.Close()
 
 	status, err := service.Query()
 	if err != nil {
@@ -155,27 +139,153 @@ func (windowsManager) StopService(name string) error {
 }
 
 func (windowsManager) QueryStatus(name string) (ServiceStatus, error) {
-	m, err := mgr.Connect()
+	m, err := connect()
 	if err != nil {
-		return ServiceStatus{}, fmt.Errorf("connect to SCM: %w", err)
+		return ServiceStatus{}, err
 	}
 	defer m.Disconnect()
-	return queryService(m, name)
+
+	service, _, err := openManaged(m, name)
+	if err != nil {
+		return ServiceStatus{}, err
+	}
+	defer service.Close()
+
+	return queryStatusOf(service, name)
 }
 
-func (windowsManager) ListServices() ([]ServiceStatus, error) {
+func (windowsManager) QueryStatuses() ([]ServiceStatus, error) {
+	m, err := connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.Disconnect()
+
+	services, err := listManaged(m)
+	if err != nil {
+		return nil, err
+	}
+
+	statuses := make([]ServiceStatus, 0, len(services))
+	for _, entry := range services {
+		service, err := m.OpenService(entry.name)
+		if err != nil {
+			continue
+		}
+		status, err := queryStatusOf(service, entry.name)
+		service.Close()
+		if err != nil {
+			continue
+		}
+		statuses = append(statuses, status)
+	}
+	return statuses, nil
+}
+
+func (windowsManager) ListServices() ([]ServiceConfig, error) {
+	m, err := connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.Disconnect()
+
+	services, err := listManaged(m)
+	if err != nil {
+		return nil, err
+	}
+
+	configs := make([]ServiceConfig, 0, len(services))
+	for _, entry := range services {
+		configs = append(configs, serviceConfigFrom(entry.name, entry.config))
+	}
+	return configs, nil
+}
+
+func (windowsManager) GetServiceByHandle(handle ProcessHandle) (ServiceConfig, error) {
+	process := windows.Handle(handle)
+	pid, err := windows.GetProcessId(process)
+	if err != nil {
+		return ServiceConfig{}, fmt.Errorf("get process id: %w", err)
+	}
+
+	name, ok, err := serviceNameByPID(pid)
+	if err != nil {
+		return ServiceConfig{}, fmt.Errorf("resolve service by pid: %w", err)
+	}
+	if !ok {
+		return ServiceConfig{}, ErrNotService
+	}
+
+	m, err := connect()
+	if err != nil {
+		return ServiceConfig{}, err
+	}
+	defer m.Disconnect()
+
+	service, config, err := openManaged(m, name)
+	if err != nil {
+		return ServiceConfig{}, err
+	}
+	service.Close()
+
+	if err := verifyAccount(process, config.ServiceStartName); err != nil {
+		return ServiceConfig{}, err
+	}
+	if err := verifyImage(process, config.BinaryPathName); err != nil {
+		return ServiceConfig{}, err
+	}
+	return serviceConfigFrom(name, config), nil
+}
+
+func connect() (*mgr.Mgr, error) {
 	m, err := mgr.Connect()
 	if err != nil {
 		return nil, fmt.Errorf("connect to SCM: %w", err)
 	}
-	defer m.Disconnect()
+	return m, nil
+}
 
+// openManaged opens a service and verifies that it is an own-process Win32
+// service created by vsystemd.
+func openManaged(m *mgr.Mgr, name string) (*mgr.Service, mgr.Config, error) {
+	service, err := m.OpenService(name)
+	if err != nil {
+		return nil, mgr.Config{}, fmt.Errorf("open service %s: %w", name, err)
+	}
+
+	config, err := service.Config()
+	if err != nil {
+		service.Close()
+		return nil, mgr.Config{}, fmt.Errorf("query config %s: %w", name, err)
+	}
+	if !isOwnProcessService(config) {
+		service.Close()
+		return nil, mgr.Config{}, fmt.Errorf("service %s is not an own-process Win32 service", name)
+	}
+	if config.LoadOrderGroup != managedServiceGroup {
+		service.Close()
+		return nil, mgr.Config{}, ErrNotManaged
+	}
+	return service, config, nil
+}
+
+func isOwnProcessService(config mgr.Config) bool {
+	return config.ServiceType&windows.SERVICE_WIN32_OWN_PROCESS != 0 &&
+		config.ServiceType&windows.SERVICE_WIN32_SHARE_PROCESS == 0
+}
+
+type managedService struct {
+	name   string
+	config mgr.Config
+}
+
+func listManaged(m *mgr.Mgr) ([]managedService, error) {
 	names, err := m.ListServices()
 	if err != nil {
 		return nil, fmt.Errorf("list services: %w", err)
 	}
 
-	statuses := make([]ServiceStatus, 0, len(names))
+	services := make([]managedService, 0, len(names))
 	for _, name := range names {
 		service, err := m.OpenService(name)
 		if err != nil {
@@ -186,27 +296,23 @@ func (windowsManager) ListServices() ([]ServiceStatus, error) {
 		if err != nil || config.LoadOrderGroup != managedServiceGroup {
 			continue
 		}
-
-		status, err := queryService(m, name)
-		if err != nil {
-			continue
-		}
-		statuses = append(statuses, status)
+		services = append(services, managedService{name: name, config: config})
 	}
-	return statuses, nil
+	return services, nil
 }
 
-func queryService(m *mgr.Mgr, name string) (ServiceStatus, error) {
-	service, err := m.OpenService(name)
-	if err != nil {
-		return ServiceStatus{}, fmt.Errorf("open service %s: %w", name, err)
+func serviceConfigFrom(name string, config mgr.Config) ServiceConfig {
+	return ServiceConfig{
+		Name:         name,
+		BinaryPath:   config.BinaryPathName,
+		StartType:    serviceStartType(config.StartType),
+		Dependencies: config.Dependencies,
+		User:         config.ServiceStartName,
+		Description:  config.Description,
 	}
-	defer service.Close()
+}
 
-	if err := requireWin32Service(service, name); err != nil {
-		return ServiceStatus{}, err
-	}
-
+func queryStatusOf(service *mgr.Service, name string) (ServiceStatus, error) {
 	status, err := service.Query()
 	if err != nil {
 		return ServiceStatus{}, fmt.Errorf("query service %s: %w", name, err)
@@ -217,6 +323,168 @@ func queryService(m *mgr.Mgr, name string) (ServiceStatus, error) {
 		PID:      status.ProcessId,
 		ExitCode: serviceExitCode(status),
 	}, nil
+}
+
+func serviceNameByPID(pid uint32) (string, bool, error) {
+	handle, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT|windows.SC_MANAGER_ENUMERATE_SERVICE)
+	if err != nil {
+		return "", false, err
+	}
+	defer windows.CloseServiceHandle(handle)
+
+	var needed, returned, resume uint32
+	size := uint32(8192)
+	for {
+		buf := make([]byte, size)
+		err := windows.EnumServicesStatusEx(
+			handle,
+			windows.SC_ENUM_PROCESS_INFO,
+			windows.SERVICE_WIN32,
+			windows.SERVICE_ACTIVE,
+			&buf[0],
+			size,
+			&needed,
+			&returned,
+			&resume,
+			nil,
+		)
+		if err != nil {
+			if errors.Is(err, windows.ERROR_MORE_DATA) {
+				size = needed
+				continue
+			}
+			return "", false, err
+		}
+		if returned == 0 {
+			return "", false, nil
+		}
+		entries := unsafe.Slice((*windows.ENUM_SERVICE_STATUS_PROCESS)(unsafe.Pointer(&buf[0])), returned)
+		for i := range entries {
+			if entries[i].ServiceStatusProcess.ProcessId == pid {
+				return windows.UTF16PtrToString(entries[i].ServiceName), true, nil
+			}
+		}
+		return "", false, nil
+	}
+}
+
+func verifyAccount(process windows.Handle, startName string) error {
+	expected, err := accountSID(startName)
+	if err != nil {
+		return fmt.Errorf("resolve account %q: %w", startName, err)
+	}
+
+	var token windows.Token
+	if err := windows.OpenProcessToken(process, windows.TOKEN_QUERY, &token); err != nil {
+		return fmt.Errorf("open process token: %w", err)
+	}
+	defer token.Close()
+
+	user, err := token.GetTokenUser()
+	if err != nil {
+		return fmt.Errorf("token user: %w", err)
+	}
+	if !user.User.Sid.Equals(expected) {
+		return errors.New("service account mismatch")
+	}
+	return nil
+}
+
+func verifyImage(process windows.Handle, binaryPathName string) error {
+	binaryPath := firstCommandArg(binaryPathName)
+	if binaryPath == "" {
+		return errors.New("service has no binary path")
+	}
+
+	imagePath, err := processImagePath(process)
+	if err != nil {
+		return fmt.Errorf("process image: %w", err)
+	}
+	processFileID, err := fileIDOfPath(imagePath)
+	if err != nil {
+		return fmt.Errorf("process image file id: %w", err)
+	}
+	binaryFileID, err := fileIDOfPath(binaryPath)
+	if err != nil {
+		return fmt.Errorf("service binary file id: %w", err)
+	}
+	if processFileID != binaryFileID {
+		return errors.New("service binary mismatch")
+	}
+	return nil
+}
+
+func processImagePath(process windows.Handle) (string, error) {
+	buf := make([]uint16, windows.MAX_PATH)
+	size := uint32(len(buf))
+	if err := windows.QueryFullProcessImageName(process, 0, &buf[0], &size); err != nil {
+		buf = make([]uint16, 4096)
+		size = uint32(len(buf))
+		if retryErr := windows.QueryFullProcessImageName(process, 0, &buf[0], &size); retryErr != nil {
+			return "", fmt.Errorf("query process image: %w", retryErr)
+		}
+	}
+	return windows.UTF16ToString(buf[:size]), nil
+}
+
+func accountSID(name string) (*windows.SID, error) {
+	account := strings.TrimSpace(name)
+	if account == "" || strings.EqualFold(account, "LocalSystem") || strings.EqualFold(account, `NT AUTHORITY\SYSTEM`) {
+		return windows.CreateWellKnownSid(windows.WinLocalSystemSid)
+	}
+
+	accountPtr, err := windows.UTF16PtrFromString(account)
+	if err != nil {
+		return nil, err
+	}
+	sidBuf := make([]byte, maxSIDSize)
+	sidLen := uint32(len(sidBuf))
+	domainBuf := make([]uint16, 256)
+	domainLen := uint32(len(domainBuf))
+	var use uint32
+	if err := windows.LookupAccountName(nil, accountPtr, (*windows.SID)(unsafe.Pointer(&sidBuf[0])), &sidLen, &domainBuf[0], &domainLen, &use); err != nil {
+		return nil, err
+	}
+	return (*windows.SID)(unsafe.Pointer(&sidBuf[0])), nil
+}
+
+type fileIDInfo struct {
+	VolumeSerialNumber uint64
+	FileID             [16]byte
+}
+
+func fileIDOfPath(path string) ([16]byte, error) {
+	pathPtr, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return [16]byte{}, err
+	}
+	handle, err := windows.CreateFile(
+		pathPtr,
+		windows.GENERIC_READ,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_FLAG_BACKUP_SEMANTICS,
+		0,
+	)
+	if err != nil {
+		return [16]byte{}, err
+	}
+	defer windows.CloseHandle(handle)
+
+	var info fileIDInfo
+	if err := windows.GetFileInformationByHandleEx(handle, windows.FileIdInfo, (*byte)(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info))); err != nil {
+		return [16]byte{}, err
+	}
+	return info.FileID, nil
+}
+
+func firstCommandArg(commandLine string) string {
+	executable, _, err := splitBinaryPath(commandLine)
+	if err != nil {
+		return ""
+	}
+	return executable
 }
 
 func splitBinaryPath(binaryPath string) (string, []string, error) {
@@ -257,6 +525,21 @@ func windowsStartType(t StartType) uint32 {
 		return windows.SERVICE_DISABLED
 	default:
 		return windows.SERVICE_DEMAND_START
+	}
+}
+
+func serviceStartType(t uint32) StartType {
+	switch t {
+	case windows.SERVICE_BOOT_START:
+		return StartTypeBoot
+	case windows.SERVICE_SYSTEM_START:
+		return StartTypeSystem
+	case windows.SERVICE_AUTO_START:
+		return StartTypeAutomatic
+	case windows.SERVICE_DISABLED:
+		return StartTypeDisabled
+	default:
+		return StartTypeManual
 	}
 }
 
