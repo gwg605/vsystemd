@@ -166,12 +166,7 @@ The SCM service name is the unit filename without its extension:
 ```
 
 If the `vsystemd` Windows service does not exist, this command registers it
-(`LocalSystem`, automatic start) and starts it. To run the daemon in the
-foreground for debugging:
-
-```powershell
-.\bin\vsystemd.exe --mode=daemon --console
-```
+(`LocalSystem`, automatic start) and starts it.
 
 The daemon must be running for `status`, `list-units`, `list-timers`,
 `daemon-reload`, and timer commands.

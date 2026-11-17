@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
@@ -43,9 +42,6 @@ func run(args []string) error {
 	unitName := parser.String("u", "unit", &argparse.Options{
 		Help: "unit name for run mode",
 	})
-	console := parser.Flag("c", "console", &argparse.Options{
-		Help: "run daemon in the foreground",
-	})
 
 	if err := parser.Parse(args); err != nil {
 		return errors.New(parser.Usage(err))
@@ -53,7 +49,7 @@ func run(args []string) error {
 
 	switch *mode {
 	case "daemon":
-		return runDaemon(*console)
+		return runDaemon()
 	case "run":
 		if *unitName == "" {
 			return errors.New(parser.Usage("--unit is required for run mode"))
@@ -64,7 +60,7 @@ func run(args []string) error {
 	}
 }
 
-func runDaemon(console bool) error {
+func runDaemon() error {
 	executable, err := os.Executable()
 	if err != nil {
 		return err
@@ -74,7 +70,7 @@ func runDaemon(console bool) error {
 	if err != nil {
 		return err
 	}
-	if !isService && !console {
+	if !isService {
 		return startDaemonService(executable)
 	}
 
@@ -95,7 +91,7 @@ func runDaemon(console bool) error {
 	}
 	defer operationLog.Close()
 	logging.Configure(operationLog, cfg.LogLevel)
-	slog.Info("vsystemd daemon starting", "console", console)
+	slog.Info("vsystemd daemon starting")
 
 	store, err := storage.New(cfg.Paths())
 	if err != nil {
@@ -108,28 +104,13 @@ func runDaemon(console bool) error {
 	}
 	defer service.Close()
 
-	if isService {
-		err := daemon.RunService(daemonServiceName, service)
-		if err != nil {
-			slog.Error("vsystemd daemon exited with error", "error", err)
-		} else {
-			slog.Info("vsystemd daemon exited")
-		}
-		return err
+	err = daemon.RunService(daemonServiceName, service)
+	if err != nil {
+		slog.Error("vsystemd daemon exited with error", "error", err)
+	} else {
+		slog.Info("vsystemd daemon exited")
 	}
-	return runDaemonConsole(service)
-}
-
-func runDaemonConsole(service *daemon.Daemon) error {
-	if err := service.Start(); err != nil {
-		return err
-	}
-
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt)
-	defer signal.Stop(signals)
-	<-signals
-	return nil
+	return err
 }
 
 func runUnit(name string) error {
@@ -200,16 +181,7 @@ func runUnit(name string) error {
 	}
 	defer service.Close()
 
-	isService, err := svc.IsWindowsService()
-	if err != nil {
-		return err
-	}
-	var runErr error
-	if isService {
-		runErr = service.Run()
-	} else {
-		runErr = service.RunConsole()
-	}
+	runErr := service.Run()
 	if runErr != nil {
 		slog.Error("vsystemd runner exited with error", "unit", name, "error", runErr)
 	} else {

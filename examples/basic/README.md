@@ -49,11 +49,7 @@ The unit files use absolute paths under `C:\vsystemd-example`.
 ```
 
 If the `vsystemd` Windows service does not exist yet, this command registers and
-starts it. To run the daemon in the foreground for debugging instead:
-
-```powershell
-.\bin\vsystemd.exe --mode=daemon --console
-```
+starts it.
 
 ## 4. Register the units in SCM
 
