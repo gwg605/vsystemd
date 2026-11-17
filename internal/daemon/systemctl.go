@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/logwriter"
 	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/scm"
@@ -135,6 +136,9 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 	seen := make(map[string]bool)
 	units := make([]protocol.UnitStatus, 0, len(unitNames)+len(configs))
 	for _, name := range unitNames {
+		if name == config.ManagerServiceName+".service" {
+			continue
+		}
 		seen[name] = true
 
 		data, err := d.store.ReadUnit(name)
@@ -162,8 +166,11 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 		units = append(units, entry)
 	}
 
-	for _, config := range configs {
-		name := config.Name + ".service"
+	for _, cfg := range configs {
+		if cfg.Name == config.ManagerServiceName {
+			continue
+		}
+		name := cfg.Name + ".service"
 		if seen[name] {
 			continue
 		}
@@ -173,7 +180,7 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 			Type:         "service",
 			SystemdState: string(state.Status()),
 			SCMState:     state.SCMState,
-			Description:  config.Description,
+			Description:  cfg.Description,
 		})
 	}
 

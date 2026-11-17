@@ -28,6 +28,8 @@ const (
 type ProcessHandle uintptr
 
 var (
+	// ErrNotFound reports that a service does not exist.
+	ErrNotFound = errors.New("service not found")
 	// ErrNotService reports that a process is not a service at all.
 	ErrNotService = errors.New("process is not a service")
 	// ErrNotManaged reports that a service was not created by vsystemd.

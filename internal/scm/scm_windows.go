@@ -250,6 +250,9 @@ func connect() (*mgr.Mgr, error) {
 func openManaged(m *mgr.Mgr, name string) (*mgr.Service, mgr.Config, error) {
 	service, err := m.OpenService(name)
 	if err != nil {
+		if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+			return nil, mgr.Config{}, ErrNotFound
+		}
 		return nil, mgr.Config{}, fmt.Errorf("open service %s: %w", name, err)
 	}
 

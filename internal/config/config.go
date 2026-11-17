@@ -16,6 +16,11 @@ import (
 
 const defaultRoot = `C:\ProgramData\vsystemd`
 
+// ManagerServiceName is the SCM name of the vsystemd manager service. It is
+// managed like any other service but is excluded from unit listings and cannot
+// be controlled through systemctl.
+const ManagerServiceName = "vsystemd"
+
 // defaultInheritEnv is the comma-separated list of environment variables
 // inherited from the runner when building a clean service environment.
 const defaultInheritEnv = "SystemRoot,SystemDrive,windir,PATH,PATHEXT,ComSpec,TEMP,TMP," +

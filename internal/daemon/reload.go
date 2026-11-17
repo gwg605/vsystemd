@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/scm"
 	"github.com/gwg605/vsystemd/internal/unit"
 )
@@ -24,7 +25,10 @@ func (d *Daemon) reload() error {
 	}
 
 	for _, service := range services {
-		config, ok := desired[service.Name]
+		if service.Name == config.ManagerServiceName {
+			continue
+		}
+		desiredConfig, ok := desired[service.Name]
 		if !ok {
 			slog.Info("daemon: removing service", "service", service.Name)
 			if err := d.manager.StopService(service.Name); err != nil {
@@ -38,7 +42,7 @@ func (d *Daemon) reload() error {
 			continue
 		}
 		slog.Info("daemon: updating service", "service", service.Name)
-		if err := d.manager.UpdateService(config); err != nil {
+		if err := d.manager.UpdateService(desiredConfig); err != nil {
 			slog.Error("daemon: update service failed", "service", service.Name, "error", err)
 			return fmt.Errorf("update service %s: %w", service.Name, err)
 		}
