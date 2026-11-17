@@ -81,6 +81,30 @@ func TestReadPasswordStdin(t *testing.T) {
 	}
 }
 
+func TestParseUnit(t *testing.T) {
+	id, err := parseUnit("app")
+	if err != nil {
+		t.Fatalf("parseUnit(app) error = %v", err)
+	}
+	if id != (unit.ID{Name: "app", Type: unit.TypeService}) {
+		t.Errorf("parseUnit(app) = %+v", id)
+	}
+
+	id, err = parseUnit("job.timer")
+	if err != nil {
+		t.Fatalf("parseUnit(job.timer) error = %v", err)
+	}
+	if id != (unit.ID{Name: "job", Type: unit.TypeTimer}) {
+		t.Errorf("parseUnit(job.timer) = %+v", id)
+	}
+
+	for _, bad := range []string{"../evil", "bad name", "app.txt"} {
+		if _, err := parseUnit(bad); err == nil {
+			t.Errorf("parseUnit(%q) error = nil", bad)
+		}
+	}
+}
+
 func TestUnitPathWarnings(t *testing.T) {
 	dir := t.TempDir()
 	good := filepath.Join(dir, "app.log")

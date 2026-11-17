@@ -251,6 +251,14 @@ func TestDaemonReloadRequest(t *testing.T) {
 	}
 }
 
+func TestStatusRequestInvalidUnit(t *testing.T) {
+	_, client := newControlClient(t, scmfake.New(), storagefake.New())
+	response := controlRequest(t, client, protocol.TypeStatusRequest, protocol.StatusRequest{Unit: "../evil.service"})
+	if response.Type != protocol.TypeErrorResponse {
+		t.Fatalf("response type = %q, want error", response.Type)
+	}
+}
+
 func TestListUnitsExcludesManagerService(t *testing.T) {
 	store := storagefake.New()
 	store.WriteUnit("app.service", []byte("[Service]\nExecStart=x\n"))

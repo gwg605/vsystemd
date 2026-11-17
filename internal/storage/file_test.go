@@ -55,9 +55,6 @@ func TestFileUnits(t *testing.T) {
 	if _, err := st.ReadUnit("missing.service"); err == nil {
 		t.Error("ReadUnit() error = nil for missing unit")
 	}
-	if _, err := st.ReadUnit("../app.service"); err == nil {
-		t.Error("ReadUnit() error = nil for invalid name")
-	}
 }
 
 func TestFileTimerStates(t *testing.T) {

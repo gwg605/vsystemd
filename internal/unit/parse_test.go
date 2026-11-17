@@ -35,12 +35,12 @@ StartLimitBurst=3
 StartLimitIntervalSec=30s
 `)
 
-	file, err := Parse("example.service", data)
+	file, err := Parse(ID{Name: "example", Type: TypeService}, data)
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
 	}
 
-	if file.Name != "example.service" {
+	if file.Name.String() != "example.service" {
 		t.Errorf("Name = %q", file.Name)
 	}
 	if file.Description != "Example service" {
@@ -126,7 +126,7 @@ Unit=backup.service
 Persistent=true
 `)
 
-	file, err := Parse("backup.timer", data)
+	file, err := Parse(ID{Name: "backup", Type: TypeTimer}, data)
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
 	}
@@ -160,39 +160,34 @@ Persistent=true
 func TestParseErrors(t *testing.T) {
 	tests := []struct {
 		name string
-		file string
+		id   ID
 		data string
 	}{
 		{
-			name: "unsupported extension",
-			file: "example.socket",
-			data: "[Socket]\nListenStream=80\n",
-		},
-		{
 			name: "missing service section",
-			file: "example.service",
+			id:   ID{Name: "example", Type: TypeService},
 			data: "[Unit]\nDescription=Example\n",
 		},
 		{
 			name: "malformed line",
-			file: "example.service",
+			id:   ID{Name: "example", Type: TypeService},
 			data: "[Service]\nExecStart\n",
 		},
 		{
 			name: "invalid restart policy",
-			file: "example.service",
+			id:   ID{Name: "example", Type: TypeService},
 			data: "[Service]\nRestart=sometimes\n",
 		},
 		{
 			name: "invalid timespan",
-			file: "example.service",
+			id:   ID{Name: "example", Type: TypeService},
 			data: "[Service]\nRestartSec=soon\n",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := Parse(tt.file, []byte(tt.data)); err == nil {
+			if _, err := Parse(tt.id, []byte(tt.data)); err == nil {
 				t.Fatal("Parse() error = nil")
 			}
 		})

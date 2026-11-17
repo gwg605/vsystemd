@@ -67,24 +67,27 @@ func (d *Daemon) desiredServices() (map[string]scm.ServiceConfig, error) {
 			continue
 		}
 
-		data, err := d.store.ReadUnit(name)
+		id, err := unit.ParseID(name)
 		if err != nil {
-			return nil, fmt.Errorf("read unit %s: %w", name, err)
+			return nil, fmt.Errorf("unit %s: %w", name, err)
 		}
-		parsed, err := unit.Parse(name, data)
+		data, err := d.store.ReadUnit(id.String())
 		if err != nil {
-			return nil, fmt.Errorf("parse unit %s: %w", name, err)
+			return nil, fmt.Errorf("read unit %s: %w", id, err)
+		}
+		parsed, err := unit.Parse(id, data)
+		if err != nil {
+			return nil, fmt.Errorf("parse unit %s: %w", id, err)
 		}
 		for _, warning := range parsed.Warnings {
-			slog.Warn("daemon: ignored unit directive", "unit", name, "warning", warning)
+			slog.Warn("daemon: ignored unit directive", "unit", id, "warning", warning)
 		}
 
-		serviceName := strings.TrimSuffix(name, ".service")
-		services[serviceName] = scm.ServiceConfig{
-			Name:         serviceName,
-			BinaryPath:   runnerCommand(d.binaryPath, name),
+		services[id.Name] = scm.ServiceConfig{
+			Name:         id.Name,
+			BinaryPath:   runnerCommand(d.binaryPath, id.String()),
 			Dependencies: unitDependencies(parsed),
-			User:         unitUser(parsed.Service.User, serviceName),
+			User:         unitUser(parsed.Service.User, id.Name),
 			Description:  parsed.Description,
 		}
 	}

@@ -95,15 +95,19 @@ func (d *Daemon) verifyRunnerAccount(source transport.Peer) error {
 	if account == "" {
 		return nil
 	}
-	data, err := d.store.ReadUnit(source.Name())
+	id, err := unit.ParseID(source.Name())
 	if err != nil {
 		return nil
 	}
-	parsed, err := unit.Parse(source.Name(), data)
+	data, err := d.store.ReadUnit(id.String())
+	if err != nil {
+		return nil
+	}
+	parsed, err := unit.Parse(id, data)
 	if err != nil || parsed.Service == nil {
 		return nil
 	}
-	expected := unitUser(parsed.Service.User, strings.TrimSuffix(source.Name(), ".service"))
+	expected := unitUser(parsed.Service.User, id.Name)
 	if !strings.EqualFold(account, expected) {
 		return fmt.Errorf("forbidden: state event from %s with unexpected account %q", source, account)
 	}
