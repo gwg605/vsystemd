@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
-	"strings"
 
 	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/logwriter"
@@ -139,12 +138,12 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 	seen := make(map[string]bool)
 	units := make([]protocol.UnitStatus, 0, len(unitNames)+len(configs))
 	for _, name := range unitNames {
-		if name == config.ManagerServiceName+".service" {
-			continue
-		}
 		id, err := unit.ParseID(name)
 		if err != nil {
 			return protocol.ListUnitsResponse{}, fmt.Errorf("unit %s: %w", name, err)
+		}
+		if id.Name == config.ManagerServiceName {
+			continue
 		}
 		seen[id.String()] = true
 
@@ -169,7 +168,7 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 		}
 
 		entry.Type = "service"
-		state := d.serviceState(id.String(), scmByName)
+		state := d.serviceState(id, scmByName)
 		entry.SystemdState = string(state.Status())
 		entry.SCMState = state.SCMState
 		units = append(units, entry)
@@ -179,13 +178,13 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 		if cfg.Name == config.ManagerServiceName {
 			continue
 		}
-		name := cfg.Name + ".service"
-		if seen[name] {
+		id := unit.ID{Name: cfg.Name, Type: unit.TypeService}
+		if seen[id.String()] {
 			continue
 		}
-		state := d.serviceState(name, scmByName)
+		state := d.serviceState(id, scmByName)
 		units = append(units, protocol.UnitStatus{
-			Unit:         name,
+			Unit:         id.String(),
 			Type:         "service",
 			SystemdState: string(state.Status()),
 			SCMState:     state.SCMState,
@@ -199,10 +198,10 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 	return protocol.ListUnitsResponse{Units: units}, nil
 }
 
-func (d *Daemon) serviceState(name string, services map[string]scm.ServiceStatus) ServiceState {
-	state, _ := d.State(name)
-	state.Unit = name
-	if service, ok := services[strings.TrimSuffix(name, ".service")]; ok {
+func (d *Daemon) serviceState(id unit.ID, services map[string]scm.ServiceStatus) ServiceState {
+	state, _ := d.State(id.String())
+	state.Unit = id.String()
+	if service, ok := services[id.Name]; ok {
 		state.SCMState = service.State
 	}
 	return state

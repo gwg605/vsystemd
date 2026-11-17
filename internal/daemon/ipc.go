@@ -125,6 +125,10 @@ func (d *Daemon) updateFromEvent(event runner.StateEvent) {
 	if event.Unit == "" {
 		return
 	}
+	id, err := unit.ParseID(event.Unit)
+	if err != nil {
+		return
+	}
 
 	transition := event.Timestamp
 	if transition.IsZero() {
@@ -132,8 +136,8 @@ func (d *Daemon) updateFromEvent(event runner.StateEvent) {
 	}
 
 	state := ServiceState{
-		Unit:           event.Unit,
-		SCMState:       d.scmState(event.Unit),
+		Unit:           id.String(),
+		SCMState:       d.scmState(id),
 		RunnerState:    RunnerState(event.State),
 		PID:            event.PID,
 		ExitCode:       event.ExitCode,
@@ -143,20 +147,19 @@ func (d *Daemon) updateFromEvent(event runner.StateEvent) {
 	}
 
 	d.mu.Lock()
-	d.states[event.Unit] = state
+	d.states[id.String()] = state
 	d.mu.Unlock()
 
 	slog.Debug("daemon: service state updated",
-		"unit", event.Unit,
+		"unit", id,
 		"runner_state", event.State,
 		"scm_state", state.SCMState,
 		"pid", state.PID,
 		"exit_code", state.ExitCode)
 }
 
-func (d *Daemon) scmState(unit string) scm.State {
-	name := strings.TrimSuffix(unit, ".service")
-	status, err := d.manager.QueryStatus(name)
+func (d *Daemon) scmState(id unit.ID) scm.State {
+	status, err := d.manager.QueryStatus(id.Name)
 	if err != nil {
 		return 0
 	}

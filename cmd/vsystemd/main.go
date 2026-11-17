@@ -113,7 +113,7 @@ func runDaemon() error {
 
 func runUnit(name string) error {
 	if filepath.Ext(name) == "" {
-		name += ".service"
+		name += unit.TypeService.Extension()
 	}
 	id, err := unit.ParseID(name)
 	if err != nil {

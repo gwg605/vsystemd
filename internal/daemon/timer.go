@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/protocol"
@@ -180,12 +179,12 @@ func (d *Daemon) startTimers() error {
 
 	known := make(map[string]bool)
 	for _, name := range units {
-		if !strings.HasSuffix(name, ".timer") {
-			continue
-		}
 		id, err := unit.ParseID(name)
 		if err != nil {
 			slog.Warn("daemon: skip timer", "unit", name, "error", err)
+			continue
+		}
+		if id.Type != unit.TypeTimer {
 			continue
 		}
 		known[id.String()] = true
@@ -224,12 +223,12 @@ func (d *Daemon) reloadTimers() error {
 	names := make(map[string]bool)
 	var definitions []scheduler.Timer
 	for _, name := range units {
-		if !strings.HasSuffix(name, ".timer") {
-			continue
-		}
 		id, err := unit.ParseID(name)
 		if err != nil {
 			slog.Warn("daemon: skip timer", "unit", name, "error", err)
+			continue
+		}
+		if id.Type != unit.TypeTimer {
 			continue
 		}
 		names[id.String()] = true

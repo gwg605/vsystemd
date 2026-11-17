@@ -132,7 +132,7 @@ func run(args []string) error {
 
 func parseUnit(name string) (unit.ID, error) {
 	if filepath.Ext(name) == "" {
-		name += ".service"
+		name += unit.TypeService.Extension()
 	}
 	return unit.ParseID(name)
 }
@@ -568,15 +568,15 @@ func unitDependencies(file *unit.UnitFile) []string {
 	var dependencies []string
 	for _, names := range [][]string{file.Requires, file.After} {
 		for _, name := range names {
-			if !strings.HasSuffix(name, ".service") {
+			id, err := unit.ParseID(name)
+			if err != nil || id.Type != unit.TypeService {
 				continue
 			}
-			dependency := strings.TrimSuffix(name, ".service")
-			if _, ok := seen[dependency]; ok {
+			if _, ok := seen[id.Name]; ok {
 				continue
 			}
-			seen[dependency] = struct{}{}
-			dependencies = append(dependencies, dependency)
+			seen[id.Name] = struct{}{}
+			dependencies = append(dependencies, id.Name)
 		}
 	}
 	return dependencies
