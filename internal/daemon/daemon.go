@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/logwriter"
 	"github.com/gwg605/vsystemd/internal/scheduler"
 	"github.com/gwg605/vsystemd/internal/scm"
@@ -35,9 +36,9 @@ type Daemon struct {
 	timerMu     sync.Mutex
 	knownTimers map[string]bool
 
-	cleanupStop    chan struct{}
-	cleanupDone    chan struct{}
-	cleanupStarted bool
+	loopStop    chan struct{}
+	loopDone    chan struct{}
+	loopStarted bool
 }
 
 func New(manager scm.Manager, store storage.Storage, binaryPath, logsDir string, logRotation logwriter.Rotation, newTransport TransportFactory) (*Daemon, error) {
@@ -54,8 +55,8 @@ func New(manager scm.Manager, store storage.Storage, binaryPath, logsDir string,
 		states:      make(map[string]ServiceState),
 		sched:       scheduler.New(manager, store),
 		knownTimers: make(map[string]bool),
-		cleanupStop: make(chan struct{}),
-		cleanupDone: make(chan struct{}),
+		loopStop:    make(chan struct{}),
+		loopDone:    make(chan struct{}),
 	}
 	tr, err := newTransport(transport.NewPeer(transport.PeerDaemon, daemonPeer, false), daemon.handle)
 	if err != nil {
@@ -73,13 +74,9 @@ func New(manager scm.Manager, store storage.Storage, binaryPath, logsDir string,
 func (d *Daemon) Start() error {
 	slog.Info("daemon: starting")
 	d.cleanupLogs()
-	d.startCleanupLoop()
+	d.startLoop()
 	if err := d.startTimers(); err != nil {
 		slog.Error("daemon: start timers failed", "error", err)
-		return err
-	}
-	if err := d.requestRunnerStates(); err != nil {
-		slog.Error("daemon: request runner states failed", "error", err)
 		return err
 	}
 	slog.Info("daemon: started")
@@ -90,14 +87,14 @@ func (d *Daemon) Close() error {
 	slog.Info("daemon: closing")
 
 	d.mu.Lock()
-	started := d.cleanupStarted
+	started := d.loopStarted
 	if started {
-		close(d.cleanupStop)
-		d.cleanupStarted = false
+		close(d.loopStop)
+		d.loopStarted = false
 	}
 	d.mu.Unlock()
 	if started {
-		<-d.cleanupDone
+		<-d.loopDone
 	}
 
 	schedulerErr := d.sched.Close()
@@ -112,28 +109,54 @@ func (d *Daemon) Close() error {
 	return transportErr
 }
 
-func (d *Daemon) startCleanupLoop() {
+func (d *Daemon) startLoop() {
 	d.mu.Lock()
-	if d.cleanupStarted {
+	if d.loopStarted {
 		d.mu.Unlock()
 		return
 	}
-	d.cleanupStarted = true
+	d.loopStarted = true
 	d.mu.Unlock()
 
 	go func() {
-		defer close(d.cleanupDone)
-		ticker := time.NewTicker(time.Hour)
-		defer ticker.Stop()
+		defer close(d.loopDone)
+		cleanup := time.NewTicker(time.Hour)
+		defer cleanup.Stop()
+		watchdog := time.NewTicker(config.HeartbeatInterval / 2)
+		defer watchdog.Stop()
 		for {
 			select {
-			case <-ticker.C:
+			case <-cleanup.C:
 				d.cleanupLogs()
-			case <-d.cleanupStop:
+			case <-watchdog.C:
+				d.checkRunners()
+			case <-d.loopStop:
 				return
 			}
 		}
 	}()
+}
+
+// checkRunners marks a runner dead when its heartbeat has been silent for too
+// long.
+func (d *Daemon) checkRunners() {
+	now := time.Now().UTC()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for name, state := range d.states {
+		switch state.RunnerState {
+		case RunnerStateActive, RunnerStateActivating, RunnerStateRestarting:
+		default:
+			continue
+		}
+		if now.Sub(state.LastTransition) < config.RunnerDeadAfter {
+			continue
+		}
+		state.RunnerState = RunnerStateDead
+		state.LastTransition = now
+		d.states[name] = state
+		slog.Warn("daemon: runner heartbeat lost", "unit", name)
+	}
 }
 
 func (d *Daemon) cleanupLogs() {

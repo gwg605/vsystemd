@@ -37,9 +37,7 @@ func newReporterPair(t *testing.T, unitName string) (*StateReporter, *fake.Trans
 	t.Cleanup(func() { daemon.Close() })
 
 	var reporter *StateReporter
-	runnerTransport := network.New(transport.DefaultConfig(), transport.NewPeer(transport.PeerRunner, unitName, false), func(source transport.Peer, msg transport.Message) error {
-		return reporter.Handle(source, msg)
-	})
+	runnerTransport := network.New(transport.DefaultConfig(), transport.NewPeer(transport.PeerRunner, unitName, false), nil)
 	t.Cleanup(func() { runnerTransport.Close() })
 	reporter = NewStateReporter(runnerTransport, unitName)
 
@@ -62,31 +60,5 @@ func TestStateReporterReport(t *testing.T) {
 	}
 	if event.Timestamp.IsZero() {
 		t.Error("Timestamp is zero")
-	}
-}
-
-func TestStateReporterStatusRequest(t *testing.T) {
-	reporter, daemon, _ := newReporterPair(t, "app.service")
-
-	want := StateEvent{State: StateActive, PID: 456, ExitCode: 1, RestartCount: 3, LastError: "boom"}
-	if err := reporter.Report(want); err != nil {
-		t.Fatalf("Report() error = %v", err)
-	}
-
-	resp, err := daemon.Req(daemon.Target(transport.PeerRunner, transport.WithName("app.service")), transport.Message{Type: MessageStatusRequest})
-	if err != nil {
-		t.Fatalf("Req() error = %v", err)
-	}
-	if resp.Type != MessageStateEvent || resp.RequestID == "" {
-		t.Errorf("response = %+v", resp)
-	}
-
-	var got StateEvent
-	if err := json.Unmarshal(resp.Payload, &got); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if got.Unit != "app.service" || got.State != want.State || got.PID != want.PID ||
-		got.ExitCode != want.ExitCode || got.RestartCount != want.RestartCount || got.LastError != want.LastError {
-		t.Errorf("state = %+v", got)
 	}
 }

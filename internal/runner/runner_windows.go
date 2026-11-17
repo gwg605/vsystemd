@@ -8,9 +8,11 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/windows/svc"
 
+	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/transport"
 	"github.com/gwg605/vsystemd/internal/unit"
 )
@@ -45,7 +47,7 @@ func NewRunner(name string, service *unit.ServiceUnit, logs *LogStreamer, env En
 		handler: handler,
 	}
 
-	tr, err := newTransport(transport.NewPeer(transport.PeerRunner, name, false), runner.handle)
+	tr, err := newTransport(transport.NewPeer(transport.PeerRunner, name, false), nil)
 	if err != nil {
 		slog.Error("runner: create transport failed", "unit", name, "error", err)
 		logs.Close()
@@ -63,13 +65,28 @@ func NewRunner(name string, service *unit.ServiceUnit, logs *LogStreamer, env En
 	return runner, nil
 }
 
-func (r *Runner) handle(source transport.Peer, msg transport.Message) error {
-	return r.reporter.Handle(source, msg)
-}
-
 func (r *Runner) Run() error {
+	stop := make(chan struct{})
+	go r.heartbeat(stop)
+	defer close(stop)
+
 	serviceName := strings.TrimSuffix(r.name, filepath.Ext(r.name))
 	return Run(serviceName, r.handler)
+}
+
+func (r *Runner) heartbeat(stop <-chan struct{}) {
+	ticker := time.NewTicker(config.HeartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if err := r.reporter.Heartbeat(); err != nil {
+				slog.Warn("runner: heartbeat failed", "unit", r.name, "error", err)
+			}
+		case <-stop:
+			return
+		}
+	}
 }
 
 func (r *Runner) Serve(requests <-chan svc.ChangeRequest, changes chan<- svc.Status) (bool, uint32) {

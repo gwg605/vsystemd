@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/runner"
 	"github.com/gwg605/vsystemd/internal/scm"
 	"github.com/gwg605/vsystemd/internal/transport"
+	"github.com/gwg605/vsystemd/internal/unit"
 )
 
 func (d *Daemon) handle(source transport.Peer, msg transport.Message) error {
@@ -81,48 +81,32 @@ func (d *Daemon) handleStateEvent(source transport.Peer, msg transport.Message) 
 	if event.Unit != source.Name() {
 		return fmt.Errorf("forbidden: state event for %q from %q", event.Unit, source.Name())
 	}
+	if err := d.verifyRunnerAccount(source); err != nil {
+		return err
+	}
 	d.updateFromEvent(event)
 	return nil
 }
 
-func (d *Daemon) requestRunnerStates() error {
-	slog.Info("daemon: requesting runner states")
-	units, err := d.store.ListUnits()
+// verifyRunnerAccount checks that the account the service runs under matches the
+// User= declared by its unit. A missing unit or config is not an error here.
+func (d *Daemon) verifyRunnerAccount(source transport.Peer) error {
+	account := source.ServiceConfig().User
+	if account == "" {
+		return nil
+	}
+	data, err := d.store.ReadUnit(source.Name())
 	if err != nil {
-		return fmt.Errorf("list units: %w", err)
+		return nil
 	}
-
-	var wg sync.WaitGroup
-	for _, unit := range units {
-		if !strings.HasSuffix(unit, ".service") {
-			continue
-		}
-		wg.Add(1)
-		go func(unit string) {
-			defer wg.Done()
-
-			response, err := d.transport.Req(
-				d.transport.Target(transport.PeerRunner, transport.WithName(unit)),
-				transport.Message{Type: runner.MessageStatusRequest},
-			)
-			if err != nil {
-				slog.Debug("daemon: runner state request failed", "unit", unit, "error", err)
-				return
-			}
-
-			var event runner.StateEvent
-			if err := json.Unmarshal(response.Payload, &event); err != nil {
-				slog.Warn("daemon: decode runner state response failed", "unit", unit, "error", err)
-				return
-			}
-			if event.Unit == "" {
-				event.Unit = unit
-			}
-			d.updateFromEvent(event)
-		}(unit)
+	parsed, err := unit.Parse(source.Name(), data)
+	if err != nil || parsed.Service == nil {
+		return nil
 	}
-	wg.Wait()
-	slog.Info("daemon: runner states requested")
+	expected := unitUser(parsed.Service.User, strings.TrimSuffix(source.Name(), ".service"))
+	if !strings.EqualFold(account, expected) {
+		return fmt.Errorf("forbidden: state event from %s with unexpected account %q", source, account)
+	}
 	return nil
 }
 

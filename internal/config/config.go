@@ -21,6 +21,14 @@ const defaultRoot = `C:\ProgramData\vsystemd`
 // be controlled through systemctl.
 const ManagerServiceName = "vsystemd"
 
+// HeartbeatInterval is how often a runner reports its state to the daemon while
+// its state stays unchanged.
+const HeartbeatInterval = 10 * time.Second
+
+// RunnerDeadAfter is how long the daemon waits without a runner heartbeat
+// before marking the runner dead.
+const RunnerDeadAfter = 30 * time.Second
+
 // defaultInheritEnv is the comma-separated list of environment variables
 // inherited from the runner when building a clean service environment.
 const defaultInheritEnv = "SystemRoot,SystemDrive,windir,PATH,PATHEXT,ComSpec,TEMP,TMP," +
@@ -51,7 +59,6 @@ func (e Environment) InheritList() []string {
 
 type IPC struct {
 	ConnectTimeoutMS int `json:"connect_timeout_ms"`
-	IdleTimeoutMS    int `json:"idle_timeout_ms"`
 	RequestTimeoutMS int `json:"request_timeout_ms"`
 }
 
@@ -86,7 +93,6 @@ func Default() Config {
 		LogLevel:        "info",
 		IPC: IPC{
 			ConnectTimeoutMS: 2000,
-			IdleTimeoutMS:    5000,
 			RequestTimeoutMS: 10000,
 		},
 		Defaults: Defaults{
@@ -137,7 +143,6 @@ func (c Config) Paths() storage.Paths {
 func (c Config) TransportConfig() transport.Config {
 	return transport.Config{
 		ConnectTimeout: time.Duration(c.IPC.ConnectTimeoutMS) * time.Millisecond,
-		IdleTimeout:    time.Duration(c.IPC.IdleTimeoutMS) * time.Millisecond,
 		RequestTimeout: time.Duration(c.IPC.RequestTimeoutMS) * time.Millisecond,
 	}
 }
@@ -177,9 +182,6 @@ func (c *Config) applyDefaults() {
 	}
 	if c.IPC.ConnectTimeoutMS <= 0 {
 		c.IPC.ConnectTimeoutMS = defaults.IPC.ConnectTimeoutMS
-	}
-	if c.IPC.IdleTimeoutMS <= 0 {
-		c.IPC.IdleTimeoutMS = defaults.IPC.IdleTimeoutMS
 	}
 	if c.IPC.RequestTimeoutMS <= 0 {
 		c.IPC.RequestTimeoutMS = defaults.IPC.RequestTimeoutMS

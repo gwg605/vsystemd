@@ -9,7 +9,7 @@ import (
 
 func TestListenerManyConnections(t *testing.T) {
 	name := `\\.\pipe\vsystemd-test-listener-many`
-	l, err := listenPipe(name, pipeACL)
+	l, err := listenPipe(name, daemonPipeACL)
 	if err != nil {
 		t.Fatalf("listenPipe: %v", err)
 	}

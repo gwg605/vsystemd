@@ -22,8 +22,7 @@ func TestDaemonControlEcho(t *testing.T) {
 	}
 	defer daemon.Close()
 
-	control, err := newTestTransport(transport.DefaultConfig(), transport.NewPeer(transport.PeerControl, "systemctl_1", false), nil,
-		fixedAuth{transport.NewPeer(transport.PeerDaemon, "daemon", false)})
+	control, err := newTestTransport(transport.DefaultConfig(), transport.NewPeer(transport.PeerControl, "systemctl_1", false), nil, nil)
 	if err != nil {
 		t.Fatalf("control New: %v", err)
 	}

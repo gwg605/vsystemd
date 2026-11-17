@@ -5,7 +5,6 @@ package pipe
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"time"
 	"unsafe"
 
@@ -21,13 +20,6 @@ type authenticator interface {
 	authenticate(handle windows.Handle, acceptTime time.Time) (transport.Peer, error)
 }
 
-func authenticatorFor(local transport.Peer, services scm.Manager) authenticator {
-	if local.Type() == transport.PeerDaemon {
-		return clientAuthenticator{services: services}
-	}
-	return daemonOnlyAuthenticator{}
-}
-
 // clientAuthenticator verifies a client of the daemon pipe: either a managed
 // service runner, or an elevated control client.
 type clientAuthenticator struct {
@@ -41,10 +33,10 @@ func (a clientAuthenticator) authenticate(handle windows.Handle, acceptTime time
 	}
 	defer client.close()
 
-	config, err := a.services.GetServiceByHandle(scm.ProcessHandle(client.proc))
+	cfg, err := a.services.GetServiceByHandle(scm.ProcessHandle(client.proc))
 	switch {
 	case err == nil:
-		return transport.NewPeer(transport.PeerRunner, config.Name+".service", false), nil
+		return transport.NewPeer(transport.PeerRunner, cfg.Name+".service", false).WithService(cfg), nil
 	case errors.Is(err, scm.ErrNotService):
 		if !client.elevated {
 			return transport.Peer{}, errors.New("control client is not elevated")
@@ -55,91 +47,11 @@ func (a clientAuthenticator) authenticate(handle windows.Handle, acceptTime time
 	}
 }
 
-// daemonOnlyAuthenticator accepts only the daemon, which runs with elevated
-// rights (LocalSystem or an administrator).
-type daemonOnlyAuthenticator struct{}
-
-func (daemonOnlyAuthenticator) authenticate(handle windows.Handle, acceptTime time.Time) (transport.Peer, error) {
-	client, err := resolveClient(handle, acceptTime)
-	if err != nil {
-		return transport.Peer{}, err
-	}
-	defer client.close()
-	if !client.isSystem && !client.elevated {
-		return transport.Peer{}, errors.New("inbound peer is not the daemon")
-	}
-	return transport.NewPeer(transport.PeerDaemon, transport.PeerDaemonName, false), nil
-}
-
-// serverVerifier verifies the process on the server end of an outbound pipe so
-// that a squatter on the pipe name cannot impersonate a peer.
-type serverVerifier interface {
-	verify(target transport.Peer, serverPID int) error
-}
-
-type pipeServerVerifier struct {
-	services scm.Manager
-}
-
-func (v pipeServerVerifier) verify(target transport.Peer, serverPID int) error {
-	if serverPID <= 0 {
-		return errors.New("server pid is unavailable")
-	}
-	pid := uint32(serverPID)
-	switch target.Type() {
-	case transport.PeerControl:
-		expected, ok := controlPID(target.Name())
-		if !ok {
-			return fmt.Errorf("invalid control peer %q", target.Name())
-		}
-		if expected != pid {
-			return fmt.Errorf("control pipe server pid %d, want %d", pid, expected)
-		}
-	case transport.PeerRunner:
-		info, err := resolveProcess(pid)
-		if err != nil {
-			return err
-		}
-		defer info.close()
-		config, err := v.services.GetServiceByHandle(scm.ProcessHandle(info.proc))
-		if err != nil {
-			return fmt.Errorf("validate runner service: %w", err)
-		}
-		if config.Name+".service" != target.Name() {
-			return fmt.Errorf("runner pipe server is not service %s", target.Name())
-		}
-	case transport.PeerDaemon:
-		info, err := resolveProcess(pid)
-		if err != nil {
-			return fmt.Errorf("resolve daemon server: %w", err)
-		}
-		defer info.close()
-		if !info.isSystem && !info.elevated {
-			return errors.New("daemon pipe server is not the daemon")
-		}
-	default:
-		return fmt.Errorf("unsupported target %s", target)
-	}
-	return nil
-}
-
-// controlPID extracts the process id encoded in a control peer name
-// ("systemctl_<pid>").
-func controlPID(name string) (uint32, bool) {
-	pid, err := strconv.ParseUint(controlSuffix(name), 10, 32)
-	if err != nil {
-		return 0, false
-	}
-	return uint32(pid), true
-}
-
 type clientInfo struct {
 	pid      uint32
 	proc     windows.Handle
 	token    windows.Token
-	tokenSID *windows.SID
 	elevated bool
-	isSystem bool
 	created  windows.Filetime
 }
 
@@ -168,8 +80,8 @@ func resolveClient(handle windows.Handle, acceptTime time.Time) (*clientInfo, er
 	return info, nil
 }
 
-// resolveProcess opens a process and gathers its identity: token SID, elevation
-// and system-ness.
+// resolveProcess opens a process and gathers its identity: elevation and
+// creation time.
 func resolveProcess(pid uint32) (*clientInfo, error) {
 	proc, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
 	if err != nil {
@@ -187,19 +99,9 @@ func resolveProcess(pid uint32) (*clientInfo, error) {
 		info.close()
 		return nil, fmt.Errorf("open process token: %w", err)
 	}
-	tokenUser, err := info.token.GetTokenUser()
-	if err != nil {
-		info.close()
-		return nil, fmt.Errorf("token user: %w", err)
-	}
-	info.tokenSID = tokenUser.User.Sid
-
 	if info.elevated, err = tokenElevated(info.token); err != nil {
 		info.close()
 		return nil, fmt.Errorf("token elevation: %w", err)
-	}
-	if systemSID, sidErr := windows.CreateWellKnownSid(windows.WinLocalSystemSid); sidErr == nil {
-		info.isSystem = info.tokenSID.Equals(systemSID)
 	}
 	return info, nil
 }

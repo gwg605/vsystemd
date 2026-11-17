@@ -10,36 +10,16 @@ import (
 	"github.com/gwg605/vsystemd/internal/transport"
 )
 
-func TestPipeName(t *testing.T) {
-	tests := []struct {
-		peer transport.Peer
-		want string
-	}{
-		{transport.NewPeer(transport.PeerDaemon, "daemon", false), `\\.\pipe\vsystemd-in`},
-		{transport.NewPeer(transport.PeerRunner, "foo.service", false), `\\.\pipe\vsystemd-svc-foo.service`},
-		{transport.NewPeer(transport.PeerControl, "systemctl_4321", false), `\\.\pipe\vsystemd-ctl-4321`},
-		{transport.NewPeer(transport.PeerControl, "systemctl-4321", false), `\\.\pipe\vsystemd-ctl-4321`},
-	}
-	for _, test := range tests {
-		if got := pipeName(test.peer); got != test.want {
-			t.Errorf("pipeName(%v) = %q, want %q", test.peer, got, test.want)
-		}
-	}
-}
-
 func TestSendAndRequest(t *testing.T) {
-	const (
-		clientPeer = "test-client.service"
-		serverPeer = "test-server.service"
-	)
+	old := daemonPipeName
+	daemonPipeName = `\\.\pipe\vsystemd-test-pipe`
+	t.Cleanup(func() { daemonPipeName = old })
+
+	const clientPeer = "test-client.service"
 
 	events := make(chan transport.Message, 1)
 	var server transport.Transport
-	var err error
-	server, err = newTestTransport(transport.DefaultConfig(), transport.NewPeer(transport.PeerRunner, serverPeer, false), func(source transport.Peer, msg transport.Message) error {
-		if source.Name() != clientPeer {
-			return nil
-		}
+	server, err := newTestTransport(transport.DefaultConfig(), transport.NewPeer(transport.PeerDaemon, "daemon", false), func(source transport.Peer, msg transport.Message) error {
 		switch msg.Type {
 		case "state_event":
 			events <- msg
@@ -57,14 +37,13 @@ func TestSendAndRequest(t *testing.T) {
 	}
 	defer server.Close()
 
-	client, err := newTestTransport(transport.DefaultConfig(), transport.NewPeer(transport.PeerRunner, clientPeer, false), nil,
-		fixedAuth{transport.NewPeer(transport.PeerRunner, serverPeer, false)})
+	client, err := newTestTransport(transport.DefaultConfig(), transport.NewPeer(transport.PeerRunner, clientPeer, false), nil, nil)
 	if err != nil {
 		t.Fatalf("client New() error = %v", err)
 	}
 	defer client.Close()
 
-	target := transport.NewPeer(transport.PeerRunner, serverPeer, false)
+	target := client.Target(transport.PeerDaemon)
 
 	if err := client.Send(target, transport.Message{
 		Type:    "state_event",
@@ -94,15 +73,18 @@ func TestSendAndRequest(t *testing.T) {
 	}
 }
 
-func TestSendToMissingPeer(t *testing.T) {
-	client, err := newTestTransport(transport.DefaultConfig(), transport.NewPeer(transport.PeerRunner, "test-missing-client.service", false), nil,
-		fixedAuth{transport.NewPeer(transport.PeerRunner, "test-missing-target.service", false)})
+func TestSendToMissingDaemon(t *testing.T) {
+	old := daemonPipeName
+	daemonPipeName = `\\.\pipe\vsystemd-test-missing`
+	t.Cleanup(func() { daemonPipeName = old })
+
+	client, err := newTestTransport(transport.DefaultConfig(), transport.NewPeer(transport.PeerRunner, "test-missing-client.service", false), nil, nil)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
 	defer client.Close()
 
-	err = client.Send(transport.NewPeer(transport.PeerRunner, "test-missing-target.service", false),
+	err = client.Send(client.Target(transport.PeerDaemon),
 		transport.Message{Type: "state_event"},
 		transport.WithConnectTimeout(50*time.Millisecond))
 	if err == nil {
