@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
 
@@ -76,37 +74,6 @@ func (r *Runner) Run() error {
 
 func (r *Runner) Serve(requests <-chan svc.ChangeRequest, changes chan<- svc.Status) (bool, uint32) {
 	return r.handler.Execute(nil, requests, changes)
-}
-
-func (r *Runner) RunConsole() error {
-	requests := make(chan svc.ChangeRequest)
-	changes := make(chan svc.Status)
-	done := make(chan struct{})
-
-	go func() {
-		r.handler.Execute(nil, requests, changes)
-		close(done)
-	}()
-	go func() {
-		for range changes {
-		}
-	}()
-
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt)
-	defer signal.Stop(signals)
-
-	select {
-	case <-signals:
-		select {
-		case requests <- svc.ChangeRequest{Cmd: svc.Stop}:
-		case <-done:
-		}
-		<-done
-	case <-done:
-	}
-	close(changes)
-	return nil
 }
 
 func (r *Runner) Close() error {

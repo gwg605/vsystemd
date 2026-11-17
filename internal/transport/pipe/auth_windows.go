@@ -95,8 +95,8 @@ func (c *clientInfo) verifyRunner(serviceName string) (transport.Peer, error) {
 	return transport.NewPeer(transport.PeerRunner, serviceName+".service", false), nil
 }
 
-// daemonOnlyAuthenticator accepts only the daemon, which runs as LocalSystem
-// (service) or as an elevated administrator (foreground/console mode).
+// daemonOnlyAuthenticator accepts only the daemon, which runs with elevated
+// rights (LocalSystem or an administrator).
 type daemonOnlyAuthenticator struct{}
 
 func (daemonOnlyAuthenticator) authenticate(handle windows.Handle, acceptTime time.Time) (transport.Peer, error) {
