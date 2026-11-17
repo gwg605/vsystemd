@@ -10,7 +10,10 @@ import (
 	"github.com/gwg605/vsystemd/internal/scm"
 )
 
-const daemonDescription = "Manages systemd-style services and timers on this computer."
+const (
+	daemonDisplayName = "VSystemd Service Manager"
+	daemonDescription = "Manages systemd-style services and timers on this computer."
+)
 
 func startDaemonService(executable string) error {
 	manager := scm.New()
@@ -19,6 +22,7 @@ func startDaemonService(executable string) error {
 		BinaryPath:  `"` + executable + `" --mode=daemon`,
 		StartType:   scm.StartTypeAutomatic,
 		User:        "LocalSystem",
+		DisplayName: daemonDisplayName,
 		Description: daemonDescription,
 	}
 

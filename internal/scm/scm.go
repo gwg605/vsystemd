@@ -43,6 +43,7 @@ type ServiceConfig struct {
 	Dependencies []string
 	User         string
 	Password     string
+	DisplayName  string
 	Description  string
 }
 
