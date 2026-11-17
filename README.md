@@ -231,11 +231,15 @@ C:\ProgramData\vsystemd\timers.json
 - `StandardOutput=file:<path>` truncates the specified file;
 - `StandardOutput=append:<path>` appends to the specified file;
 - `StandardOutput=null` discards the stream;
-- custom `file:`/`append:` paths must be absolute (no `..`), and their parent
-  directory must already exist and be writable — otherwise the service fails to
-  start; any other `StandardOutput`/`StandardError` value is rejected;
-- `EnvironmentFile=` paths must also be absolute (no `..`); a missing file fails
-  the service unless the path is prefixed with `-`;
+- custom `file:`/`append:` paths must be absolute and be plain file paths: no
+  `..`/`.` components, no components with trailing dots or spaces, no alternate
+  data streams (`:`), no device paths (`\\.\`, `\\?\`) and no reserved device
+  names (`CON`, `NUL`, `COM1`, ...); the parent directory must already exist and
+  be a directory (and writable for `file:`/`append:`), the target must not be a
+  directory — otherwise the service fails to start; any other
+  `StandardOutput`/`StandardError` value is rejected;
+- `EnvironmentFile=` paths are subject to the same path rules; a missing file
+  fails the service unless the path is prefixed with `-`;
 - explicit `file:`/`append:` paths are never rotated or age-cleaned;
 - managed logs are rotated when `max_size_mb` is exceeded or the file becomes
   older than `max_age_days`; a new timestamped file is started.
