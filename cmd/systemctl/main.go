@@ -396,7 +396,7 @@ func daemonReloadCommand() error {
 
 func daemonRequest(cfg config.Config, msgType string, payload any) (transport.Message, error) {
 	local := transport.NewPeer(transport.PeerControl, fmt.Sprintf("systemctl_%d", os.Getpid()), false)
-	tr, err := pipe.New(cfg.TransportConfig(), local, nil)
+	tr, err := pipe.New(cfg.TransportConfig(), local, nil, nil)
 	if err != nil {
 		return transport.Message{}, fmt.Errorf("create transport: %w", err)
 	}

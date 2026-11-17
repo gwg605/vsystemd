@@ -8,6 +8,7 @@ import (
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
+	"golang.org/x/sys/windows/svc/mgr"
 )
 
 func TestMapState(t *testing.T) {
@@ -96,5 +97,78 @@ func TestWindowsServiceConfig(t *testing.T) {
 	}
 	if got.DisplayName != cfg.Name || got.Description != cfg.Description {
 		t.Errorf("display = %q/%q", got.DisplayName, got.Description)
+	}
+}
+
+func TestServiceStartType(t *testing.T) {
+	tests := []struct {
+		startType uint32
+		want      StartType
+	}{
+		{windows.SERVICE_BOOT_START, StartTypeBoot},
+		{windows.SERVICE_SYSTEM_START, StartTypeSystem},
+		{windows.SERVICE_AUTO_START, StartTypeAutomatic},
+		{windows.SERVICE_DEMAND_START, StartTypeManual},
+		{windows.SERVICE_DISABLED, StartTypeDisabled},
+	}
+	for _, tt := range tests {
+		if got := serviceStartType(tt.startType); got != tt.want {
+			t.Errorf("serviceStartType(%d) = %v, want %v", tt.startType, got, tt.want)
+		}
+	}
+}
+
+func TestServiceConfigFrom(t *testing.T) {
+	got := serviceConfigFrom("app", mgr.Config{
+		BinaryPathName:   `"C:\vsystemd\vsystemd.exe" --mode=run --unit=app.service`,
+		StartType:        windows.SERVICE_AUTO_START,
+		Dependencies:     []string{"db"},
+		ServiceStartName: `NT SERVICE\app`,
+		Description:      "Example",
+	})
+
+	if got.Name != "app" || got.BinaryPath != `"C:\vsystemd\vsystemd.exe" --mode=run --unit=app.service` {
+		t.Errorf("name/binary = %q/%q", got.Name, got.BinaryPath)
+	}
+	if got.StartType != StartTypeAutomatic {
+		t.Errorf("StartType = %v", got.StartType)
+	}
+	if !reflect.DeepEqual(got.Dependencies, []string{"db"}) {
+		t.Errorf("Dependencies = %v", got.Dependencies)
+	}
+	if got.User != `NT SERVICE\app` || got.Description != "Example" {
+		t.Errorf("user/description = %q/%q", got.User, got.Description)
+	}
+	if got.Password != "" {
+		t.Errorf("Password = %q", got.Password)
+	}
+}
+
+func TestAccountSIDKnownAccounts(t *testing.T) {
+	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
+	if err != nil {
+		t.Fatalf("CreateWellKnownSid: %v", err)
+	}
+	for _, name := range []string{"", "LocalSystem", `NT AUTHORITY\SYSTEM`} {
+		sid, err := accountSID(name)
+		if err != nil {
+			t.Fatalf("accountSID(%q): %v", name, err)
+		}
+		if !sid.Equals(system) {
+			t.Errorf("accountSID(%q) = %v, want LocalSystem", name, sid)
+		}
+	}
+}
+
+func TestFirstCommandArg(t *testing.T) {
+	tests := map[string]string{
+		`"C:\path\vsystemd.exe" --mode=run --unit=app.service`: `C:\path\vsystemd.exe`,
+		`C:\path\vsystemd.exe`:                                 `C:\path\vsystemd.exe`,
+		``:                                                     ``,
+	}
+	for input, want := range tests {
+		if got := firstCommandArg(input); got != want {
+			t.Errorf("firstCommandArg(%q) = %q, want %q", input, got, want)
+		}
 	}
 }

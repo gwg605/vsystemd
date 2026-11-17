@@ -98,7 +98,8 @@ func runDaemon() error {
 		return err
 	}
 
-	service, err := daemon.New(scm.New(), store, executable, cfg.LogsDir, cfg.LogRotation(), transportFactory(cfg))
+	manager := scm.New()
+	service, err := daemon.New(manager, store, executable, cfg.LogsDir, cfg.LogRotation(), transportFactory(cfg, manager))
 	if err != nil {
 		return err
 	}
@@ -175,7 +176,7 @@ func runUnit(name string) error {
 		Inherit: cfg.Environment.InheritList(),
 		Vars:    cfg.Environment.Vars,
 	}
-	service, err := runner.NewRunner(name, parsed.Service, logs, envDefaults, transportFactory(cfg))
+	service, err := runner.NewRunner(name, parsed.Service, logs, envDefaults, transportFactory(cfg, scm.New()))
 	if err != nil {
 		return err
 	}
@@ -205,8 +206,8 @@ func applyServiceDefaults(service *unit.ServiceUnit, cfg config.Config) {
 	}
 }
 
-func transportFactory(cfg config.Config) func(transport.Peer, transport.MsgHandler) (transport.Transport, error) {
+func transportFactory(cfg config.Config, services scm.Manager) func(transport.Peer, transport.MsgHandler) (transport.Transport, error) {
 	return func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
-		return pipe.New(cfg.TransportConfig(), local, handler)
+		return pipe.New(cfg.TransportConfig(), local, handler, services)
 	}
 }
