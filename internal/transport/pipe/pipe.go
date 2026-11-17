@@ -9,7 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -25,17 +24,8 @@ import (
 const (
 	errnoFileNotFound = syscall.Errno(2)
 	errnoPipeBusy     = syscall.Errno(231)
-)
 
-const (
-	servicePipePrefix = `\\.\pipe\vsystemd-svc-`
-	controlPipePrefix = `\\.\pipe\vsystemd-ctl-`
-
-	pipeACL       = "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;OW)"
 	daemonPipeACL = "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;OW)(A;;GA;;;S-1-5-80-0)"
-
-	systemctlUnderscore = "systemctl_"
-	systemctlHyphen     = "systemctl-"
 )
 
 // daemonPipeName is a variable so tests can avoid clashing with a running daemon.
@@ -46,49 +36,53 @@ type envelope struct {
 	Msg  transport.Message `json:"msg"`
 }
 
+// Transport is a named-pipe transport in a client-server topology: the daemon
+// owns the single inbound pipe and accepts connections, while runners and
+// control clients connect to it. A connection is duplex, so replies travel back
+// on the connection a client opened.
 type Transport struct {
 	local    transport.Peer
 	config   transport.Config
 	core     *transport.Core
-	listener *pipeListener
 	auth     authenticator
-	verify   serverVerifier
+	server   bool
+	listener *pipeListener
 
-	mu       sync.Mutex
-	outbound map[string]*outbound
-	inbound  map[conn]struct{}
-	closed   bool
+	mu     sync.Mutex
+	conns  map[string]*peerConn
+	closed bool
 }
 
-type outbound struct {
-	conn  *pipeConn
-	mu    sync.Mutex
-	timer *time.Timer
+type peerConn struct {
+	conn conn
+	mu   sync.Mutex
 }
 
 func New(config transport.Config, local transport.Peer, handler transport.MsgHandler, services scm.Manager) (transport.Transport, error) {
-	return newTransport(config, local, handler, authenticatorFor(local, services), pipeServerVerifier{services: services})
+	return newTransport(config, local, handler, clientAuthenticator{services: services})
 }
 
-func newTransport(config transport.Config, local transport.Peer, handler transport.MsgHandler, auth authenticator, verify serverVerifier) (transport.Transport, error) {
+func newTransport(config transport.Config, local transport.Peer, handler transport.MsgHandler, auth authenticator) (transport.Transport, error) {
 	config = config.WithDefaults()
-	listener, err := listenPipe(pipeName(local), pipeACLFor(local))
-	if err != nil {
-		return nil, fmt.Errorf("listen on pipe for %s: %w", local, err)
-	}
 
 	t := &Transport{
-		local:    local,
-		config:   config,
-		listener: listener,
-		auth:     auth,
-		verify:   verify,
-		outbound: make(map[string]*outbound),
-		inbound:  make(map[conn]struct{}),
+		local:  local,
+		config: config,
+		auth:   auth,
+		server: local.Type() == transport.PeerDaemon,
+		conns:  make(map[string]*peerConn),
 	}
 	t.core = transport.NewCore(config, handler, t.send)
-	slog.Info("pipe: listening", "local", local.String(), "pipe", pipeName(local))
-	go t.acceptLoop()
+
+	if t.server {
+		listener, err := listenPipe(daemonPipeName, daemonPipeACL)
+		if err != nil {
+			return nil, fmt.Errorf("listen on pipe for %s: %w", local, err)
+		}
+		t.listener = listener
+		go t.acceptLoop()
+	}
+	slog.Info("pipe: created", "local", local.String(), "server", t.server)
 	return t, nil
 }
 
@@ -113,60 +107,75 @@ func (t *Transport) Close() error {
 		return nil
 	}
 	t.closed = true
-	connections := make([]*outbound, 0, len(t.outbound))
-	for target, conn := range t.outbound {
-		connections = append(connections, conn)
-		delete(t.outbound, target)
-	}
-	inbound := make([]conn, 0, len(t.inbound))
-	for conn := range t.inbound {
-		inbound = append(inbound, conn)
-		delete(t.inbound, conn)
+	conns := make([]*peerConn, 0, len(t.conns))
+	for name, pc := range t.conns {
+		conns = append(conns, pc)
+		delete(t.conns, name)
 	}
 	t.mu.Unlock()
 
-	err := t.listener.Close()
-	for _, conn := range inbound {
-		conn.Close()
+	var err error
+	if t.listener != nil {
+		err = t.listener.Close()
 	}
-	for _, conn := range connections {
-		if conn.timer != nil {
-			conn.timer.Stop()
-		}
-		conn.mu.Lock()
-		conn.conn.Close()
-		conn.mu.Unlock()
+	for _, pc := range conns {
+		pc.conn.Close()
 	}
 	return err
 }
 
 func (t *Transport) send(target transport.Peer, msg transport.Message, opts ...transport.Opt) error {
-	conn, err := t.outboundFor(target, opts...)
-	if err != nil {
-		slog.Debug("pipe: connect failed", "local", t.local.Name(), "target", target.Name(), "error", err)
-		return err
+	if t.server {
+		return t.sendToPeer(target, msg)
 	}
+	return t.sendToDaemon(msg, opts...)
+}
 
-	conn.mu.Lock()
-	defer conn.mu.Unlock()
-	if err := writeEnvelope(conn.conn, envelope{From: t.local.Name(), Msg: msg}); err != nil {
-		slog.Warn(pipeMsg(conn.conn.tag(), "write failed"), "local", t.local.Name(), "target", target.Name(), "error", err)
-		t.dropOutbound(target.Name(), conn)
+func (t *Transport) sendToPeer(target transport.Peer, msg transport.Message) error {
+	t.mu.Lock()
+	pc := t.conns[target.Name()]
+	t.mu.Unlock()
+	if pc == nil {
+		return fmt.Errorf("peer %s is not connected", target)
+	}
+	if err := t.write(pc, msg); err != nil {
+		slog.Warn(pipeMsg(pc.conn.tag(), "write failed"), "local", t.local.Name(), "target", target.String(), "error", err)
 		return fmt.Errorf("send to %s: %w", target, err)
 	}
-	slog.Debug(pipeMsg(conn.conn.tag(), "sent"), "local", t.local.Name(), "to", target.String(), "type", msg.Type, "id", msg.ID, "request_id", msg.RequestID)
-	t.resetIdle(target.Name(), conn)
+	slog.Debug(pipeMsg(pc.conn.tag(), "sent"), "local", t.local.Name(), "to", target.String(), "type", msg.Type, "id", msg.ID, "request_id", msg.RequestID)
 	return nil
 }
 
-func (t *Transport) outboundFor(target transport.Peer, opts ...transport.Opt) (*outbound, error) {
+func (t *Transport) sendToDaemon(msg transport.Message, opts ...transport.Opt) error {
+	pc, err := t.daemonConn(opts...)
+	if err != nil {
+		return err
+	}
+	if err := t.write(pc, msg); err != nil {
+		slog.Warn(pipeMsg(pc.conn.tag(), "write failed"), "local", t.local.Name(), "target", transport.PeerDaemonName, "error", err)
+		t.dropConn(transport.PeerDaemonName, pc)
+		return fmt.Errorf("send to daemon: %w", err)
+	}
+	slog.Debug(pipeMsg(pc.conn.tag(), "sent"), "local", t.local.Name(), "to", transport.PeerDaemonName, "type", msg.Type, "id", msg.ID, "request_id", msg.RequestID)
+	return nil
+}
+
+func (t *Transport) write(pc *peerConn, msg transport.Message) error {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	return writeEnvelope(pc.conn, envelope{From: t.local.Name(), Msg: msg})
+}
+
+// daemonConn returns the connection to the daemon, dialing it on first use. The
+// connection is kept until it fails; the next send reconnects.
+func (t *Transport) daemonConn(opts ...transport.Opt) (*peerConn, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.closed {
 		return nil, transport.ErrClosed
 	}
-	if conn, ok := t.outbound[target.Name()]; ok {
-		return conn, nil
+	if pc, ok := t.conns[transport.PeerDaemonName]; ok {
+		return pc, nil
 	}
 
 	options := transport.ResolveOptions(opts...)
@@ -174,21 +183,99 @@ func (t *Transport) outboundFor(target transport.Peer, opts ...transport.Opt) (*
 	if options.ConnectTimeout > 0 {
 		timeout = options.ConnectTimeout
 	}
-	conn, err := dialPipe(pipeName(target), timeout)
+	c, err := dialPipe(daemonPipeName, timeout)
 	if err != nil {
-		return nil, fmt.Errorf("connect to %s: %w", target, err)
+		return nil, fmt.Errorf("connect to daemon: %w", err)
 	}
-	if err := t.verify.verify(target, conn.serverPID); err != nil {
-		slog.Warn(pipeMsg(conn.tag(), "server rejected"),
-			"local", t.local.Name(), "target", target.String(), "error", err)
-		conn.Close()
-		return nil, fmt.Errorf("verify server for %s: %w", target, err)
-	}
-	slog.Debug(pipeMsg(conn.tag(), "dialed"), "local", t.local.Name(), "to", target.String(), "pipe", pipeName(target))
+	pc := &peerConn{conn: c}
+	t.conns[transport.PeerDaemonName] = pc
+	slog.Debug(pipeMsg(c.tag(), "dialed"), "local", t.local.Name(), "pipe", daemonPipeName)
+	go t.serve(pc, transport.NewPeer(transport.PeerDaemon, transport.PeerDaemonName, false))
+	return pc, nil
+}
 
-	out := &outbound{conn: conn}
-	t.outbound[target.Name()] = out
-	return out, nil
+func (t *Transport) dropConn(name string, pc *peerConn) {
+	t.mu.Lock()
+	if t.conns[name] == pc {
+		delete(t.conns, name)
+	}
+	t.mu.Unlock()
+	pc.conn.Close()
+}
+
+func (t *Transport) acceptLoop() {
+	for {
+		c, err := t.listener.Accept()
+		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				slog.Debug("pipe: accept loop stopped", "local", t.local.Name(), "error", err)
+				return
+			}
+			slog.Warn("pipe: accept failed", "local", t.local.Name(), "error", err)
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
+		peer, err := t.authenticate(c)
+		if err != nil {
+			slog.Warn(pipeMsg(c.tag(), "authentication failed"), "local", t.local.Name(), "error", err)
+			c.Close()
+			continue
+		}
+
+		t.mu.Lock()
+		if t.closed {
+			t.mu.Unlock()
+			c.Close()
+			return
+		}
+		previous := t.conns[peer.Name()]
+		pc := &peerConn{conn: c}
+		t.conns[peer.Name()] = pc
+		t.mu.Unlock()
+		if previous != nil {
+			previous.conn.Close()
+		}
+		slog.Debug(pipeMsg(c.tag(), "accepted"), "local", t.local.Name(), "peer", peer.String())
+		go t.serve(pc, peer)
+	}
+}
+
+func (t *Transport) serve(pc *peerConn, peer transport.Peer) {
+	defer func() {
+		pc.conn.Close()
+		t.mu.Lock()
+		if t.conns[peer.Name()] == pc {
+			delete(t.conns, peer.Name())
+		}
+		t.mu.Unlock()
+	}()
+
+	slog.Debug(pipeMsg(pc.conn.tag(), "serve started"), "local", t.local.Name(), "peer", peer.String())
+	decoder := json.NewDecoder(pc.conn)
+	for {
+		var env envelope
+		if err := decoder.Decode(&env); err != nil {
+			slog.Debug(pipeMsg(pc.conn.tag(), "connection closed"), "local", t.local.Name(), "error", err)
+			return
+		}
+		slog.Debug(pipeMsg(pc.conn.tag(), "received"), "local", t.local.Name(),
+			"from", env.From, "type", env.Msg.Type, "id", env.Msg.ID, "request_id", env.Msg.RequestID)
+		if env.From != peer.Name() {
+			slog.Warn(pipeMsg(pc.conn.tag(), "dropping message with mismatched sender"),
+				"local", t.local.Name(), "from", env.From, "peer", peer.String())
+			continue
+		}
+		if err := t.core.Dispatch(peer, env.Msg); err != nil {
+			slog.Error(pipeMsg(pc.conn.tag(), "message handler failed"), "local", t.local.Name(), "from", peer.String(), "type", env.Msg.Type, "error", err)
+		}
+	}
+}
+
+func (t *Transport) authenticate(c conn) (transport.Peer, error) {
+	if t.auth == nil {
+		return transport.Peer{}, errors.New("transport has no authenticator")
+	}
+	return t.auth.authenticate(c.Handle(), time.Now())
 }
 
 // dialPipe connects to a named pipe, retrying until timeout while the server is
@@ -240,110 +327,6 @@ func isRetryableDialError(err error) bool {
 	}
 }
 
-func (t *Transport) resetIdle(target string, conn *outbound) {
-	if t.config.IdleTimeout <= 0 {
-		return
-	}
-	if conn.timer != nil {
-		conn.timer.Stop()
-	}
-	conn.timer = time.AfterFunc(t.config.IdleTimeout, func() {
-		t.closeIdle(target, conn)
-	})
-}
-
-func (t *Transport) closeIdle(target string, conn *outbound) {
-	t.mu.Lock()
-	if t.outbound[target] == conn {
-		delete(t.outbound, target)
-	}
-	t.mu.Unlock()
-
-	conn.mu.Lock()
-	conn.conn.Close()
-	conn.mu.Unlock()
-}
-
-func (t *Transport) dropOutbound(target string, conn *outbound) {
-	t.mu.Lock()
-	if t.outbound[target] == conn {
-		delete(t.outbound, target)
-	}
-	t.mu.Unlock()
-
-	if conn.timer != nil {
-		conn.timer.Stop()
-	}
-	conn.conn.Close()
-}
-
-func (t *Transport) acceptLoop() {
-	for {
-		c, err := t.listener.Accept()
-		if err != nil {
-			if errors.Is(err, net.ErrClosed) {
-				slog.Debug("pipe: accept loop stopped", "peer", t.local.Name(), "error", err)
-				return
-			}
-			slog.Warn("pipe: accept failed", "peer", t.local.Name(), "error", err)
-			time.Sleep(10 * time.Millisecond)
-			continue
-		}
-		peer, err := t.authenticate(c)
-		if err != nil {
-			slog.Warn(pipeMsg(c.tag(), "authentication failed"), "local", t.local.Name(), "error", err)
-			c.Close()
-			continue
-		}
-		t.mu.Lock()
-		if t.closed {
-			t.mu.Unlock()
-			c.Close()
-			return
-		}
-		t.inbound[c] = struct{}{}
-		t.mu.Unlock()
-		slog.Debug(pipeMsg(c.tag(), "accepted"), "local", t.local.Name(), "peer", peer.String())
-		go t.serve(c, peer)
-	}
-}
-
-func (t *Transport) authenticate(c conn) (transport.Peer, error) {
-	if t.auth == nil {
-		return transport.Peer{}, errors.New("transport has no authenticator")
-	}
-	return t.auth.authenticate(c.Handle(), time.Now())
-}
-
-func (t *Transport) serve(c conn, peer transport.Peer) {
-	defer func() {
-		c.Close()
-		t.mu.Lock()
-		delete(t.inbound, c)
-		t.mu.Unlock()
-	}()
-
-	slog.Debug(pipeMsg(c.tag(), "serve started"), "local", t.local.Name(), "peer", peer.String())
-	decoder := json.NewDecoder(c)
-	for {
-		var env envelope
-		if err := decoder.Decode(&env); err != nil {
-			slog.Debug(pipeMsg(c.tag(), "connection closed"), "local", t.local.Name(), "error", err)
-			return
-		}
-		slog.Debug(pipeMsg(c.tag(), "received"), "local", t.local.Name(),
-			"from", env.From, "type", env.Msg.Type, "id", env.Msg.ID, "request_id", env.Msg.RequestID)
-		if env.From != peer.Name() {
-			slog.Warn(pipeMsg(c.tag(), "dropping message with mismatched sender"),
-				"local", t.local.Name(), "from", env.From, "peer", peer.String())
-			continue
-		}
-		if err := t.core.Dispatch(peer, env.Msg); err != nil {
-			slog.Error(pipeMsg(c.tag(), "message handler failed"), "local", t.local.Name(), "from", peer.String(), "type", env.Msg.Type, "error", err)
-		}
-	}
-}
-
 func writeEnvelope(w io.Writer, env envelope) error {
 	data, err := json.Marshal(env)
 	if err != nil {
@@ -360,32 +343,4 @@ func pipeMsg(tag, msg string) string {
 		return "pipe: " + msg
 	}
 	return fmt.Sprintf("pipe: %s %s", tag, msg)
-}
-
-func pipeName(peer transport.Peer) string {
-	switch peer.Type() {
-	case transport.PeerDaemon:
-		return daemonPipeName
-	case transport.PeerControl:
-		return controlPipePrefix + controlSuffix(peer.Name())
-	default:
-		return servicePipePrefix + peer.Name()
-	}
-}
-
-func pipeACLFor(local transport.Peer) string {
-	if local.Type() == transport.PeerDaemon {
-		return daemonPipeACL
-	}
-	return pipeACL
-}
-
-func controlSuffix(name string) string {
-	if suffix, ok := strings.CutPrefix(name, systemctlUnderscore); ok {
-		return suffix
-	}
-	if suffix, ok := strings.CutPrefix(name, systemctlHyphen); ok {
-		return suffix
-	}
-	return name
 }

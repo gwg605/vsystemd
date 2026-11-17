@@ -95,46 +95,43 @@ All other timer directives (`OnUnitActiveSec=`, `OnUnitInactiveSec=`, `Persisten
 
 ## IPC
 
-All peers own an inbound pipe and accept messages on it. Outgoing messages are written to the receiver's inbound pipe. The transport authenticates every inbound connection (OS identity) and hands the handler a verified `Peer`; replies are sent to that verified source peer. The envelope's `from` field is untrusted and is checked against the verified peer name. The protocol is newline-delimited JSON.
+Client-server over a single named pipe. The daemon owns the pipe and listens; runners and control clients connect to it. A connection is duplex, so a reply travels back on the connection the client opened — there are no per-peer inbound pipes. The daemon authenticates every inbound connection (OS identity) and hands the handler a verified `Peer`; the envelope's `from` field is untrusted and is checked against the verified peer name. The protocol is newline-delimited JSON.
 
-| Peer | PeerType | Inbound pipe |
+| Peer | PeerType | Role |
 |---|---|---|
-| daemon | `daemon` | `\\.\pipe\vsystemd-in` |
-| runner (`foo.service`) | `runner` | `\\.\pipe\vsystemd-svc-foo.service` |
-| systemctl (`systemctl_<pid>`) | `control` | `\\.\pipe\vsystemd-ctl-<pid>` |
+| daemon | `daemon` | server, listens on `\\.\pipe\vsystemd-in` |
+| runner (`foo.service`) | `runner` | client |
+| systemctl (`systemctl_<pid>`) | `control` | client |
 
 ### Authentication
 
-- Daemon pipe: a client is either a service runner (own-process SCM service whose `ServiceStartName` matches the token SID and whose configured binary has the same `FILE_ID` as the running image) or an elevated control client; anything else is rejected.
-- Runner/control pipes: only the daemon (LocalSystem or an elevated administrator) is accepted.
+- The daemon authenticates each client: a runner is a managed service (own-process, token SID matches `ServiceStartName`, running image matches `BinaryPathName`); an elevated non-service is a control client; anything else is rejected.
 - The process creation time must precede the connection (anti PID-reuse).
-- Outbound: after dialing a peer, the server process is verified against the target (control → pid encoded in the name; runner → the SCM service for the unit, same checks as inbound; daemon → LocalSystem/elevated); a squatter on the pipe name is rejected.
+- The client trusts the server by position: the daemon is the only owner of the pipe (`FILE_FLAG_FIRST_PIPE_INSTANCE` + ACL + early service start). There is no client-side verification of the server.
 - Consequence: `systemctl` must run elevated, otherwise the daemon rejects the control connection.
 
-### Channel 1: runner ↔ daemon (best-effort)
+### Channel 1: runner → daemon (best-effort)
 
-- **Pipe owner**: runner (creates on start)
-- **Pipe name**: `\\.\pipe\vsystemd-svc-<unitname>`
-- **Daemon inbound pipe**: `\\.\pipe\vsystemd-in`
-- **Direction**: bidirectional
+- **Pipe owner**: daemon (server)
+- **Direction**: client to server (replies, if any, on the same connection)
 - **Protocol**: JSON
 
 Messages:
 ```
 runner → daemon:  StateEvent { unit, state, pid, exit_code, restart_count, timestamp, last_error }
-daemon → runner:  StatusRequest {}  →  runner replies with StateEvent
 ```
 
-Behavior when connection is unavailable:
-- Runner operates normally without daemon connection
-- Daemon falls back to SCM state if runner pipe is unreachable
-- On daemon start: enumerate known units, attempt to connect to each runner pipe and request status
+The runner keeps a persistent connection and sends a `StateEvent` on every state change and periodically as a heartbeat. The daemon never pushes and never sends a status request.
 
-### Channel 2: systemctl ↔ daemon
+Behavior when the daemon is unavailable:
+- The runner operates normally; sends fail and are logged
+- The daemon marks a runner `dead` if no heartbeat arrives within the dead threshold
+- After a daemon restart, runners reconnect and report state at the next heartbeat
 
-- **Pipe owner**: systemctl (creates `vsystemd-ctl-<pid>` on start)
-- **Daemon inbound pipe**: `\\.\pipe\vsystemd-in`
-- **Direction**: bidirectional
+### Channel 2: systemctl → daemon
+
+- **Pipe owner**: daemon (server)
+- **Direction**: client to server (reply on the same connection)
 - **Protocol**: JSON RPC
 
 Commands routed through daemon:
@@ -257,7 +254,6 @@ Single mechanism: ACL on all vsystemd-managed resources.
 | `C:\ProgramData\vsystemd\` and `system\` | SYSTEM: Full Control, Administrators: Full Control, `NT SERVICE\All Services`: ReadAndExecute |
 | `C:\ProgramData\vsystemd\logs\` | SYSTEM: Full Control, Administrators: Full Control, `NT SERVICE\All Services`: Modify |
 | `\\.\pipe\vsystemd-in` | SYSTEM, Administrators, `NT SERVICE\All Services`: Full Control; owner |
-| `\\.\pipe\vsystemd-svc-*`, `\\.\pipe\vsystemd-ctl-*` | SYSTEM, Administrators: Full Control; owner |
 
 No path/binary validation at enable time in v1.
 

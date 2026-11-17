@@ -3,7 +3,9 @@ package daemon
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
+	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/logwriter"
 	"github.com/gwg605/vsystemd/internal/runner"
 	"github.com/gwg605/vsystemd/internal/scm"
@@ -78,42 +80,72 @@ func TestHandleStateEvent(t *testing.T) {
 	}
 }
 
-func TestRequestRunnerStates(t *testing.T) {
+func sendRunnerEvent(t *testing.T, network *transportfake.Network, user string, event runner.StateEvent) error {
+	t.Helper()
+	runnerTransport := network.New(
+		transport.DefaultConfig(),
+		transport.NewPeer(transport.PeerRunner, "app.service", false).WithService(scm.ServiceConfig{User: user}),
+		nil,
+	)
+	payload, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	return runnerTransport.Send(runnerTransport.Target(transport.PeerDaemon), transport.Message{
+		Type:    runner.MessageStateEvent,
+		Payload: payload,
+	})
+}
+
+func TestStateEventAccountMatch(t *testing.T) {
 	store := storagefake.New()
-	store.WriteUnit("app.service", []byte("[Service]\n"))
-	manager := scmfake.New()
+	store.WriteUnit("app.service", []byte("[Service]\nExecStart=x\nUser=NT SERVICE\\app\n"))
 
-	daemon, network := newTestDaemon(t, manager, store)
+	daemon, network := newTestDaemon(t, scmfake.New(), store)
+	err := sendRunnerEvent(t, network, `NT SERVICE\app`, runner.StateEvent{
+		Unit:  "app.service",
+		State: runner.StateActive,
+		PID:   7,
+	})
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	if state, ok := daemon.State("app.service"); !ok || state.PID != 7 {
+		t.Errorf("state = %+v, ok = %v", state, ok)
+	}
+}
 
-	var runnerTransport *transportfake.Transport
-	runnerTransport = network.New(transport.DefaultConfig(), transport.NewPeer(transport.PeerRunner, "app.service", false), func(source transport.Peer, msg transport.Message) error {
-		if msg.Type != runner.MessageStatusRequest {
-			return nil
-		}
-		payload, err := json.Marshal(runner.StateEvent{
-			Unit:  "app.service",
-			State: runner.StateActive,
-			PID:   99,
-		})
-		if err != nil {
-			return err
-		}
-		return runnerTransport.Send(source, transport.Message{
-			Type:      runner.MessageStateEvent,
-			RequestID: msg.ID,
-			Payload:   payload,
-		})
+func TestStateEventAccountMismatch(t *testing.T) {
+	store := storagefake.New()
+	store.WriteUnit("app.service", []byte("[Service]\nExecStart=x\nUser=NT SERVICE\\app\n"))
+
+	daemon, network := newTestDaemon(t, scmfake.New(), store)
+	err := sendRunnerEvent(t, network, `NT AUTHORITY\SYSTEM`, runner.StateEvent{
+		Unit:  "app.service",
+		State: runner.StateActive,
+		PID:   7,
+	})
+	if err == nil {
+		t.Fatal("Send() error = nil, want rejection")
+	}
+	if _, ok := daemon.State("app.service"); ok {
+		t.Error("state event with a mismatched account was applied")
+	}
+}
+
+func TestCheckRunnersMarksDead(t *testing.T) {
+	daemon, _ := newTestDaemon(t, scmfake.New(), storagefake.New())
+	daemon.updateFromEvent(runner.StateEvent{
+		Unit:      "app.service",
+		State:     runner.StateActive,
+		PID:       1,
+		Timestamp: time.Now().Add(-2 * config.RunnerDeadAfter),
 	})
 
-	if err := daemon.requestRunnerStates(); err != nil {
-		t.Fatalf("requestRunnerStates() error = %v", err)
-	}
+	daemon.checkRunners()
 
 	state, ok := daemon.State("app.service")
-	if !ok {
-		t.Fatal("state not found")
-	}
-	if state.RunnerState != RunnerStateActive || state.PID != 99 {
-		t.Errorf("state = %+v", state)
+	if !ok || state.RunnerState != RunnerStateDead {
+		t.Errorf("state = %+v, ok = %v", state, ok)
 	}
 }

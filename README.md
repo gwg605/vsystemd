@@ -122,7 +122,6 @@ Example:
   },
   "ipc": {
     "connect_timeout_ms": 2000,
-    "idle_timeout_ms": 5000,
     "request_timeout_ms": 10000
   },
   "defaults": {

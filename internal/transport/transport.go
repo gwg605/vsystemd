@@ -3,6 +3,8 @@ package transport
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/gwg605/vsystemd/internal/scm"
 )
 
 // PeerType classifies the process on the other end of a connection.
@@ -40,15 +42,27 @@ type Peer struct {
 	typ      PeerType
 	name     string
 	elevated bool
+	service  scm.ServiceConfig
 }
 
 func NewPeer(typ PeerType, name string, elevated bool) Peer {
 	return Peer{typ: typ, name: name, elevated: elevated}
 }
 
+// WithService returns a copy of the peer carrying the authenticated service
+// configuration of a runner.
+func (p Peer) WithService(cfg scm.ServiceConfig) Peer {
+	p.service = cfg
+	return p
+}
+
 func (p Peer) Type() PeerType { return p.typ }
 func (p Peer) Name() string   { return p.name }
 func (p Peer) Elevated() bool { return p.elevated }
+
+// ServiceConfig returns the authenticated service configuration carried by a
+// runner peer; it is zero for other peers.
+func (p Peer) ServiceConfig() scm.ServiceConfig { return p.service }
 
 func (p Peer) String() string { return p.typ.String() + ":" + p.name }
 
@@ -102,14 +116,12 @@ func resolvePeerOptions(opts ...PeerOption) peerOptions {
 
 type Config struct {
 	ConnectTimeout time.Duration
-	IdleTimeout    time.Duration
 	RequestTimeout time.Duration
 }
 
 func DefaultConfig() Config {
 	return Config{
 		ConnectTimeout: 2 * time.Second,
-		IdleTimeout:    5 * time.Second,
 		RequestTimeout: 10 * time.Second,
 	}
 }
@@ -118,9 +130,6 @@ func (c Config) WithDefaults() Config {
 	defaults := DefaultConfig()
 	if c.ConnectTimeout <= 0 {
 		c.ConnectTimeout = defaults.ConnectTimeout
-	}
-	if c.IdleTimeout <= 0 {
-		c.IdleTimeout = defaults.IdleTimeout
 	}
 	if c.RequestTimeout <= 0 {
 		c.RequestTimeout = defaults.RequestTimeout

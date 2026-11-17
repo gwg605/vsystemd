@@ -2,7 +2,6 @@ package runner
 
 import (
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -13,8 +12,7 @@ import (
 const (
 	daemonPeer = "daemon"
 
-	MessageStateEvent    = "state_event"
-	MessageStatusRequest = "status_request"
+	MessageStateEvent = "state_event"
 )
 
 const (
@@ -90,27 +88,10 @@ func (r *StateReporter) State() StateEvent {
 	return r.state
 }
 
-func (r *StateReporter) Handle(source transport.Peer, msg transport.Message) error {
-	if source.Type() != transport.PeerDaemon {
-		return fmt.Errorf("forbidden: %s is not the daemon", source)
-	}
-	if msg.Type != MessageStatusRequest {
-		return nil
-	}
-	slog.Debug("runner: status request received", "source", source.String())
-
-	payload, err := json.Marshal(r.State())
-	if err != nil {
-		slog.Error("runner: encode status response failed", "error", err)
-		return err
-	}
-	if err := r.transport.Send(source, transport.Message{
-		Type:      MessageStateEvent,
-		RequestID: msg.ID,
-		Payload:   payload,
-	}); err != nil {
-		slog.Warn("runner: status response failed", "source", source.String(), "error", err)
-		return err
-	}
-	return nil
+// Heartbeat re-sends the last reported state with a fresh timestamp so the
+// daemon knows the runner is still alive.
+func (r *StateReporter) Heartbeat() error {
+	state := r.State()
+	state.Timestamp = time.Time{}
+	return r.Report(state)
 }

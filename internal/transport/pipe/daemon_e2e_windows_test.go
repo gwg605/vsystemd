@@ -37,8 +37,7 @@ func TestDaemonRealHandlerOverPipe(t *testing.T) {
 	}
 	t.Cleanup(func() { d.Close() })
 
-	control, err := newTestTransport(transport.DefaultConfig(), transport.NewPeer(transport.PeerControl, controlName, false), nil,
-		fixedAuth{transport.NewPeer(transport.PeerDaemon, transport.PeerDaemonName, false)})
+	control, err := newTestTransport(transport.DefaultConfig(), transport.NewPeer(transport.PeerControl, controlName, false), nil, nil)
 	if err != nil {
 		t.Fatalf("control New: %v", err)
 	}

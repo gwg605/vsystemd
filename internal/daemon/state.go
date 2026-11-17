@@ -14,6 +14,7 @@ const (
 	RunnerStateFailed     RunnerState = "failed"
 	RunnerStateActivating RunnerState = "activating"
 	RunnerStateRestarting RunnerState = "restarting"
+	RunnerStateDead       RunnerState = "dead"
 )
 
 type SystemdState string
@@ -51,6 +52,8 @@ func (s ServiceState) Status() SystemdState {
 			return SystemdActivatingStart
 		case RunnerStateRestarting:
 			return SystemdActivatingAutoRestart
+		case RunnerStateDead:
+			return SystemdInactiveDead
 		default:
 			return SystemdActiveRunning
 		}
