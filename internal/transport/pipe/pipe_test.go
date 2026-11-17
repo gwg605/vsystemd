@@ -3,12 +3,36 @@
 package pipe
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/gwg605/vsystemd/internal/transport"
 )
+
+func TestEnvelopeScannerSizeLimit(t *testing.T) {
+	scanner := newEnvelopeScanner(bytes.NewReader(bytes.Repeat([]byte("a"), 128)), 64)
+	if scanner.Scan() {
+		t.Error("Scan() = true for an oversized line")
+	}
+	if !errors.Is(scanner.Err(), bufio.ErrTooLong) {
+		t.Errorf("Err() = %v, want bufio.ErrTooLong", scanner.Err())
+	}
+}
+
+func TestEnvelopeScannerReadsLine(t *testing.T) {
+	line := `{"from":"x","msg":{"id":"1"}}`
+	scanner := newEnvelopeScanner(bytes.NewReader([]byte(line+"\n")), 1024)
+	if !scanner.Scan() {
+		t.Fatalf("Scan() = false: %v", scanner.Err())
+	}
+	if string(scanner.Bytes()) != line {
+		t.Errorf("line = %q", scanner.Bytes())
+	}
+}
 
 func TestSendAndRequest(t *testing.T) {
 	old := daemonPipeName

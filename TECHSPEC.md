@@ -539,6 +539,8 @@ func (c *Component) handleStatusRequest(source transport.Peer, msg transport.Mes
 
 Поле `from` содержит имя отправителя (недоверенное). Транспорт сверяет его с именем проверенного `Peer` и дропает сообщение при несовпадении.
 
+Размер одного сообщения ограничен (`transport.Config.MaxMessageSize`, по умолчанию 4 MiB): строка сверх лимита рвёт соединение. Пустые и нераспознанные строки пропускаются.
+
 ### Именование peers
 
 | PeerType | peerName | Роль |

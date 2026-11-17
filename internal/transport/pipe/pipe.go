@@ -3,6 +3,8 @@
 package pipe
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -251,12 +253,16 @@ func (t *Transport) serve(pc *peerConn, peer transport.Peer) {
 	}()
 
 	slog.Debug(pipeMsg(pc.conn.tag(), "serve started"), "local", t.local.Name(), "peer", peer.String())
-	decoder := json.NewDecoder(pc.conn)
-	for {
+	scanner := newEnvelopeScanner(pc.conn, t.config.MaxMessageSize)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
 		var env envelope
-		if err := decoder.Decode(&env); err != nil {
-			slog.Debug(pipeMsg(pc.conn.tag(), "connection closed"), "local", t.local.Name(), "error", err)
-			return
+		if err := json.Unmarshal(line, &env); err != nil {
+			slog.Debug(pipeMsg(pc.conn.tag(), "decode failed"), "local", t.local.Name(), "error", err)
+			continue
 		}
 		slog.Debug(pipeMsg(pc.conn.tag(), "received"), "local", t.local.Name(),
 			"from", env.From, "type", env.Msg.Type, "id", env.Msg.ID, "request_id", env.Msg.RequestID)
@@ -269,6 +275,17 @@ func (t *Transport) serve(pc *peerConn, peer transport.Peer) {
 			slog.Error(pipeMsg(pc.conn.tag(), "message handler failed"), "local", t.local.Name(), "from", peer.String(), "type", env.Msg.Type, "error", err)
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		slog.Debug(pipeMsg(pc.conn.tag(), "connection closed"), "local", t.local.Name(), "error", err)
+	}
+}
+
+// newEnvelopeScanner reads newline-delimited JSON envelopes, limiting the size
+// of a single message.
+func newEnvelopeScanner(r io.Reader, maxMessageSize int) *bufio.Scanner {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(nil, maxMessageSize)
+	return scanner
 }
 
 func (t *Transport) authenticate(c conn) (transport.Peer, error) {
