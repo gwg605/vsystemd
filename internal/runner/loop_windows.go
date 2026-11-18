@@ -42,6 +42,19 @@ const (
 	stageKill
 )
 
+const defaultStopTimeout = 45 * time.Second
+
+func Run(name string, handler svc.Handler) error {
+	return svc.Run(name, handler)
+}
+
+func resolveStopTimeout(service *unit.ServiceUnit) time.Duration {
+	if service.TimeoutStopSec > 0 {
+		return service.TimeoutStopSec
+	}
+	return defaultStopTimeout
+}
+
 type handlerSession struct {
 	h        *controlHandler
 	requests <-chan svc.ChangeRequest
@@ -282,6 +295,7 @@ func (s *handlerSession) enterStopping(trigger stopTrigger, exitCode int) {
 	if trigger == triggerControl {
 		s.setStatus(svc.Status{State: svc.StopPending})
 	}
+	s.report(StateDeactivating, 0, s.exitCode, s.lastError)
 	s.armStopTimer()
 	s.beginDrain()
 }

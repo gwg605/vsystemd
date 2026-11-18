@@ -9,12 +9,13 @@ import (
 type RunnerState string
 
 const (
-	RunnerStateActive     RunnerState = "active"
-	RunnerStateInactive   RunnerState = "inactive"
-	RunnerStateFailed     RunnerState = "failed"
-	RunnerStateActivating RunnerState = "activating"
-	RunnerStateRestarting RunnerState = "restarting"
-	RunnerStateDead       RunnerState = "dead"
+	RunnerStateActive       RunnerState = "active"
+	RunnerStateInactive     RunnerState = "inactive"
+	RunnerStateFailed       RunnerState = "failed"
+	RunnerStateActivating   RunnerState = "activating"
+	RunnerStateRestarting   RunnerState = "restarting"
+	RunnerStateDeactivating RunnerState = "deactivating"
+	RunnerStateDead         RunnerState = "dead"
 )
 
 type SystemdState string
@@ -52,6 +53,8 @@ func (s ServiceState) Status() SystemdState {
 			return SystemdActivatingStart
 		case RunnerStateRestarting:
 			return SystemdActivatingAutoRestart
+		case RunnerStateDeactivating:
+			return SystemdDeactivatingStop
 		case RunnerStateDead:
 			return SystemdInactiveDead
 		default:

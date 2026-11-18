@@ -22,7 +22,7 @@ type TransportFactory func(local transport.Peer, handler transport.MsgHandler) (
 type Runner struct {
 	name      string
 	logs      *LogStreamer
-	handler   *SCMHandler
+	handler   *controlHandler
 	reporter  *StateReporter
 	transport transport.Transport
 }
@@ -36,10 +36,8 @@ func NewRunner(name string, service *unit.ServiceUnit, logs *LogStreamer, env En
 		return nil, errors.New("log streamer is required")
 	}
 
-	process := NewProcessManager(service, env)
-	process.SetLogStreamer(logs)
 	restart := NewRestartController(service)
-	handler := NewSCMHandler(service, process, restart)
+	handler := newControlHandler(service, restart, env, logs)
 
 	runner := &Runner{
 		name:    name,
@@ -60,7 +58,7 @@ func NewRunner(name string, service *unit.ServiceUnit, logs *LogStreamer, env En
 
 	runner.transport = tr
 	runner.reporter = NewStateReporter(tr, name)
-	runner.handler.SetStateReporter(runner.reporter)
+	runner.handler.setReporter(runner.reporter)
 	slog.Info("runner: created", "unit", name)
 	return runner, nil
 }

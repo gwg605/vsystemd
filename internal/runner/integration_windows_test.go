@@ -44,7 +44,7 @@ func newIntegratedRunner(t *testing.T, name string, service *unit.ServiceUnit) (
 	return runner, collector
 }
 
-func runSCMHandler(t *testing.T, handler *SCMHandler) (<-chan svc.Status, chan<- svc.ChangeRequest, <-chan struct{}) {
+func runControlHandler(t *testing.T, handler *controlHandler) (<-chan svc.Status, chan<- svc.ChangeRequest, <-chan struct{}) {
 	t.Helper()
 	requests := make(chan svc.ChangeRequest)
 	changes := make(chan svc.Status, 20)
@@ -84,7 +84,7 @@ func TestRunnerStartStop(t *testing.T) {
 		TimeoutStopSec: 100 * time.Millisecond,
 	}
 	runner, collector := newIntegratedRunner(t, "app.service", service)
-	changes, requests, done := runSCMHandler(t, runner.handler)
+	changes, requests, done := runControlHandler(t, runner.handler)
 
 	waitForStatus(t, changes, svc.Running)
 	requests <- svc.ChangeRequest{Cmd: svc.Stop}
@@ -117,7 +117,7 @@ func TestRunnerRestartOnFailure(t *testing.T) {
 		StartLimitIntervalSec: time.Second,
 	}
 	runner, collector := newIntegratedRunner(t, "app.service", service)
-	changes, _, done := runSCMHandler(t, runner.handler)
+	changes, _, done := runControlHandler(t, runner.handler)
 
 	waitForStatus(t, changes, svc.Stopped)
 	waitForDone(t, done)
@@ -155,7 +155,7 @@ func TestRunnerStartLimitExhaustion(t *testing.T) {
 		StartLimitIntervalSec: time.Second,
 	}
 	runner, collector := newIntegratedRunner(t, "app.service", service)
-	changes, _, done := runSCMHandler(t, runner.handler)
+	changes, _, done := runControlHandler(t, runner.handler)
 
 	waitForStatus(t, changes, svc.Stopped)
 	waitForDone(t, done)

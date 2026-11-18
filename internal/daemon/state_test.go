@@ -17,6 +17,7 @@ func TestStatusComputation(t *testing.T) {
 		{"running active", scm.StateRunning, RunnerStateActive, 0, SystemdActiveRunning},
 		{"running activating", scm.StateRunning, RunnerStateActivating, 0, SystemdActivatingStart},
 		{"running restarting", scm.StateRunning, RunnerStateRestarting, 0, SystemdActivatingAutoRestart},
+		{"running deactivating", scm.StateRunning, RunnerStateDeactivating, 0, SystemdDeactivatingStop},
 		{"running no runner data", scm.StateRunning, "", 0, SystemdActiveRunning},
 		{"running failed", scm.StateRunning, RunnerStateFailed, 1, SystemdActiveRunning},
 		{"stopped inactive", scm.StateStopped, RunnerStateInactive, 0, SystemdInactiveDead},

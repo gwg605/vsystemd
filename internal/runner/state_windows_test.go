@@ -5,38 +5,26 @@ package runner
 import (
 	"path/filepath"
 	"testing"
-	"time"
 
 	"golang.org/x/sys/windows/svc"
 
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
-func TestSCMHandlerReportsStates(t *testing.T) {
+func TestControlHandlerReportsStates(t *testing.T) {
 	dir := t.TempDir()
 
 	reporter, _, collector := newReporterPair(t, "app.service")
 	service := &unit.ServiceUnit{
 		ExecStart: helperCommand("record", filepath.Join(dir, "exit.txt"), "done", "3"),
 	}
-	process := newProcessManager(service)
-	handler := NewSCMHandler(service, process, NewRestartController(service))
-	handler.SetStateReporter(reporter)
+	handler := newTestHandler(service)
+	handler.setReporter(reporter)
 
-	requests := make(chan svc.ChangeRequest)
-	changes := make(chan svc.Status, 20)
-	done := make(chan struct{})
-	go func() {
-		handler.Execute(nil, requests, changes)
-		close(done)
-	}()
+	changes, _, done := runControlHandler(t, handler)
 
 	waitForStatus(t, changes, svc.Stopped)
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Execute did not return")
-	}
+	waitForDone(t, done)
 	close(collector.events)
 
 	var states []string

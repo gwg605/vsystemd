@@ -283,3 +283,8 @@ func processExitCode(err error) (int, error) {
 	}
 	return -1, err
 }
+
+func writeStopConfirmation(stdin io.Writer) error {
+	_, err := stdin.Write([]byte("Y\r\n"))
+	return err
+}
