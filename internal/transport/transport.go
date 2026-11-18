@@ -117,12 +117,14 @@ func resolvePeerOptions(opts ...PeerOption) peerOptions {
 type Config struct {
 	ConnectTimeout time.Duration
 	RequestTimeout time.Duration
+	MaxMessageSize int
 }
 
 func DefaultConfig() Config {
 	return Config{
 		ConnectTimeout: 2 * time.Second,
 		RequestTimeout: 10 * time.Second,
+		MaxMessageSize: 4 << 20,
 	}
 }
 
@@ -133,6 +135,9 @@ func (c Config) WithDefaults() Config {
 	}
 	if c.RequestTimeout <= 0 {
 		c.RequestTimeout = defaults.RequestTimeout
+	}
+	if c.MaxMessageSize <= 0 {
+		c.MaxMessageSize = defaults.MaxMessageSize
 	}
 	return c
 }
