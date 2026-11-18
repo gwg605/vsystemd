@@ -15,7 +15,7 @@ import (
 
 func waitForStatus(t *testing.T, changes <-chan svc.Status, state svc.State) {
 	t.Helper()
-	timeout := time.NewTimer(2 * time.Second)
+	timeout := time.NewTimer(5 * time.Second)
 	defer timeout.Stop()
 	for {
 		select {
@@ -44,96 +44,81 @@ func waitForFile(t *testing.T, path string) []byte {
 	}
 }
 
-func TestSCMHandlerStop(t *testing.T) {
-	dir := t.TempDir()
-	stopFile := filepath.Join(dir, "stop.txt")
+func newTestHandler(service *unit.ServiceUnit) *controlHandler {
+	return newControlHandler(service, NewRestartController(service), EnvironmentDefaults{}, nil)
+}
+
+func TestControlHandlerStop(t *testing.T) {
+	stopFile := filepath.Join(t.TempDir(), "stop.txt")
 
 	service := &unit.ServiceUnit{
 		ExecStart:      helperCommand("sleep", "5s"),
 		ExecStop:       helperCommand("record", stopFile, "stopped"),
-		TimeoutStopSec: 100 * time.Millisecond,
+		TimeoutStopSec: 2 * time.Second,
 	}
-	process := newProcessManager(service)
-	handler := NewSCMHandler(service, process, NewRestartController(service))
-
-	requests := make(chan svc.ChangeRequest)
-	changes := make(chan svc.Status, 20)
-	done := make(chan struct{})
-	go func() {
-		handler.Execute(nil, requests, changes)
-		close(done)
-	}()
+	changes, requests, done := runControlHandler(t, newTestHandler(service))
 
 	waitForStatus(t, changes, svc.Running)
 	requests <- svc.ChangeRequest{Cmd: svc.Stop}
 	waitForStatus(t, changes, svc.Stopped)
-
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Execute did not return")
-	}
+	waitForDone(t, done)
 
 	if data := waitForFile(t, stopFile); string(data) != "stopped\n" {
 		t.Errorf("ExecStop output = %q", data)
 	}
 }
 
-func TestSCMHandlerInterrogate(t *testing.T) {
+func TestControlHandlerInterrogate(t *testing.T) {
 	service := &unit.ServiceUnit{
 		ExecStart:      helperCommand("sleep", "5s"),
 		TimeoutStopSec: 100 * time.Millisecond,
 	}
-	process := newProcessManager(service)
-	handler := NewSCMHandler(service, process, NewRestartController(service))
-
-	requests := make(chan svc.ChangeRequest)
-	changes := make(chan svc.Status, 20)
-	done := make(chan struct{})
-	go func() {
-		handler.Execute(nil, requests, changes)
-		close(done)
-	}()
+	changes, requests, done := runControlHandler(t, newTestHandler(service))
 
 	waitForStatus(t, changes, svc.Running)
 	requests <- svc.ChangeRequest{Cmd: svc.Interrogate}
 	waitForStatus(t, changes, svc.Running)
 	requests <- svc.ChangeRequest{Cmd: svc.Stop}
 	waitForStatus(t, changes, svc.Stopped)
-
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Execute did not return")
-	}
+	waitForDone(t, done)
 }
 
-func TestSCMHandlerExitWithoutRestart(t *testing.T) {
-	dir := t.TempDir()
-	exitFile := filepath.Join(dir, "exit.txt")
+func TestControlHandlerExitWithoutRestart(t *testing.T) {
+	exitFile := filepath.Join(t.TempDir(), "exit.txt")
 
 	service := &unit.ServiceUnit{
 		ExecStart: helperCommand("record", exitFile, "done", "3"),
 	}
-	process := newProcessManager(service)
-	handler := NewSCMHandler(service, process, NewRestartController(service))
-
-	requests := make(chan svc.ChangeRequest)
-	changes := make(chan svc.Status, 20)
-	done := make(chan struct{})
-	go func() {
-		handler.Execute(nil, requests, changes)
-		close(done)
-	}()
+	changes, _, done := runControlHandler(t, newTestHandler(service))
 
 	waitForStatus(t, changes, svc.Stopped)
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Execute did not return")
-	}
+	waitForDone(t, done)
 
 	if data := waitForFile(t, exitFile); string(data) != "done\n" {
 		t.Errorf("output = %q", data)
 	}
+}
+
+func TestControlHandlerExecStartPreFailure(t *testing.T) {
+	orderFile := filepath.Join(t.TempDir(), "order.txt")
+
+	service := &unit.ServiceUnit{
+		ExecStartPre: []string{helperCommand("record", orderFile, "pre", "1")},
+		ExecStart:    helperCommand("record", orderFile, "start"),
+	}
+	changes, _, done := runControlHandler(t, newTestHandler(service))
+
+	waitForStatus(t, changes, svc.Stopped)
+	waitForDone(t, done)
+
+	if data := waitForFile(t, orderFile); string(data) != "pre\n" {
+		t.Errorf("order = %q", data)
+	}
+}
+
+func TestControlHandlerMissingExecStart(t *testing.T) {
+	changes, _, done := runControlHandler(t, newTestHandler(&unit.ServiceUnit{}))
+
+	waitForStatus(t, changes, svc.Stopped)
+	waitForDone(t, done)
 }

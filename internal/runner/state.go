@@ -16,11 +16,12 @@ const (
 )
 
 const (
-	StateActivating = "activating"
-	StateActive     = "active"
-	StateInactive   = "inactive"
-	StateFailed     = "failed"
-	StateRestarting = "restarting"
+	StateActivating   = "activating"
+	StateActive       = "active"
+	StateInactive     = "inactive"
+	StateFailed       = "failed"
+	StateRestarting   = "restarting"
+	StateDeactivating = "deactivating"
 )
 
 type StateEvent struct {

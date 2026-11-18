@@ -2,6 +2,7 @@ package runner
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +11,27 @@ import (
 	"github.com/gwg605/vsystemd/internal/logwriter"
 	"github.com/gwg605/vsystemd/internal/unit"
 )
+
+func runLoggedProcess(t *testing.T, service *unit.ServiceUnit, streamer *LogStreamer) {
+	t.Helper()
+	parsed, err := parseCommand(service.ExecStart)
+	if err != nil {
+		t.Fatalf("parseCommand() error = %v", err)
+	}
+	cmd := exec.Command(parsed.path, parsed.args...)
+	cmd.Stdout = streamer.Stdout()
+	cmd.Stderr = streamer.Stderr()
+	configureCommand(cmd)
+
+	results := make(chan opResult, 1)
+	op := newProcessOperation(roleMain, cmd, func(r opResult) { results <- r })
+	if err := op.start(); err != nil {
+		t.Fatalf("start() error = %v", err)
+	}
+	if result := recvOpResult(t, results); result.err != nil {
+		t.Fatalf("process error = %v", result.err)
+	}
+}
 
 func TestLogStreamerDefault(t *testing.T) {
 	logsDir := t.TempDir()
@@ -23,14 +45,7 @@ func TestLogStreamerDefault(t *testing.T) {
 	}
 	defer streamer.Close()
 
-	manager := newProcessManager(service)
-	manager.SetLogStreamer(streamer)
-	if err := manager.Start(); err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-	if _, err := manager.Wait(); err != nil {
-		t.Fatalf("Wait() error = %v", err)
-	}
+	runLoggedProcess(t, service, streamer)
 	if err := streamer.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
@@ -62,14 +77,7 @@ func TestLogStreamerFileRedirect(t *testing.T) {
 	}
 	defer streamer.Close()
 
-	manager := newProcessManager(service)
-	manager.SetLogStreamer(streamer)
-	if err := manager.Start(); err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-	if _, err := manager.Wait(); err != nil {
-		t.Fatalf("Wait() error = %v", err)
-	}
+	runLoggedProcess(t, service, streamer)
 	if err := streamer.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
