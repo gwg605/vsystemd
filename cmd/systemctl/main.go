@@ -77,6 +77,7 @@ func run(args []string) error {
 
 	listUnits := parser.NewCommand("list-units", "List known units")
 	listTimers := parser.NewCommand("list-timers", "List timers")
+	listTimersAll := listTimers.Flag("a", "all", &argparse.Options{Help: "show stopped and disabled timers too"})
 	daemonReload := parser.NewCommand("daemon-reload", "Reload unit files")
 	versionCmd := parser.NewCommand("--version", "Print version")
 
@@ -122,7 +123,7 @@ func run(args []string) error {
 	case listUnits.Happened():
 		return listUnitsCommand()
 	case listTimers.Happened():
-		return listTimersCommand()
+		return listTimersCommand(*listTimersAll)
 	case daemonReload.Happened():
 		return daemonReloadCommand()
 	default:
@@ -346,12 +347,12 @@ func listUnitsCommand() error {
 	return nil
 }
 
-func listTimersCommand() error {
+func listTimersCommand(all bool) error {
 	list, err := fetchUnits()
 	if err != nil {
 		return err
 	}
-	printTimers(list)
+	printTimers(list, all)
 	return nil
 }
 
@@ -491,10 +492,17 @@ func printUnits(list protocol.ListUnitsResponse) {
 	}
 }
 
-func printTimers(list protocol.ListUnitsResponse) {
+func timerActive(entry protocol.UnitStatus) bool {
+	return entry.Running != nil && *entry.Running
+}
+
+func printTimers(list protocol.ListUnitsResponse, all bool) {
 	fmt.Printf("%-28s %-12s %-28s %-12s %-24s %s\n", "NEXT", "LEFT", "LAST", "PASSED", "UNIT", "ACTIVATES")
 	for _, entry := range list.Units {
 		if entry.Type != "timer" {
+			continue
+		}
+		if !all && !timerActive(entry) {
 			continue
 		}
 

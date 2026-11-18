@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
@@ -101,6 +102,25 @@ func TestParseUnit(t *testing.T) {
 	for _, bad := range []string{"../evil", "bad name", "app.txt"} {
 		if _, err := parseUnit(bad); err == nil {
 			t.Errorf("parseUnit(%q) error = nil", bad)
+		}
+	}
+}
+
+func TestTimerActive(t *testing.T) {
+	running := true
+	stopped := false
+	tests := []struct {
+		name  string
+		entry protocol.UnitStatus
+		want  bool
+	}{
+		{"in scheduler", protocol.UnitStatus{Running: &running}, true},
+		{"stopped", protocol.UnitStatus{Running: &stopped}, false},
+		{"not scheduled", protocol.UnitStatus{}, false},
+	}
+	for _, test := range tests {
+		if got := timerActive(test.entry); got != test.want {
+			t.Errorf("%s: timerActive() = %v, want %v", test.name, got, test.want)
 		}
 	}
 }
