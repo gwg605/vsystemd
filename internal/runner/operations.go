@@ -34,12 +34,17 @@ type operation interface {
 	cancel(cancelMode)
 }
 
+type pidProvider interface {
+	pid() uint32
+}
+
 type processOperation struct {
 	role        opRole
 	cmd         *exec.Cmd
 	proc        processHandle
 	stdin       io.WriteCloser
 	interruptib bool
+	processID   uint32
 	report      func(opResult)
 	mu          sync.Mutex
 }
@@ -51,6 +56,12 @@ func newProcessOperation(role opRole, cmd *exec.Cmd, report func(opResult)) *pro
 func (o *processOperation) start() error { return nil }
 
 func (o *processOperation) cancel(mode cancelMode) {}
+
+func (o *processOperation) pid() uint32 {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.processID
+}
 
 type sequenceOperation struct {
 	role     opRole
