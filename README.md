@@ -208,7 +208,11 @@ Inspect timers with:
 ```powershell
 .\bin\systemctl.exe status foo.timer
 .\bin\systemctl.exe list-timers
+.\bin\systemctl.exe list-timers --all
 ```
+
+`list-timers` shows only timers currently in the scheduler; `--all` also lists
+timers that are stopped or disabled.
 
 Timer times are displayed in the local timezone with a numeric UTC offset.
 
@@ -264,7 +268,7 @@ Set `"log_level": "debug"` in `config.json` for verbose daemon/runner logs.
 | `start/stop/restart <unit>.service` | SCM | Control the service |
 | `status <unit>` | daemon | Aggregated status and log tail |
 | `list-units` | daemon | List known units and states |
-| `list-timers` | daemon | List timers with next/last run times |
+| `list-timers` | daemon | List active timers with next/last run times; `--all` includes stopped and disabled timers |
 | `daemon-reload` | daemon | Rescan units and update SCM entries |
 | `enable/disable <unit>.timer` | daemon | Persist timer enabled state |
 | `start/stop <unit>.timer` | daemon | Add/remove timer from scheduler |

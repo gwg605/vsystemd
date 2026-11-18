@@ -138,7 +138,7 @@ Commands routed through daemon:
 - `daemon-reload`
 - `status <unit>` (aggregated state for services and timers)
 - `list-units`
-- `list-timers`
+- `list-timers` (only active timers by default; `--all` includes stopped and disabled)
 - `enable/disable/start/stop` for `.timer` units
 
 Commands that bypass daemon (direct SCM):
