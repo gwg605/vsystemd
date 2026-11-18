@@ -248,12 +248,14 @@ C:\ProgramData\vsystemd\timers.json
 - managed logs are rotated when `max_size_mb` is exceeded or the file becomes
   older than `max_age_days`; a new timestamped file is started.
 
-Log writers keep their files open but readable. `systemctl status` shows the
-last lines from the current/latest managed file, or from the explicit
-`file:`/`append:` target if one is configured.
+Log writers keep their files open but readable. `systemctl status` prints a
+systemd-style block (`Loaded`, `Active`, `Main PID`/`Trigger`/`Triggers`) followed
+by a blank line and the last lines from the current/latest managed file, or from
+the explicit `file:`/`append:` target if one is configured. For a `.timer` the
+tail comes from the service it activates.
 
-Log timestamps are written in UTC with a `Z` suffix. Timer `last_run` and
-`next_run` values in `timers.json` are also stored in UTC.
+Log timestamps are written in UTC with a `Z` suffix. Timer `last_run`, `next_run`
+and `active_since` values in `timers.json` are also stored in UTC.
 
 Set `"log_level": "debug"` in `config.json` for verbose daemon/runner logs.
 
@@ -266,7 +268,7 @@ Set `"log_level": "debug"` in `config.json` for verbose daemon/runner logs.
 | `enable <unit>.service --password-file <path>` / `--password-stdin` | SCM | Supply the service account password without putting it on the command line |
 | `disable <unit>.service` | SCM | Stop and remove the service from SCM |
 | `start/stop/restart <unit>.service` | SCM | Control the service |
-| `status <unit>` | daemon | Aggregated status and log tail |
+| `status <unit>` | daemon | systemd-style status block and log tail |
 | `list-units` | daemon | List known units and states |
 | `list-timers` | daemon | List active timers with next/last run times; `--all` includes stopped and disabled timers |
 | `daemon-reload` | daemon | Rescan units and update SCM entries |

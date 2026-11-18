@@ -85,6 +85,10 @@ All other timer directives (`OnUnitActiveSec=`, `OnUnitInactiveSec=`, `Persisten
 
 - Routed through daemon (Channel 2)
 - Combines SCM state + daemon in-memory state + last N lines from log file
+- Prints a systemd-style block: `Loaded` (path; enabled from SCM `StartType`),
+  `Active` with `since`, and `Main PID`/`Exit code`/`Restart`/`Error` when relevant
+- `status foo.timer` prints `Loaded`/`Active`/`Trigger`/`Triggers`; the log tail
+  comes from the service the timer activates
 
 ### `systemctl list-units`
 

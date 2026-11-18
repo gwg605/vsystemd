@@ -34,10 +34,12 @@ type StatusResponse struct {
 	LastTransition time.Time  `json:"last_transition"`
 	LastError      string     `json:"last_error"`
 	LogTail        []string   `json:"log_tail"`
+	Description    string     `json:"description,omitempty"`
 	Enabled        *bool      `json:"enabled,omitempty"`
 	Running        *bool      `json:"running,omitempty"`
 	NextRun        *time.Time `json:"next_run,omitempty"`
 	LastRun        *time.Time `json:"last_run,omitempty"`
+	ActiveSince    *time.Time `json:"active_since,omitempty"`
 	Activates      string     `json:"activates,omitempty"`
 }
 

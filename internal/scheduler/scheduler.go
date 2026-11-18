@@ -69,6 +69,7 @@ func (s *Scheduler) Add(timer Timer) error {
 		done:   make(chan struct{}),
 	}
 	s.timers[timer.Name] = scheduled
+	s.markActive(timer.Name)
 	if next, ok := nextEvent(events, time.Now()); ok {
 		s.writeNext(timer.Name, next)
 	}
@@ -88,19 +89,20 @@ func (s *Scheduler) Remove(name string) error {
 func (s *Scheduler) Stop(name string) error {
 	slog.Info("scheduler: timer stopped", "unit", name)
 	s.stop(name)
-	return s.clearNext(name)
+	return s.clearRunState(name)
 }
 
-func (s *Scheduler) clearNext(name string) error {
+func (s *Scheduler) clearRunState(name string) error {
 	state, err := s.store.ReadTimerState(name)
 	if err != nil {
 		slog.Warn("scheduler: read timer state failed", "unit", name, "error", err)
 		return err
 	}
-	if state.NextRun.IsZero() {
+	if state.NextRun.IsZero() && state.ActiveSince.IsZero() {
 		return nil
 	}
 	state.NextRun = time.Time{}
+	state.ActiveSince = time.Time{}
 	if err := s.store.WriteTimerState(name, state); err != nil {
 		slog.Warn("scheduler: write timer state failed", "unit", name, "error", err)
 		return err
@@ -243,6 +245,18 @@ func (s *Scheduler) run(timer *scheduledTimer) {
 			slog.Warn("scheduler: no future timer events, stopping timer", "unit", timer.timer.Name)
 			return
 		}
+	}
+}
+
+func (s *Scheduler) markActive(name string) {
+	state, err := s.store.ReadTimerState(name)
+	if err != nil {
+		slog.Warn("scheduler: read timer state failed", "unit", name, "error", err)
+		return
+	}
+	state.ActiveSince = time.Now().UTC()
+	if err := s.store.WriteTimerState(name, state); err != nil {
+		slog.Warn("scheduler: write timer state failed", "unit", name, "error", err)
 	}
 }
 

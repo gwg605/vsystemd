@@ -49,7 +49,7 @@ func TestStatusResponse(t *testing.T) {
 	store.WriteUnit("app.service", []byte("[Unit]\nDescription=App\n[Service]\nExecStart=x\n"))
 
 	manager := scmfake.New()
-	if err := manager.CreateService(scm.ServiceConfig{Name: "app"}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: "app", StartType: scm.StartTypeAutomatic}); err != nil {
 		t.Fatalf("CreateService() error = %v", err)
 	}
 	if err := manager.StartService("app"); err != nil {
@@ -93,6 +93,12 @@ func TestStatusResponse(t *testing.T) {
 	}
 	if status.PID != 777 || status.RestartCount != 2 {
 		t.Errorf("status = %+v", status)
+	}
+	if status.Description != "App" {
+		t.Errorf("Description = %q", status.Description)
+	}
+	if status.Enabled == nil || !*status.Enabled {
+		t.Errorf("Enabled = %v", status.Enabled)
 	}
 	if len(status.LogTail) != 2 || status.LogTail[1] != "line2" {
 		t.Errorf("LogTail = %v", status.LogTail)
