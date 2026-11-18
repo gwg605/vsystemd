@@ -158,6 +158,7 @@ Runner держит постоянное соединение и по тайме
 | `SERVICE_RUNNING` | `active` | — | `active (running)` |
 | `SERVICE_RUNNING` | `activating` | — | `activating (start)` |
 | `SERVICE_RUNNING` | `restarting` | — | `activating (auto-restart)` |
+| `SERVICE_RUNNING` | `deactivating` | — | `deactivating (stop)` |
 | `SERVICE_RUNNING` | нет данных | — | `active (running)` |
 | `SERVICE_STOPPED` | `inactive` | 0 | `inactive (dead)` |
 | `SERVICE_STOPPED` | `failed` | ≠ 0 | `failed` |
@@ -288,8 +289,8 @@ type ServiceConfig struct {
 
 | Компонент | Ответственность |
 |---|---|
-| `SCMHandler` | Регистрация в SCM, приём control-кодов (STOP, INTERROGATE), обновление `SetServiceStatus` |
-| `ProcessManager` | Запуск ExecStartPre → ExecStart → ExecStartPost, настройка env/user/workdir, ExecStop |
+| `controlHandler` | Регистрация в SCM, приём control-кодов (STOP/SHUTDOWN/INTERROGATE), цикл состояний и обновление `SetServiceStatus` |
+| `operation` | Запуск внешнего процесса (`processOperation`) или последовательности (`sequenceOperation`), ожидание завершения, `Cancel(Interrupt\|Kill)` |
 | `RestartController` | `Restart=` / `RestartSec=` / `StartLimitBurst=` логика, счётчик `restart_count` |
 | `LogStreamer` | Перехват stdout/stderr дочернего процесса → `logwriter.Writer` |
 | `StateReporter` | Отправка `state_event` в daemon и heartbeat-таймер |
@@ -302,9 +303,10 @@ SCM start → Runner start
   → ExecStart (child process)
   → ExecStartPost
   → [работает, мониторит child]
-  → child exit → RestartController
-  → [исчерпан Restart= или Restart=no] → Runner exit
-SCM stop → SERVICE_CONTROL_STOP → ExecStop → Runner exit
+  → child exit → drain (дожидаемся завершения всех операций)
+  → [Restart= активен и лимит не исчерпан] → RestartSec → повтор
+  → [Restart=no или лимит исчерпан] → Runner exit
+SCM stop → SERVICE_CONTROL_STOP → drain (ExecStop / Ctrl+C, по таймауту Kill) → Runner exit
 ```
 
 ### ExecStartPre / ExecStartPost
