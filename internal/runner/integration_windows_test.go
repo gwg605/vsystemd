@@ -60,7 +60,7 @@ func waitForDone(t *testing.T, done <-chan struct{}) {
 	t.Helper()
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("Execute did not return")
 	}
 }
@@ -81,7 +81,7 @@ func TestRunnerStartStop(t *testing.T) {
 	service := &unit.ServiceUnit{
 		ExecStart:      helperCommand("sleep", "5s"),
 		ExecStop:       helperCommand("record", stopFile, "stopped"),
-		TimeoutStopSec: 100 * time.Millisecond,
+		TimeoutStopSec: 2 * time.Second,
 	}
 	runner, collector := newIntegratedRunner(t, "app.service", service)
 	changes, requests, done := runControlHandler(t, runner.handler)

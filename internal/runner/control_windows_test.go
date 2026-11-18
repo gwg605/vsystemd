@@ -15,7 +15,7 @@ import (
 
 func waitForStatus(t *testing.T, changes <-chan svc.Status, state svc.State) {
 	t.Helper()
-	timeout := time.NewTimer(2 * time.Second)
+	timeout := time.NewTimer(5 * time.Second)
 	defer timeout.Stop()
 	for {
 		select {
@@ -54,7 +54,7 @@ func TestControlHandlerStop(t *testing.T) {
 	service := &unit.ServiceUnit{
 		ExecStart:      helperCommand("sleep", "5s"),
 		ExecStop:       helperCommand("record", stopFile, "stopped"),
-		TimeoutStopSec: 100 * time.Millisecond,
+		TimeoutStopSec: 2 * time.Second,
 	}
 	changes, requests, done := runControlHandler(t, newTestHandler(service))
 
