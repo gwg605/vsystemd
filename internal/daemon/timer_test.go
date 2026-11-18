@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -78,6 +80,13 @@ func TestTimerStartStop(t *testing.T) {
 	if result.NextRun.IsZero() {
 		t.Errorf("NextRun = %v, want set on start", result.NextRun)
 	}
+	active, err := store.ReadTimerState("job.timer")
+	if err != nil {
+		t.Fatalf("ReadTimerState() error = %v", err)
+	}
+	if active.ActiveSince.IsZero() {
+		t.Error("ActiveSince was not set on start")
+	}
 
 	listResponse := controlRequest(t, client, protocol.TypeListUnits, nil)
 	var list protocol.ListUnitsResponse
@@ -104,6 +113,9 @@ func TestTimerStartStop(t *testing.T) {
 	}
 	if !state.NextRun.IsZero() {
 		t.Errorf("NextRun = %v, want zero after stop", state.NextRun)
+	}
+	if !state.ActiveSince.IsZero() {
+		t.Errorf("ActiveSince = %v, want zero after stop", state.ActiveSince)
 	}
 	if !state.LastRun.Equal(lastRun) {
 		t.Errorf("LastRun = %v, want %v", state.LastRun, lastRun)
@@ -205,8 +217,14 @@ func TestReloadTimers(t *testing.T) {
 }
 
 func TestTimerStatus(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "backup.log")
+	if err := os.WriteFile(logPath, []byte("backup-line\n"), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
 	store := storagefake.New()
-	store.WriteUnit("job.timer", []byte("[Timer]\nOnCalendar=daily\nUnit=backup.service\n"))
+	store.WriteUnit("job.timer", []byte("[Unit]\nDescription=Daily backup\n[Timer]\nOnCalendar=daily\nUnit=backup.service\n"))
+	store.WriteUnit("backup.service", []byte("[Service]\nExecStart=x\nStandardOutput=file:"+logPath+"\n"))
 	lastRun := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
 	if err := store.WriteTimerState("job.timer", storage.TimerState{
 		Enabled: true,
@@ -230,6 +248,9 @@ func TestTimerStatus(t *testing.T) {
 	if status.SystemdState != string(SystemdActiveWaiting) {
 		t.Errorf("SystemdState = %q", status.SystemdState)
 	}
+	if status.Description != "Daily backup" {
+		t.Errorf("Description = %q", status.Description)
+	}
 	if status.Enabled == nil || !*status.Enabled {
 		t.Errorf("Enabled = %v", status.Enabled)
 	}
@@ -239,10 +260,16 @@ func TestTimerStatus(t *testing.T) {
 	if status.Activates != "backup.service" {
 		t.Errorf("Activates = %q", status.Activates)
 	}
+	if status.ActiveSince == nil || status.ActiveSince.IsZero() {
+		t.Errorf("ActiveSince = %v", status.ActiveSince)
+	}
 	if status.LastRun == nil || !status.LastRun.Equal(lastRun) {
 		t.Errorf("LastRun = %v", status.LastRun)
 	}
 	if status.NextRun == nil || status.NextRun.IsZero() {
 		t.Errorf("NextRun = %v", status.NextRun)
+	}
+	if len(status.LogTail) != 1 || status.LogTail[0] != "backup-line" {
+		t.Errorf("LogTail = %v", status.LogTail)
 	}
 }

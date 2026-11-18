@@ -134,16 +134,16 @@ Runner держит постоянное соединение и по тайме
 | Тип | request_id | Payload |
 |---|---|---|
 | `reload_result` | id запроса `daemon_reload` | `success` |
-| `status_response` | id запроса `status_request` | `unit`, `systemd_state`, `scm_state`, `pid`, `exit_code`, `restart_count`, `last_transition`, `last_error`, `log_tail`; для `.timer` дополнительно `enabled`, `running`, `next_run`, `last_run`, `activates` |
+| `status_response` | id запроса `status_request` | `unit`, `systemd_state`, `scm_state`, `pid`, `exit_code`, `restart_count`, `last_transition`, `last_error`, `log_tail`, `description`, `enabled`; для `.timer` дополнительно `running`, `next_run`, `last_run`, `active_since`, `activates` |
 | `list_units_response` | id запроса `list_units` | `units[]`: `unit`, `type`, `systemd_state`, `scm_state`, `description`, `enabled`, `running`, `next_run`, `last_run`, `activates` |
 | `timer_result` | id исходного запроса | `unit`, `success`, `enabled`, `running`, `last_run`, `next_run` |
 | `error_response` | id исходного запроса | `error` |
 
 **`error_response`** — универсальный ответ на любой запрос в случае ошибки обработки. `request_id` содержит `id` того запроса, который вызвал ошибку.
 
-Поля `enabled`, `running`, `next_run`, `last_run`, `activates` в `list_units_response` заполняются только для юнитов типа `.timer`; для `.service` — `null`/пусто.
+Поля `running`, `next_run`, `last_run`, `active_since`, `activates` заполняются только для юнитов типа `.timer`; для `.service` — `null`/пусто. Поле `enabled` для `.service` вычисляется из SCM `StartType` (`Automatic`/`Boot`/`System` → `true`, `Manual`/`Disabled` → `false`), для `.timer` — из persistence.
 
-Для `.timer` поле `systemd_state` равно `active (waiting)`, если таймер добавлен в scheduler, иначе `inactive (dead)`.
+Для `.timer` поле `systemd_state` равно `active (waiting)`, если таймер добавлен в scheduler, иначе `inactive (dead)`. Поле `active_since` содержит момент добавления таймера в scheduler и сбрасывается при `stop`.
 
 ---
 
@@ -191,6 +191,9 @@ Runner держит постоянное соединение и по тайме
 | `last_transition` | daemon | timestamp последней смены состояния |
 | `last_error` | runner | строка с ошибкой запуска, сгенерированная runner'ом; только последняя; null если ошибок не было |
 | `log_tail` | лог-файл | последние 10 строк из текущего файла `logs\<service>\` или явного `file:`/`append:` файла |
+| `description` | unit-файл | значение `Description=` из секции `[Unit]` |
+| `enabled` | SCM `StartType` / persistence | для `.service` — из SCM; для `.timer` — из `timers.json` |
+| `active_since` | scheduler / persistence | для `.timer` — момент добавления в scheduler; отсутствует у неактивного таймера |
 
 ---
 
@@ -239,9 +242,10 @@ type Storage interface {
 }
 
 type TimerState struct {
-    Enabled bool
-    LastRun time.Time
-    NextRun time.Time
+    Enabled     bool
+    LastRun     time.Time
+    NextRun     time.Time
+    ActiveSince time.Time
 }
 
 type Manager interface {
@@ -383,12 +387,13 @@ SCM stop → SERVICE_CONTROL_STOP → drain (ExecStop / Ctrl+C, по тайма�
   "foo.timer": {
     "enabled": true,
     "last_run": "2026-11-09T10:00:00Z",
-    "next_run": "2026-11-09T11:00:00Z"
+    "next_run": "2026-11-09T11:00:00Z",
+    "active_since": "2026-11-09T09:00:00Z"
   }
 }
 ```
 
-`last_run` и `next_run` хранятся и обрабатываются только в UTC (RFC3339 с `Z`).
+`last_run`, `next_run` и `active_since` хранятся и обрабатываются только в UTC (RFC3339 с `Z`).
 При отображении время либо выводится в UTC с явным `Z`, либо конвертируется в
 локальную TZ с указанием зоны.
 
@@ -402,8 +407,8 @@ SCM stop → SERVICE_CONTROL_STOP → drain (ExecStop / Ctrl+C, по тайма�
 |---|---|
 | `systemctl enable foo.timer` | `enabled=true` в persistence; не запускает таймер |
 | `systemctl disable foo.timer` | `enabled=false` в persistence; не останавливает таймер |
-| `systemctl start foo.timer` | добавляет в scheduler (running); не меняет `enabled` |
-| `systemctl stop foo.timer` | убирает из scheduler; не меняет `enabled` |
+| `systemctl start foo.timer` | добавляет в scheduler (running); не меняет `enabled`; устанавливает `active_since` |
+| `systemctl stop foo.timer` | убирает из scheduler; не меняет `enabled`; сбрасывает `next_run` и `active_since` |
 
 При старте daemon'а: все таймеры с `enabled=true` автоматически добавляются в scheduler.
 
@@ -459,9 +464,16 @@ SCM stop → SERVICE_CONTROL_STOP → drain (ExecStop / Ctrl+C, по тайма�
 
 ### `systemctl status`
 
-Показывает последние 10 строк из текущего/последнего managed-файла
-`logs\<service>\`, либо из явно заданного `file:`/`append:` файла.
-Ротированные файлы не подмешиваются. При `null` для обоих потоков tail пуст.
+Вывод оформлен в systemd-стиле. Для `.service`:
+`● unit - description`, `Loaded`, `Active` (со `since ...; ... ago`),
+`Main PID`, а также `Exit code`/`Restart`/`Error` при наличии значения.
+Для `.timer`: `Loaded`, `Active` (со `since ...; ... ago` при активном таймере),
+`Trigger` (время следующего запуска и остаток) и `Triggers` (активируемый сервис).
+
+После блока идёт пустая строка и последние 10 строк лога: из текущего/последнего
+managed-файла `logs\<service>\`, либо из явно заданного `file:`/`append:` файла.
+Для `.timer` показывается хвост лога активируемого сервиса. Ротированные файлы не
+подмешиваются. При `null` для обоих потоков tail пуст.
 
 ---
 

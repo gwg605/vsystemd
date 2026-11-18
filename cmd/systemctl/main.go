@@ -334,7 +334,11 @@ func statusCommand(cfg config.Config, id unit.ID) error {
 	if err := json.Unmarshal(response.Payload, &status); err != nil {
 		return err
 	}
-	printStatus(status)
+	if id.Type == unit.TypeTimer {
+		printTimerStatus(cfg, id, status)
+	} else {
+		printServiceStatus(cfg, id, status)
+	}
 	return nil
 }
 
@@ -454,35 +458,97 @@ func waitStopped(manager scm.Manager, name string, timeout time.Duration) error 
 	}
 }
 
-func printStatus(status protocol.StatusResponse) {
-	fmt.Printf("%s - %s\n", status.Unit, status.SystemdState)
-	if status.Activates != "" {
-		fmt.Printf("    Activates: %s\n", status.Activates)
-	}
-	if status.Enabled != nil {
-		fmt.Printf("    Enabled: %s\n", yesNo(*status.Enabled))
-	}
-	if status.Running != nil {
-		fmt.Printf("    Running: %s\n", yesNo(*status.Running))
-	}
-	if status.NextRun != nil {
-		fmt.Printf("    Trigger: %s\n", formatTime(*status.NextRun))
-	}
-	if status.LastRun != nil {
-		fmt.Printf("    Last run: %s\n", formatTime(*status.LastRun))
-	}
-	if status.PID != 0 {
-		fmt.Printf("    PID: %d\n", status.PID)
-	}
-	if status.ExitCode != 0 {
-		fmt.Printf("    Exit code: %d\n", status.ExitCode)
-	}
-	if status.LastError != "" {
-		fmt.Printf("    Error: %s\n", status.LastError)
-	}
-	for _, line := range status.LogTail {
+func printServiceStatus(cfg config.Config, id unit.ID, status protocol.StatusResponse) {
+	for _, line := range serviceStatusLines(cfg, id, status) {
 		fmt.Println(line)
 	}
+}
+
+func serviceStatusLines(cfg config.Config, id unit.ID, status protocol.StatusResponse) []string {
+	header := fmt.Sprintf("● %s", status.Unit)
+	if status.Description != "" {
+		header += " - " + status.Description
+	}
+
+	loaded := filepath.Join(cfg.Paths().SystemDir, id.String())
+	if status.Enabled != nil {
+		loaded += "; " + enabledDisabled(*status.Enabled)
+	}
+
+	active := status.SystemdState
+	if status.SystemdState != "inactive (dead)" && !status.LastTransition.IsZero() {
+		active += fmt.Sprintf(" since %s; %s ago", formatTime(status.LastTransition), formatDelta(time.Since(status.LastTransition)))
+	}
+
+	lines := []string{
+		header,
+		fmt.Sprintf("%12s %s", "Loaded:", "loaded ("+loaded+")"),
+		fmt.Sprintf("%12s %s", "Active:", active),
+	}
+	if status.PID != 0 {
+		lines = append(lines, fmt.Sprintf("%12s %d", "Main PID:", status.PID))
+	}
+	if status.ExitCode != 0 {
+		lines = append(lines, fmt.Sprintf("%12s %d", "Exit code:", status.ExitCode))
+	}
+	if status.RestartCount > 0 {
+		lines = append(lines, fmt.Sprintf("%12s %d", "Restart:", status.RestartCount))
+	}
+	if status.LastError != "" {
+		lines = append(lines, fmt.Sprintf("%12s %s", "Error:", status.LastError))
+	}
+	if len(status.LogTail) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, status.LogTail...)
+	}
+	return lines
+}
+
+func printTimerStatus(cfg config.Config, id unit.ID, status protocol.StatusResponse) {
+	for _, line := range timerStatusLines(cfg, id, status) {
+		fmt.Println(line)
+	}
+}
+
+func timerStatusLines(cfg config.Config, id unit.ID, status protocol.StatusResponse) []string {
+	header := fmt.Sprintf("● %s", status.Unit)
+	if status.Description != "" {
+		header += " - " + status.Description
+	}
+
+	loaded := filepath.Join(cfg.Paths().SystemDir, id.String())
+	if status.Enabled != nil {
+		loaded += "; " + enabledDisabled(*status.Enabled)
+	}
+
+	active := status.SystemdState
+	if status.ActiveSince != nil {
+		active += fmt.Sprintf(" since %s; %s ago", formatTime(*status.ActiveSince), formatDelta(time.Since(*status.ActiveSince)))
+	}
+
+	lines := []string{
+		header,
+		fmt.Sprintf("%12s %s", "Loaded:", "loaded ("+loaded+")"),
+		fmt.Sprintf("%12s %s", "Active:", active),
+	}
+	if status.NextRun != nil {
+		lines = append(lines, fmt.Sprintf("%12s %s; %s left", "Trigger:", formatTime(*status.NextRun), formatDelta(time.Until(*status.NextRun))))
+	}
+	if status.Activates != "" {
+		lines = append(lines, fmt.Sprintf("%12s ● %s", "Triggers:", status.Activates))
+	}
+	if len(status.LogTail) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, status.LogTail...)
+	}
+	return lines
+}
+
+func enabledDisabled(value bool) string {
+	if value {
+		return "enabled"
+	}
+	return "disabled"
 }
 
 func printUnits(list protocol.ListUnitsResponse) {
@@ -550,13 +616,6 @@ func formatDelta(value time.Duration) string {
 		parts = append(parts, fmt.Sprintf("%ds", seconds))
 	}
 	return strings.Join(parts, " ")
-}
-
-func yesNo(value bool) string {
-	if value {
-		return "yes"
-	}
-	return "no"
 }
 
 func vsystemdPath() (string, error) {

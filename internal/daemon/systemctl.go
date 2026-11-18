@@ -81,9 +81,15 @@ func (d *Daemon) status(id unit.ID) (protocol.StatusResponse, error) {
 	cached, hasCached := d.State(name)
 	scmStatus, scmErr := d.manager.QueryStatus(id.Name)
 
-	if scmErr != nil && !hasCached {
-		if _, err := d.store.ReadUnit(name); err != nil {
-			return protocol.StatusResponse{}, fmt.Errorf("unit %s not found", name)
+	data, readErr := d.store.ReadUnit(name)
+	if scmErr != nil && !hasCached && readErr != nil {
+		return protocol.StatusResponse{}, fmt.Errorf("unit %s not found", name)
+	}
+
+	description := ""
+	if readErr == nil {
+		if parsed, err := unit.Parse(id, data); err == nil {
+			description = parsed.Description
 		}
 	}
 
@@ -113,7 +119,24 @@ func (d *Daemon) status(id unit.ID) (protocol.StatusResponse, error) {
 		LastTransition: state.LastTransition,
 		LastError:      state.LastError,
 		LogTail:        logTail,
+		Description:    description,
+		Enabled:        serviceEnabled(d.manager, id.Name),
 	}, nil
+}
+
+func serviceEnabled(manager scm.Manager, name string) *bool {
+	configs, err := manager.ListServices()
+	if err != nil {
+		return nil
+	}
+	for _, cfg := range configs {
+		if cfg.Name != name {
+			continue
+		}
+		enabled := cfg.StartType != scm.StartTypeDisabled && cfg.StartType != scm.StartTypeManual
+		return &enabled
+	}
+	return nil
 }
 
 func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
@@ -233,11 +256,17 @@ func (d *Daemon) timerStatus(id unit.ID) (protocol.StatusResponse, error) {
 	response := protocol.StatusResponse{
 		Unit:         name,
 		SystemdState: string(systemdState),
+		Description:  parsed.Description,
 		Enabled:      &enabled,
 		Running:      &running,
 	}
 	if target, err := timerTarget(parsed.Timer, id); err == nil {
 		response.Activates = target.String()
+		response.LogTail = d.logTail(target)
+	}
+	if running && !state.ActiveSince.IsZero() {
+		activeSince := state.ActiveSince
+		response.ActiveSince = &activeSince
 	}
 	if !state.LastRun.IsZero() {
 		lastRun := state.LastRun

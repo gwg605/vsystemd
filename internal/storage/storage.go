@@ -8,9 +8,10 @@ import (
 const defaultRoot = `C:\ProgramData\vsystemd`
 
 type TimerState struct {
-	Enabled bool      `json:"enabled"`
-	LastRun time.Time `json:"last_run"`
-	NextRun time.Time `json:"next_run"`
+	Enabled     bool      `json:"enabled"`
+	LastRun     time.Time `json:"last_run"`
+	NextRun     time.Time `json:"next_run"`
+	ActiveSince time.Time `json:"active_since"`
 }
 
 func (s TimerState) UTC() TimerState {
@@ -19,6 +20,9 @@ func (s TimerState) UTC() TimerState {
 	}
 	if !s.NextRun.IsZero() {
 		s.NextRun = s.NextRun.UTC()
+	}
+	if !s.ActiveSince.IsZero() {
+		s.ActiveSince = s.ActiveSince.UTC()
 	}
 	return s
 }

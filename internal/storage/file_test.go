@@ -108,9 +108,10 @@ func TestTimerStateStoredInUTC(t *testing.T) {
 	st, paths := newTestStorage(t)
 	zone := time.FixedZone("MSK", 3*60*60)
 	input := TimerState{
-		Enabled: true,
-		LastRun: time.Date(2026, 11, 9, 10, 0, 0, 0, zone),
-		NextRun: time.Date(2026, 11, 9, 11, 0, 0, 0, zone),
+		Enabled:     true,
+		LastRun:     time.Date(2026, 11, 9, 10, 0, 0, 0, zone),
+		NextRun:     time.Date(2026, 11, 9, 11, 0, 0, 0, zone),
+		ActiveSince: time.Date(2026, 11, 9, 9, 0, 0, 0, zone),
 	}
 
 	if err := st.WriteTimerState("job.timer", input); err != nil {
@@ -120,10 +121,10 @@ func TestTimerStateStoredInUTC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadTimerState() error = %v", err)
 	}
-	if got.LastRun.Location() != time.UTC || got.NextRun.Location() != time.UTC {
-		t.Errorf("locations = %v/%v", got.LastRun.Location(), got.NextRun.Location())
+	if got.LastRun.Location() != time.UTC || got.NextRun.Location() != time.UTC || got.ActiveSince.Location() != time.UTC {
+		t.Errorf("locations = %v/%v/%v", got.LastRun.Location(), got.NextRun.Location(), got.ActiveSince.Location())
 	}
-	if !got.LastRun.Equal(input.LastRun) || !got.NextRun.Equal(input.NextRun) {
+	if !got.LastRun.Equal(input.LastRun) || !got.NextRun.Equal(input.NextRun) || !got.ActiveSince.Equal(input.ActiveSince) {
 		t.Errorf("times changed: %+v", got)
 	}
 
