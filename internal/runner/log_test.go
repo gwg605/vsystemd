@@ -12,7 +12,7 @@ import (
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
-func runLoggedProcess(t *testing.T, service *unit.ServiceUnit, streamer *LogStreamer) {
+func runLoggedProcess(t *testing.T, service *unit.ServiceUnit, streamer *logStreamer) {
 	t.Helper()
 	parsed, err := parseCommand(service.ExecStart)
 	if err != nil {
@@ -39,9 +39,9 @@ func TestLogStreamerDefault(t *testing.T) {
 	service := &unit.ServiceUnit{
 		ExecStart: helperCommand("output", "out-line", "err-line"),
 	}
-	streamer, err := NewLogStreamer("app", service, logsDir, logwriter.Rotation{}, time.Now().UTC())
+	streamer, err := newLogStreamer("app", service, logsDir, logwriter.Rotation{}, time.Now().UTC())
 	if err != nil {
-		t.Fatalf("NewLogStreamer() error = %v", err)
+		t.Fatalf("newLogStreamer() error = %v", err)
 	}
 	defer streamer.Close()
 
@@ -71,9 +71,9 @@ func TestLogStreamerFileRedirect(t *testing.T) {
 		StandardOutput: "file:" + custom,
 		ExecStart:      helperCommand("output", "stdout-text", "stderr-text"),
 	}
-	streamer, err := NewLogStreamer("app", service, logsDir, logwriter.Rotation{}, time.Now().UTC())
+	streamer, err := newLogStreamer("app", service, logsDir, logwriter.Rotation{}, time.Now().UTC())
 	if err != nil {
-		t.Fatalf("NewLogStreamer() error = %v", err)
+		t.Fatalf("newLogStreamer() error = %v", err)
 	}
 	defer streamer.Close()
 

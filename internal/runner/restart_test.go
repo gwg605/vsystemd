@@ -21,7 +21,7 @@ func TestRestartPolicy(t *testing.T) {
 		{unit.RestartOnFailure, 1, true},
 	}
 	for _, tt := range tests {
-		controller := NewRestartController(&unit.ServiceUnit{Restart: tt.policy})
+		controller := newRestartController(&unit.ServiceUnit{Restart: tt.policy})
 		if got := controller.ShouldRestart(tt.exitCode); got != tt.want {
 			t.Errorf("Restart=%s exit=%d: ShouldRestart() = %v, want %v", tt.policy, tt.exitCode, got, tt.want)
 		}
@@ -29,14 +29,14 @@ func TestRestartPolicy(t *testing.T) {
 }
 
 func TestRestartDelay(t *testing.T) {
-	controller := NewRestartController(&unit.ServiceUnit{RestartSec: 5 * time.Second})
+	controller := newRestartController(&unit.ServiceUnit{RestartSec: 5 * time.Second})
 	if got := controller.Delay(); got != 5*time.Second {
 		t.Errorf("Delay() = %v", got)
 	}
 }
 
 func TestRestartCount(t *testing.T) {
-	controller := NewRestartController(&unit.ServiceUnit{})
+	controller := newRestartController(&unit.ServiceUnit{})
 	controller.RecordRestart()
 	controller.RecordRestart()
 	if got := controller.RestartCount(); got != 2 {
@@ -45,7 +45,7 @@ func TestRestartCount(t *testing.T) {
 }
 
 func TestStartLimit(t *testing.T) {
-	controller := NewRestartController(&unit.ServiceUnit{
+	controller := newRestartController(&unit.ServiceUnit{
 		StartLimitBurst:       2,
 		StartLimitIntervalSec: time.Minute,
 	})

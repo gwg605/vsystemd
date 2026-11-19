@@ -11,16 +11,16 @@ import (
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
-// EnvironmentDefaults describes how the clean environment for service
+// environmentDefaults describes how the clean environment for service
 // processes is built: Inherit lists variables taken from the runner's
 // environment, Vars are extra variables whose values may reference the runner's
 // environment via %NAME% placeholders.
-type EnvironmentDefaults struct {
+type environmentDefaults struct {
 	Inherit []string
 	Vars    map[string]string
 }
 
-func buildEnvironment(service *unit.ServiceUnit, defaults EnvironmentDefaults) ([]string, error) {
+func buildEnvironment(service *unit.ServiceUnit, defaults environmentDefaults) ([]string, error) {
 	parent := parentEnvironment()
 
 	env := make(map[string]string)

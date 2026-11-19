@@ -34,7 +34,7 @@ type StateEvent struct {
 	LastError    string    `json:"last_error"`
 }
 
-type StateReporter struct {
+type stateReporter struct {
 	transport transport.Transport
 	unit      string
 
@@ -42,15 +42,15 @@ type StateReporter struct {
 	state StateEvent
 }
 
-func NewStateReporter(tr transport.Transport, unit string) *StateReporter {
-	return &StateReporter{
+func newStateReporter(tr transport.Transport, unit string) *stateReporter {
+	return &stateReporter{
 		transport: tr,
 		unit:      unit,
 		state:     StateEvent{Unit: unit, State: StateInactive},
 	}
 }
 
-func (r *StateReporter) Report(event StateEvent) error {
+func (r *stateReporter) Report(event StateEvent) error {
 	if event.Unit == "" {
 		event.Unit = r.unit
 	}
@@ -83,7 +83,7 @@ func (r *StateReporter) Report(event StateEvent) error {
 	return nil
 }
 
-func (r *StateReporter) State() StateEvent {
+func (r *stateReporter) State() StateEvent {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.state
@@ -91,7 +91,7 @@ func (r *StateReporter) State() StateEvent {
 
 // Heartbeat re-sends the last reported state with a fresh timestamp so the
 // daemon knows the runner is still alive.
-func (r *StateReporter) Heartbeat() error {
+func (r *stateReporter) Heartbeat() error {
 	state := r.State()
 	state.Timestamp = time.Time{}
 	return r.Report(state)

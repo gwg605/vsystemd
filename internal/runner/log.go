@@ -8,13 +8,13 @@ import (
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
-type LogStreamer struct {
+type logStreamer struct {
 	stdout  io.Writer
 	stderr  io.Writer
 	closers []io.Closer
 }
 
-func NewLogStreamer(serviceName string, service *unit.ServiceUnit, logsDir string, rotation logwriter.Rotation, startTime time.Time) (*LogStreamer, error) {
+func newLogStreamer(serviceName string, service *unit.ServiceUnit, logsDir string, rotation logwriter.Rotation, startTime time.Time) (*logStreamer, error) {
 	stdoutTarget, stderrTarget, err := logwriter.ResolveServiceOutputs(service)
 	if err != nil {
 		return nil, err
@@ -35,7 +35,7 @@ func NewLogStreamer(serviceName string, service *unit.ServiceUnit, logsDir strin
 		}
 	}
 
-	streamer := &LogStreamer{}
+	streamer := &logStreamer{}
 	opened := make(map[string]io.Writer)
 
 	open := func(target writerSpec) (io.Writer, error) {
@@ -97,15 +97,15 @@ func toWriterSpec(defaultPath string, target logwriter.OutputTarget) writerSpec 
 	return writerSpec{kind: target.Kind, path: target.Path}
 }
 
-func (l *LogStreamer) Stdout() io.Writer {
+func (l *logStreamer) Stdout() io.Writer {
 	return l.stdout
 }
 
-func (l *LogStreamer) Stderr() io.Writer {
+func (l *logStreamer) Stderr() io.Writer {
 	return l.stderr
 }
 
-func (l *LogStreamer) Close() error {
+func (l *logStreamer) Close() error {
 	var firstErr error
 	for _, closer := range l.closers {
 		if err := closer.Close(); err != nil && firstErr == nil {

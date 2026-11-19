@@ -7,7 +7,7 @@ import (
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
-type RestartController struct {
+type restartController struct {
 	policy     unit.RestartPolicy
 	restartSec time.Duration
 	burst      int
@@ -19,8 +19,8 @@ type RestartController struct {
 	now          func() time.Time
 }
 
-func NewRestartController(service *unit.ServiceUnit) *RestartController {
-	return &RestartController{
+func newRestartController(service *unit.ServiceUnit) *restartController {
+	return &restartController{
 		policy:     service.Restart,
 		restartSec: service.RestartSec,
 		burst:      service.StartLimitBurst,
@@ -29,7 +29,7 @@ func NewRestartController(service *unit.ServiceUnit) *RestartController {
 	}
 }
 
-func (r *RestartController) AllowStart() bool {
+func (r *restartController) AllowStart() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -46,7 +46,7 @@ func (r *RestartController) AllowStart() bool {
 	return true
 }
 
-func (r *RestartController) ShouldRestart(exitCode int) bool {
+func (r *restartController) ShouldRestart(exitCode int) bool {
 	switch r.policy {
 	case unit.RestartAlways:
 		return true
@@ -57,23 +57,23 @@ func (r *RestartController) ShouldRestart(exitCode int) bool {
 	}
 }
 
-func (r *RestartController) Delay() time.Duration {
+func (r *restartController) Delay() time.Duration {
 	return r.restartSec
 }
 
-func (r *RestartController) RecordRestart() {
+func (r *restartController) RecordRestart() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.restartCount++
 }
 
-func (r *RestartController) RestartCount() int {
+func (r *restartController) RestartCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.restartCount
 }
 
-func (r *RestartController) prune(now time.Time) {
+func (r *restartController) prune(now time.Time) {
 	cutoff := now.Add(-r.interval)
 	index := 0
 	for index < len(r.attempts) && r.attempts[index].Before(cutoff) {

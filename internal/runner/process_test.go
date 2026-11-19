@@ -144,7 +144,7 @@ func TestBuildEnvironment(t *testing.T) {
 	service := &unit.ServiceUnit{
 		Environment: map[string]string{"UNIT_VAR": "unit-value", "OVERRIDE": "from-unit"},
 	}
-	defaults := EnvironmentDefaults{
+	defaults := environmentDefaults{
 		Inherit: []string{"MY_PARENT", "NOT_SET_VAR"},
 		Vars: map[string]string{
 			"DERIVED":  "pre-%MY_PARENT%-post",
@@ -182,7 +182,7 @@ func TestBuildEnvironmentFile(t *testing.T) {
 		Environment:      map[string]string{"FROM_UNIT": "unitvalue"},
 	}
 
-	env := environmentMap(t, service, EnvironmentDefaults{})
+	env := environmentMap(t, service, environmentDefaults{})
 
 	if env["FROM_FILE"] != "filevalue" {
 		t.Errorf("FROM_FILE = %q", env["FROM_FILE"])
@@ -196,7 +196,7 @@ func TestRequiredEnvironmentFileMissing(t *testing.T) {
 	service := &unit.ServiceUnit{
 		EnvironmentFiles: []string{filepath.Join(t.TempDir(), "missing.env")},
 	}
-	if _, err := buildEnvironment(service, EnvironmentDefaults{}); err == nil {
+	if _, err := buildEnvironment(service, environmentDefaults{}); err == nil {
 		t.Fatal("buildEnvironment() error = nil")
 	}
 }
@@ -206,13 +206,13 @@ func TestEnvironmentFileInvalidPathRejected(t *testing.T) {
 	dotdot := t.TempDir() + separator + ".." + separator + "x.env"
 	for _, file := range []string{"relative.env", "-relative.env", dotdot, "-" + dotdot} {
 		service := &unit.ServiceUnit{EnvironmentFiles: []string{file}}
-		if _, err := buildEnvironment(service, EnvironmentDefaults{}); err == nil {
+		if _, err := buildEnvironment(service, environmentDefaults{}); err == nil {
 			t.Errorf("buildEnvironment() error = nil for EnvironmentFile %q, want error", file)
 		}
 	}
 }
 
-func environmentMap(t *testing.T, service *unit.ServiceUnit, defaults EnvironmentDefaults) map[string]string {
+func environmentMap(t *testing.T, service *unit.ServiceUnit, defaults environmentDefaults) map[string]string {
 	t.Helper()
 	lines, err := buildEnvironment(service, defaults)
 	if err != nil {

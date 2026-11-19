@@ -44,10 +44,6 @@ const (
 
 const defaultStopTimeout = 45 * time.Second
 
-func Run(name string, handler svc.Handler) error {
-	return svc.Run(name, handler)
-}
-
 func resolveStopTimeout(service *unit.ServiceUnit) time.Duration {
 	if service.TimeoutStopSec > 0 {
 		return service.TimeoutStopSec
@@ -79,14 +75,14 @@ type handlerSession struct {
 
 type controlHandler struct {
 	service     *unit.ServiceUnit
-	restart     *RestartController
-	reporter    *StateReporter
-	env         EnvironmentDefaults
-	logs        *LogStreamer
+	restart     *restartController
+	reporter    *stateReporter
+	env         environmentDefaults
+	logs        *logStreamer
 	stopTimeout time.Duration
 }
 
-func newControlHandler(service *unit.ServiceUnit, restart *RestartController, env EnvironmentDefaults, logs *LogStreamer) *controlHandler {
+func newControlHandler(service *unit.ServiceUnit, restart *restartController, env environmentDefaults, logs *logStreamer) *controlHandler {
 	return &controlHandler{
 		service:     service,
 		restart:     restart,
@@ -100,7 +96,7 @@ func (h *controlHandler) Execute(_ []string, requests <-chan svc.ChangeRequest, 
 	return h.newSession(requests, changes).run()
 }
 
-func (h *controlHandler) setReporter(reporter *StateReporter) {
+func (h *controlHandler) setReporter(reporter *stateReporter) {
 	h.reporter = reporter
 }
 

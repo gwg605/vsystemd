@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -15,14 +14,15 @@ import (
 
 	"golang.org/x/sys/windows/svc"
 
+	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/daemon"
 	"github.com/gwg605/vsystemd/internal/logwriter"
 	"github.com/gwg605/vsystemd/internal/runner"
 	scmfake "github.com/gwg605/vsystemd/internal/scm/fake"
+	"github.com/gwg605/vsystemd/internal/storage"
 	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
 	"github.com/gwg605/vsystemd/internal/transport"
 	transportfake "github.com/gwg605/vsystemd/internal/transport/fake"
-	"github.com/gwg605/vsystemd/internal/unit"
 )
 
 var clientCounter atomic.Int64
@@ -119,16 +119,12 @@ func (e *testEnv) newDaemon(t *testing.T) *daemon.Daemon {
 	return d
 }
 
-func (e *testEnv) newRunner(t *testing.T, name string, service *unit.ServiceUnit) *runner.Runner {
+func (e *testEnv) newRunner(t *testing.T, name string) *runner.Runner {
 	t.Helper()
-	serviceName := strings.TrimSuffix(name, filepath.Ext(name))
-	logs, err := runner.NewLogStreamer(serviceName, service, t.TempDir(), logwriter.Rotation{}, time.Now().UTC())
+	store := func() (storage.Storage, error) { return e.store, nil }
+	cfg := config.Config{LogsDir: t.TempDir()}
+	r, err := runner.NewRunner(name, store, e.transportFactory, cfg, time.Now().UTC())
 	if err != nil {
-		t.Fatalf("runner.NewLogStreamer() error = %v", err)
-	}
-	r, err := runner.NewRunner(name, service, logs, runner.EnvironmentDefaults{}, e.transportFactory)
-	if err != nil {
-		logs.Close()
 		t.Fatalf("runner.NewRunner() error = %v", err)
 	}
 	t.Cleanup(func() { r.Close() })
