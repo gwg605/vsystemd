@@ -93,3 +93,9 @@ func (s *Storage) ListTimerStates() (map[string]storage.TimerState, error) {
 	}
 	return states, nil
 }
+
+func (s *Storage) ValidatePath(path string) error { return storage.ValidatePath(path) }
+
+func (s *Storage) OutputWritable(path string) error { return storage.OutputWritable(path) }
+
+func (s *Storage) InputReadable(path string) error { return storage.InputReadable(path) }

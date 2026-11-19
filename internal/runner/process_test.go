@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gwg605/vsystemd/internal/unit"
+	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
 )
 
 func TestProcessHelper(t *testing.T) {
@@ -196,7 +197,7 @@ func TestRequiredEnvironmentFileMissing(t *testing.T) {
 	service := &unit.ServiceUnit{
 		EnvironmentFiles: []string{filepath.Join(t.TempDir(), "missing.env")},
 	}
-	if _, err := buildEnvironment(service, environmentDefaults{}); err == nil {
+	if _, err := buildEnvironment(storagefake.New(), service, environmentDefaults{}); err == nil {
 		t.Fatal("buildEnvironment() error = nil")
 	}
 }
@@ -206,7 +207,7 @@ func TestEnvironmentFileInvalidPathRejected(t *testing.T) {
 	dotdot := t.TempDir() + separator + ".." + separator + "x.env"
 	for _, file := range []string{"relative.env", "-relative.env", dotdot, "-" + dotdot} {
 		service := &unit.ServiceUnit{EnvironmentFiles: []string{file}}
-		if _, err := buildEnvironment(service, environmentDefaults{}); err == nil {
+		if _, err := buildEnvironment(storagefake.New(), service, environmentDefaults{}); err == nil {
 			t.Errorf("buildEnvironment() error = nil for EnvironmentFile %q, want error", file)
 		}
 	}
@@ -214,7 +215,7 @@ func TestEnvironmentFileInvalidPathRejected(t *testing.T) {
 
 func environmentMap(t *testing.T, service *unit.ServiceUnit, defaults environmentDefaults) map[string]string {
 	t.Helper()
-	lines, err := buildEnvironment(service, defaults)
+	lines, err := buildEnvironment(storagefake.New(), service, defaults)
 	if err != nil {
 		t.Fatalf("buildEnvironment() error = %v", err)
 	}

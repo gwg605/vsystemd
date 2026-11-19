@@ -65,7 +65,7 @@ func NewRunner(name string, store storage.Factory, newTransport transport.Factor
 		slog.Debug("runner: cleanup service logs failed", "unit", id.String(), "error", err)
 	}
 
-	logs, err := newLogStreamer(id.Name, parsed.Service, cfg.LogsDir, cfg.LogRotation(), startTime)
+	logs, err := newLogStreamer(st, id.Name, parsed.Service, cfg.LogsDir, cfg.LogRotation(), startTime)
 	if err != nil {
 		return nil, fmt.Errorf("create log streamer: %w", err)
 	}
@@ -75,7 +75,7 @@ func NewRunner(name string, store storage.Factory, newTransport transport.Factor
 		Vars:    cfg.Environment.Vars,
 	}
 	restart := newRestartController(parsed.Service)
-	handler := newControlHandler(parsed.Service, restart, env, logs)
+	handler := newControlHandler(parsed.Service, restart, env, logs, st)
 
 	tr, err := newTransport(transport.NewPeer(transport.PeerRunner, id.String(), false), nil)
 	if err != nil {

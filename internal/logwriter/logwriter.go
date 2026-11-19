@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -315,4 +316,16 @@ func splitLines(value string) []string {
 	}
 	lines = append(lines, line)
 	return lines
+}
+
+func SamePath(left, right string) bool {
+	return CanonicalPath(left) == CanonicalPath(right)
+}
+
+func CanonicalPath(path string) string {
+	return strings.ToLower(filepath.Clean(path))
+}
+
+func ServiceLogDir(logsDir, serviceName string) string {
+	return filepath.Join(logsDir, serviceName)
 }
