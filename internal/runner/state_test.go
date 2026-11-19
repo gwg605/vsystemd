@@ -4,23 +4,24 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/transport"
 	"github.com/gwg605/vsystemd/internal/transport/fake"
 )
 
 type stateCollector struct {
-	events chan StateEvent
+	events chan protocol.StateEvent
 }
 
 func newStateCollector() *stateCollector {
-	return &stateCollector{events: make(chan StateEvent, 16)}
+	return &stateCollector{events: make(chan protocol.StateEvent, 16)}
 }
 
 func (c *stateCollector) handler(_ transport.Peer, msg transport.Message) error {
-	if msg.Type != MessageStateEvent {
+	if msg.Type != protocol.MessageStateEvent {
 		return nil
 	}
-	var event StateEvent
+	var event protocol.StateEvent
 	if err := json.Unmarshal(msg.Payload, &event); err != nil {
 		return err
 	}
@@ -47,7 +48,7 @@ func newReporterPair(t *testing.T, unitName string) (*stateReporter, *fake.Trans
 func TestStateReporterReport(t *testing.T) {
 	reporter, _, collector := newReporterPair(t, "app.service")
 
-	if err := reporter.Report(StateEvent{State: StateActive, PID: 123, RestartCount: 2}); err != nil {
+	if err := reporter.Report(protocol.StateEvent{State: protocol.StateActive, PID: 123, RestartCount: 2}); err != nil {
 		t.Fatalf("Report() error = %v", err)
 	}
 
@@ -55,7 +56,7 @@ func TestStateReporterReport(t *testing.T) {
 	if event.Unit != "app.service" {
 		t.Errorf("Unit = %q", event.Unit)
 	}
-	if event.State != StateActive || event.PID != 123 || event.RestartCount != 2 {
+	if event.State != protocol.StateActive || event.PID != 123 || event.RestartCount != 2 {
 		t.Errorf("event = %+v", event)
 	}
 	if event.Timestamp.IsZero() {

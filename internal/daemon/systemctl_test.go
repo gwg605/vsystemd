@@ -10,7 +10,6 @@ import (
 	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/logwriter"
 	"github.com/gwg605/vsystemd/internal/protocol"
-	"github.com/gwg605/vsystemd/internal/runner"
 	"github.com/gwg605/vsystemd/internal/scm"
 	scmfake "github.com/gwg605/vsystemd/internal/scm/fake"
 	"github.com/gwg605/vsystemd/internal/storage"
@@ -65,9 +64,9 @@ func TestStatusResponse(t *testing.T) {
 	if err := os.WriteFile(logPath, []byte("line1\nline2\n"), 0o644); err != nil {
 		t.Fatalf("write log: %v", err)
 	}
-	daemon.updateFromEvent(runner.StateEvent{
+	daemon.updateFromEvent(protocol.StateEvent{
 		Unit:         "app.service",
-		State:        runner.StateActive,
+		State:        protocol.StateActive,
 		PID:          777,
 		RestartCount: 2,
 		Timestamp:    time.Now(),

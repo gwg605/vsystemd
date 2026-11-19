@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/sys/windows/svc"
 
+	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/storage"
 	"github.com/gwg605/vsystemd/internal/unit"
 )
@@ -151,7 +152,7 @@ func (s *handlerSession) beginStart() {
 
 	s.phase = phaseStartPre
 	s.setStatus(svc.Status{State: svc.StartPending})
-	s.report(StateActivating, 0, s.exitCode, s.lastError)
+	s.report(protocol.StateActivating, 0, s.exitCode, s.lastError)
 	s.startPre()
 }
 
@@ -243,7 +244,7 @@ func (s *handlerSession) onPostCompleted(result opResult) {
 	}
 	s.phase = phaseRunning
 	s.setStatus(svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown})
-	s.report(StateActive, s.mainPID(), 0, "")
+	s.report(protocol.StateActive, s.mainPID(), 0, "")
 }
 
 func (s *handlerSession) onMainCompleted(result opResult) {
@@ -294,7 +295,7 @@ func (s *handlerSession) enterStopping(trigger stopTrigger, exitCode int) {
 	if trigger == triggerControl {
 		s.setStatus(svc.Status{State: svc.StopPending})
 	}
-	s.report(StateDeactivating, 0, s.exitCode, s.lastError)
+	s.report(protocol.StateDeactivating, 0, s.exitCode, s.lastError)
 	s.armStopTimer()
 	s.beginDrain()
 }
@@ -346,7 +347,7 @@ func (s *handlerSession) resolveStopping() {
 func (s *handlerSession) enterAutoRestart() {
 	s.phase = phaseAutoRestart
 	s.setStatus(svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown})
-	s.report(StateRestarting, 0, s.exitCode, s.lastError)
+	s.report(protocol.StateRestarting, 0, s.exitCode, s.lastError)
 
 	delay := s.h.restart.Delay()
 	if delay <= 0 {
@@ -361,7 +362,7 @@ func (s *handlerSession) finishStopped() {
 	s.stopTimers()
 	s.phase = phaseStopped
 	s.setStatus(svc.Status{State: svc.Stopped})
-	s.report(StateInactive, 0, s.exitCode, "")
+	s.report(protocol.StateInactive, 0, s.exitCode, "")
 }
 
 func (s *handlerSession) finishFailed(message string) {
@@ -369,7 +370,7 @@ func (s *handlerSession) finishFailed(message string) {
 	s.lastError = message
 	s.phase = phaseFailed
 	s.setStatus(svc.Status{State: svc.Stopped})
-	s.report(StateFailed, 0, s.exitCode, message)
+	s.report(protocol.StateFailed, 0, s.exitCode, message)
 }
 
 func (s *handlerSession) maybeResolve() {
@@ -440,11 +441,11 @@ func (s *handlerSession) stopTimers() {
 	s.restartTimerC = nil
 }
 
-func (s *handlerSession) report(state string, pid uint32, exitCode int, lastError string) {
+func (s *handlerSession) report(state protocol.State, pid uint32, exitCode int, lastError string) {
 	if s.h.reporter == nil {
 		return
 	}
-	if err := s.h.reporter.Report(StateEvent{
+	if err := s.h.reporter.Report(protocol.StateEvent{
 		State:        state,
 		PID:          pid,
 		ExitCode:     exitCode,
