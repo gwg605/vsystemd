@@ -209,7 +209,7 @@ func applyServiceDefaults(service *unit.ServiceUnit, cfg config.Config) {
 	}
 }
 
-func transportFactory(cfg config.Config, services scm.Manager) func(transport.Peer, transport.MsgHandler) (transport.Transport, error) {
+func transportFactory(cfg config.Config, services scm.Manager) transport.Factory {
 	return func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
 		return pipe.New(cfg.TransportConfig(), local, handler, services)
 	}

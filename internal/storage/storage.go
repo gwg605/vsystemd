@@ -36,6 +36,9 @@ type Storage interface {
 	ListTimerStates() (map[string]TimerState, error)
 }
 
+// Factory opens a Storage.
+type Factory func() (Storage, error)
+
 type Paths struct {
 	SystemDir  string
 	LogsDir    string

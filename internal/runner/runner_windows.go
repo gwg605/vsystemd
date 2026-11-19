@@ -17,8 +17,6 @@ import (
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
-type TransportFactory func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error)
-
 type Runner struct {
 	name      string
 	logs      *LogStreamer
@@ -27,7 +25,7 @@ type Runner struct {
 	transport transport.Transport
 }
 
-func NewRunner(name string, service *unit.ServiceUnit, logs *LogStreamer, env EnvironmentDefaults, newTransport TransportFactory) (*Runner, error) {
+func NewRunner(name string, service *unit.ServiceUnit, logs *LogStreamer, env EnvironmentDefaults, newTransport transport.Factory) (*Runner, error) {
 	if newTransport == nil {
 		return nil, errors.New("transport factory is required")
 	}
