@@ -3,6 +3,7 @@
 package runner
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,13 +12,14 @@ import (
 
 	"golang.org/x/sys/windows/svc"
 
-	"github.com/gwg605/vsystemd/internal/logwriter"
+	"github.com/gwg605/vsystemd/internal/config"
+	"github.com/gwg605/vsystemd/internal/storage"
+	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
 	"github.com/gwg605/vsystemd/internal/transport"
 	transportfake "github.com/gwg605/vsystemd/internal/transport/fake"
-	"github.com/gwg605/vsystemd/internal/unit"
 )
 
-func newIntegratedRunner(t *testing.T, name string, service *unit.ServiceUnit) (*Runner, *stateCollector) {
+func newIntegratedRunner(t *testing.T, name, unitText string) (*Runner, *stateCollector) {
 	t.Helper()
 
 	network := transportfake.NewNetwork()
@@ -25,18 +27,16 @@ func newIntegratedRunner(t *testing.T, name string, service *unit.ServiceUnit) (
 	daemon := network.New(transport.DefaultConfig(), transport.NewPeer(transport.PeerDaemon, daemonPeer, false), collector.handler)
 	t.Cleanup(func() { daemon.Close() })
 
-	serviceName := strings.TrimSuffix(name, filepath.Ext(name))
-	logs, err := NewLogStreamer(serviceName, service, t.TempDir(), logwriter.Rotation{}, time.Now().UTC())
-	if err != nil {
-		t.Fatalf("NewLogStreamer() error = %v", err)
-	}
+	store := storagefake.New()
+	store.WriteUnit(name, []byte(unitText))
+	storeFactory := func() (storage.Storage, error) { return store, nil }
 
 	factory := func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
 		return network.New(transport.DefaultConfig(), local, handler), nil
 	}
-	runner, err := NewRunner(name, service, logs, EnvironmentDefaults{}, factory)
+	cfg := config.Config{LogsDir: t.TempDir()}
+	runner, err := NewRunner(name, storeFactory, factory, cfg, time.Now().UTC())
 	if err != nil {
-		logs.Close()
 		t.Fatalf("NewRunner() error = %v", err)
 	}
 	t.Cleanup(func() { runner.Close() })
@@ -78,12 +78,9 @@ func TestRunnerStartStop(t *testing.T) {
 	dir := t.TempDir()
 	stopFile := filepath.Join(dir, "stop.txt")
 
-	service := &unit.ServiceUnit{
-		ExecStart:      helperCommand("sleep", "5s"),
-		ExecStop:       helperCommand("record", stopFile, "stopped"),
-		TimeoutStopSec: 2 * time.Second,
-	}
-	runner, collector := newIntegratedRunner(t, "app.service", service)
+	unitText := fmt.Sprintf("[Service]\nExecStart=%s\nExecStop=%s\nTimeoutStopSec=2s\n",
+		helperCommand("sleep", "5s"), helperCommand("record", stopFile, "stopped"))
+	runner, collector := newIntegratedRunner(t, "app.service", unitText)
 	changes, requests, done := runControlHandler(t, runner.handler)
 
 	waitForStatus(t, changes, svc.Running)
@@ -109,14 +106,9 @@ func TestRunnerStartStop(t *testing.T) {
 func TestRunnerRestartOnFailure(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "marker")
 
-	service := &unit.ServiceUnit{
-		ExecStart:             helperCommand("failonce", marker),
-		Restart:               unit.RestartOnFailure,
-		RestartSec:            10 * time.Millisecond,
-		StartLimitBurst:       5,
-		StartLimitIntervalSec: time.Second,
-	}
-	runner, collector := newIntegratedRunner(t, "app.service", service)
+	unitText := fmt.Sprintf("[Service]\nExecStart=%s\nRestart=on-failure\nRestartSec=10ms\nStartLimitBurst=5\nStartLimitIntervalSec=1s\n",
+		helperCommand("failonce", marker))
+	runner, collector := newIntegratedRunner(t, "app.service", unitText)
 	changes, _, done := runControlHandler(t, runner.handler)
 
 	waitForStatus(t, changes, svc.Stopped)
@@ -147,14 +139,9 @@ func TestRunnerRestartOnFailure(t *testing.T) {
 func TestRunnerStartLimitExhaustion(t *testing.T) {
 	attempts := filepath.Join(t.TempDir(), "attempts.txt")
 
-	service := &unit.ServiceUnit{
-		ExecStart:             helperCommand("record", attempts, "attempt", "1"),
-		Restart:               unit.RestartAlways,
-		RestartSec:            time.Millisecond,
-		StartLimitBurst:       2,
-		StartLimitIntervalSec: time.Second,
-	}
-	runner, collector := newIntegratedRunner(t, "app.service", service)
+	unitText := fmt.Sprintf("[Service]\nExecStart=%s\nRestart=always\nRestartSec=1ms\nStartLimitBurst=2\nStartLimitIntervalSec=1s\n",
+		helperCommand("record", attempts, "attempt", "1"))
+	runner, collector := newIntegratedRunner(t, "app.service", unitText)
 	changes, _, done := runControlHandler(t, runner.handler)
 
 	waitForStatus(t, changes, svc.Stopped)

@@ -28,7 +28,7 @@ func (c *stateCollector) handler(_ transport.Peer, msg transport.Message) error 
 	return nil
 }
 
-func newReporterPair(t *testing.T, unitName string) (*StateReporter, *fake.Transport, *stateCollector) {
+func newReporterPair(t *testing.T, unitName string) (*stateReporter, *fake.Transport, *stateCollector) {
 	t.Helper()
 	network := fake.NewNetwork()
 
@@ -36,10 +36,10 @@ func newReporterPair(t *testing.T, unitName string) (*StateReporter, *fake.Trans
 	daemon := network.New(transport.DefaultConfig(), transport.NewPeer(transport.PeerDaemon, daemonPeer, false), collector.handler)
 	t.Cleanup(func() { daemon.Close() })
 
-	var reporter *StateReporter
+	var reporter *stateReporter
 	runnerTransport := network.New(transport.DefaultConfig(), transport.NewPeer(transport.PeerRunner, unitName, false), nil)
 	t.Cleanup(func() { runnerTransport.Close() })
-	reporter = NewStateReporter(runnerTransport, unitName)
+	reporter = newStateReporter(runnerTransport, unitName)
 
 	return reporter, daemon, collector
 }

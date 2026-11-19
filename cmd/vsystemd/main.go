@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/akamensky/argparse"
@@ -20,7 +21,6 @@ import (
 	"github.com/gwg605/vsystemd/internal/storage"
 	"github.com/gwg605/vsystemd/internal/transport"
 	"github.com/gwg605/vsystemd/internal/transport/pipe"
-	"github.com/gwg605/vsystemd/internal/unit"
 )
 
 func main() {
@@ -112,17 +112,6 @@ func runDaemon() error {
 }
 
 func runUnit(name string) error {
-	if filepath.Ext(name) == "" {
-		name += unit.TypeService.Extension()
-	}
-	id, err := unit.ParseID(name)
-	if err != nil {
-		return err
-	}
-	if id.Type != unit.TypeService {
-		return fmt.Errorf("%s is not a service unit", id)
-	}
-
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -131,7 +120,7 @@ func runUnit(name string) error {
 	startTime := time.Now().UTC()
 	operationLog, err := logwriter.OpenManaged(
 		filepath.Join(cfg.LogsDir, "vsystemd"),
-		id.Name+"_",
+		strings.TrimSuffix(name, filepath.Ext(name))+"_",
 		startTime,
 		cfg.LogRotation(),
 	)
@@ -140,73 +129,25 @@ func runUnit(name string) error {
 	}
 	defer operationLog.Close()
 	logging.Configure(operationLog, cfg.LogLevel)
-	slog.Info("vsystemd runner starting", "unit", id.String())
+	slog.Info("vsystemd runner starting", "unit", name)
 
-	store, err := storage.New(cfg.Paths())
+	store := func() (storage.Storage, error) {
+		return storage.New(cfg.Paths())
+	}
+	service, err := runner.NewRunner(name, store, transportFactory(cfg, scm.New()), cfg, startTime)
 	if err != nil {
-		return err
-	}
-	data, err := store.ReadUnit(id.String())
-	if err != nil {
-		slog.Error("vsystemd runner: read unit failed", "unit", id.String(), "error", err)
-		return err
-	}
-	parsed, err := unit.Parse(id, data)
-	if err != nil {
-		slog.Error("vsystemd runner: parse unit failed", "unit", id.String(), "error", err)
-		return err
-	}
-	if parsed.Service == nil {
-		return fmt.Errorf("%s is not a service unit", id)
-	}
-	for _, warning := range parsed.Warnings {
-		slog.Warn("vsystemd runner: ignored unit directive", "unit", id.String(), "warning", warning)
-	}
-
-	if err := logwriter.Cleanup(logwriter.ServiceLogDir(cfg.LogsDir, id.Name), cfg.Logs.MaxAgeDays, time.Now().UTC()); err != nil {
-		slog.Debug("vsystemd runner: cleanup service logs failed", "unit", id.String(), "error", err)
-	}
-
-	applyServiceDefaults(parsed.Service, cfg)
-	logs, err := runner.NewLogStreamer(id.Name, parsed.Service, cfg.LogsDir, cfg.LogRotation(), startTime)
-	if err != nil {
-		slog.Error("vsystemd runner: create log streamer failed", "unit", id.String(), "error", err)
-		return err
-	}
-	defer logs.Close()
-
-	envDefaults := runner.EnvironmentDefaults{
-		Inherit: cfg.Environment.InheritList(),
-		Vars:    cfg.Environment.Vars,
-	}
-	service, err := runner.NewRunner(id.String(), parsed.Service, logs, envDefaults, transportFactory(cfg, scm.New()))
-	if err != nil {
+		slog.Error("vsystemd runner: init failed", "unit", name, "error", err)
 		return err
 	}
 	defer service.Close()
 
 	runErr := service.Run()
 	if runErr != nil {
-		slog.Error("vsystemd runner exited with error", "unit", id.String(), "error", runErr)
+		slog.Error("vsystemd runner exited with error", "unit", name, "error", runErr)
 	} else {
-		slog.Info("vsystemd runner exited", "unit", id.String())
+		slog.Info("vsystemd runner exited", "unit", name)
 	}
 	return runErr
-}
-
-func applyServiceDefaults(service *unit.ServiceUnit, cfg config.Config) {
-	if service.RestartSec == 0 {
-		service.RestartSec = cfg.Defaults.RestartSec()
-	}
-	if service.TimeoutStopSec == 0 {
-		service.TimeoutStopSec = cfg.Defaults.TimeoutStopSec()
-	}
-	if service.StartLimitBurst == 0 {
-		service.StartLimitBurst = cfg.Defaults.StartLimitBurst
-	}
-	if service.StartLimitIntervalSec == 0 {
-		service.StartLimitIntervalSec = cfg.Defaults.StartLimitIntervalSec()
-	}
 }
 
 func transportFactory(cfg config.Config, services scm.Manager) transport.Factory {

@@ -3,35 +3,31 @@
 package tests
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"golang.org/x/sys/windows/svc"
 
 	"github.com/gwg605/vsystemd/internal/daemon"
-	"github.com/gwg605/vsystemd/internal/unit"
 )
 
 func TestServiceLifecycle(t *testing.T) {
 	env := newTestEnv()
-	env.store.WriteUnit("app.service", []byte("[Service]\nExecStart=app\n"))
 
 	stopFile := filepath.Join(t.TempDir(), "stop.txt")
-	service := &unit.ServiceUnit{
-		ExecStart:      helperCommand("sleep", "5s"),
-		ExecStop:       helperCommand("record", stopFile, "stopped"),
-		TimeoutStopSec: 200 * time.Millisecond,
-	}
+	unitText := fmt.Sprintf("[Service]\nExecStart=%s\nExecStop=%s\nTimeoutStopSec=200ms\n",
+		helperCommand("sleep", "5s"), helperCommand("record", stopFile, "stopped"))
+	env.store.WriteUnit("app.service", []byte(unitText))
 
 	d := env.newDaemon(t)
 	if err := d.Start(); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 
-	r := env.newRunner(t, "app.service", service)
+	r := env.newRunner(t, "app.service")
 	requests, changes, done := startRunner(t, r)
 
 	waitForStatus(t, changes, svc.Running)
@@ -50,23 +46,17 @@ func TestServiceLifecycle(t *testing.T) {
 
 func TestRestartOnFailure(t *testing.T) {
 	env := newTestEnv()
-	env.store.WriteUnit("app.service", []byte("[Service]\nExecStart=app\n"))
 	marker := filepath.Join(t.TempDir(), "marker")
-
-	service := &unit.ServiceUnit{
-		ExecStart:             helperCommand("failonce", marker),
-		Restart:               unit.RestartOnFailure,
-		RestartSec:            10 * time.Millisecond,
-		StartLimitBurst:       5,
-		StartLimitIntervalSec: time.Second,
-	}
+	unitText := fmt.Sprintf("[Service]\nExecStart=%s\nRestart=on-failure\nRestartSec=10ms\nStartLimitBurst=5\nStartLimitIntervalSec=1s\n",
+		helperCommand("failonce", marker))
+	env.store.WriteUnit("app.service", []byte(unitText))
 
 	d := env.newDaemon(t)
 	if err := d.Start(); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 
-	r := env.newRunner(t, "app.service", service)
+	r := env.newRunner(t, "app.service")
 	_, changes, done := startRunner(t, r)
 
 	waitForStatus(t, changes, svc.Stopped)
@@ -83,23 +73,17 @@ func TestRestartOnFailure(t *testing.T) {
 
 func TestStartLimitExhaustion(t *testing.T) {
 	env := newTestEnv()
-	env.store.WriteUnit("app.service", []byte("[Service]\nExecStart=app\n"))
 	attempts := filepath.Join(t.TempDir(), "attempts.txt")
-
-	service := &unit.ServiceUnit{
-		ExecStart:             helperCommand("record", attempts, "attempt", "1"),
-		Restart:               unit.RestartAlways,
-		RestartSec:            time.Millisecond,
-		StartLimitBurst:       2,
-		StartLimitIntervalSec: time.Second,
-	}
+	unitText := fmt.Sprintf("[Service]\nExecStart=%s\nRestart=always\nRestartSec=1ms\nStartLimitBurst=2\nStartLimitIntervalSec=1s\n",
+		helperCommand("record", attempts, "attempt", "1"))
+	env.store.WriteUnit("app.service", []byte(unitText))
 
 	d := env.newDaemon(t)
 	if err := d.Start(); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 
-	r := env.newRunner(t, "app.service", service)
+	r := env.newRunner(t, "app.service")
 	_, changes, done := startRunner(t, r)
 
 	waitForStatus(t, changes, svc.Stopped)
