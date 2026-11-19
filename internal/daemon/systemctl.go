@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"sort"
 
 	"github.com/gwg605/vsystemd/internal/config"
@@ -290,18 +291,22 @@ func (d *Daemon) logTail(id unit.ID) []string {
 		return nil
 	}
 
-	stdout, stderr, err := logwriter.ResolveServiceOutputs(parsed.Service)
+	stdout, stderr, err := parsed.Service.ResolveOutputs()
 	if err != nil {
 		slog.Warn("daemon: invalid log output config", "unit", name, "error", err)
 		return nil
 	}
 
-	target := logwriter.StatusTarget(stdout, stderr)
+	target := unit.StatusTarget(stdout, stderr)
 	switch target.Kind {
-	case logwriter.OutputNull:
+	case unit.OutputNull:
 		return nil
-	case logwriter.OutputFile, logwriter.OutputAppend:
-		lines, err := logwriter.ReadTail(target.Path, 10)
+	case unit.OutputFile, unit.OutputAppend:
+		if err := d.store.ValidatePath(target.Path); err != nil {
+			slog.Warn("daemon: invalid log path", "unit", name, "path", target.Path, "error", err)
+			return nil
+		}
+		lines, err := logwriter.ReadTail(filepath.Clean(target.Path), 10)
 		if err != nil {
 			slog.Warn("daemon: read log tail failed", "unit", name, "path", target.Path, "error", err)
 			return nil

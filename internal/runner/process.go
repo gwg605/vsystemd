@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/gwg605/vsystemd/internal/logwriter"
+	"github.com/gwg605/vsystemd/internal/storage"
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
@@ -20,7 +20,7 @@ type environmentDefaults struct {
 	Vars    map[string]string
 }
 
-func buildEnvironment(service *unit.ServiceUnit, defaults environmentDefaults) ([]string, error) {
+func buildEnvironment(store storage.Storage, service *unit.ServiceUnit, defaults environmentDefaults) ([]string, error) {
 	parent := parentEnvironment()
 
 	env := make(map[string]string)
@@ -36,7 +36,7 @@ func buildEnvironment(service *unit.ServiceUnit, defaults environmentDefaults) (
 	for _, file := range service.EnvironmentFiles {
 		optional := strings.HasPrefix(file, "-")
 		path := strings.TrimPrefix(file, "-")
-		if err := logwriter.ValidateUnitPath(path); err != nil {
+		if err := store.ValidatePath(path); err != nil {
 			return nil, fmt.Errorf("invalid EnvironmentFile: %w", err)
 		}
 		data, err := os.ReadFile(path)

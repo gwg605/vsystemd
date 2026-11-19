@@ -34,6 +34,14 @@ type Storage interface {
 	WriteTimerState(name string, state TimerState) error
 	DeleteTimerState(name string) error
 	ListTimerStates() (map[string]TimerState, error)
+
+	// ValidatePath rejects a path that is not a plain absolute file path.
+	ValidatePath(path string) error
+	// OutputWritable reports whether an output file's parent directory exists
+	// and is writable.
+	OutputWritable(path string) error
+	// InputReadable reports whether an input file can be read.
+	InputReadable(path string) error
 }
 
 // Factory opens a Storage.

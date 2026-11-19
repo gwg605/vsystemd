@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/gwg605/vsystemd/internal/unit"
 )
 
 func TestManagedSizeRotation(t *testing.T) {
@@ -198,50 +196,6 @@ func TestReadTailAcrossChunks(t *testing.T) {
 	for i, prefix := range want {
 		if !strings.HasPrefix(lines[i], prefix) {
 			t.Errorf("lines[%d] = %q, want prefix %q", i, lines[i], prefix)
-		}
-	}
-}
-
-func TestResolveServiceOutputs(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "app.log")
-
-	service := &unit.ServiceUnit{
-		StandardOutput: "file:" + path,
-		StandardError:  "append:" + path,
-	}
-	stdout, stderr, err := ResolveServiceOutputs(service)
-	if err != nil {
-		t.Fatalf("ResolveServiceOutputs() error = %v", err)
-	}
-	if stdout.Kind != OutputFile || stderr.Kind != OutputAppend {
-		t.Errorf("kinds = %v/%v", stdout.Kind, stderr.Kind)
-	}
-	if !SamePath(stdout.Path, stderr.Path) {
-		t.Errorf("paths differ: %q/%q", stdout.Path, stderr.Path)
-	}
-
-	service = &unit.ServiceUnit{StandardOutput: "", StandardError: "null"}
-	stdout, stderr, err = ResolveServiceOutputs(service)
-	if err != nil {
-		t.Fatalf("ResolveServiceOutputs() error = %v", err)
-	}
-	if stdout.Kind != OutputDefault || stderr.Kind != OutputNull {
-		t.Errorf("kinds = %v/%v", stdout.Kind, stderr.Kind)
-	}
-}
-
-func TestResolveServiceOutputsErrors(t *testing.T) {
-	dotdot := t.TempDir() + string(filepath.Separator) + ".." + string(filepath.Separator) + "app.log"
-	tests := map[string]string{
-		"unsupported": "journal",
-		"relative":    "file:relative.log",
-		"parent":      "file:" + dotdot,
-		"empty path":  "file:",
-	}
-	for name, value := range tests {
-		service := &unit.ServiceUnit{StandardOutput: value}
-		if _, _, err := ResolveServiceOutputs(service); err == nil {
-			t.Errorf("%s: ResolveServiceOutputs(%q) error = nil, want error", name, value)
 		}
 	}
 }

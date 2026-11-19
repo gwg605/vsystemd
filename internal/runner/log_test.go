@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gwg605/vsystemd/internal/logwriter"
+	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
@@ -39,7 +40,7 @@ func TestLogStreamerDefault(t *testing.T) {
 	service := &unit.ServiceUnit{
 		ExecStart: helperCommand("output", "out-line", "err-line"),
 	}
-	streamer, err := newLogStreamer("app", service, logsDir, logwriter.Rotation{}, time.Now().UTC())
+	streamer, err := newLogStreamer(storagefake.New(), "app", service, logsDir, logwriter.Rotation{}, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("newLogStreamer() error = %v", err)
 	}
@@ -71,7 +72,7 @@ func TestLogStreamerFileRedirect(t *testing.T) {
 		StandardOutput: "file:" + custom,
 		ExecStart:      helperCommand("output", "stdout-text", "stderr-text"),
 	}
-	streamer, err := newLogStreamer("app", service, logsDir, logwriter.Rotation{}, time.Now().UTC())
+	streamer, err := newLogStreamer(storagefake.New(), "app", service, logsDir, logwriter.Rotation{}, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("newLogStreamer() error = %v", err)
 	}

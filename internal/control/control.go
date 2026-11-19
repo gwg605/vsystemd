@@ -43,7 +43,7 @@ func (c *Controller) Enable(id unit.ID, executable string, password, passwordFil
 	}
 
 	warnings := append([]string{}, parsed.Warnings...)
-	warnings = append(warnings, unitPathWarnings(parsed)...)
+	warnings = append(warnings, unitPathWarnings(store, parsed)...)
 
 	resolvedPassword, err := resolvePassword(password, passwordFile, passwordStdin)
 	if err != nil {

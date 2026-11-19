@@ -152,3 +152,9 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	return os.Rename(tmpName, path)
 }
 
+func (s *fileStorage) ValidatePath(path string) error { return ValidatePath(path) }
+
+func (s *fileStorage) OutputWritable(path string) error { return OutputWritable(path) }
+
+func (s *fileStorage) InputReadable(path string) error { return InputReadable(path) }
+
