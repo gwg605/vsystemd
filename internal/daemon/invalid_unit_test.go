@@ -47,16 +47,16 @@ func TestListUnitsSkipsInvalidUnit(t *testing.T) {
 	if !ok {
 		t.Fatal("app.service missing")
 	}
-	if app.ConfigError != "" {
-		t.Errorf("app ConfigError = %q", app.ConfigError)
+	if app.LoadState != string(LoadStateLoaded) {
+		t.Errorf("app LoadState = %q", app.LoadState)
 	}
 
 	broken, ok := units["broken.service"]
 	if !ok {
 		t.Fatal("broken.service missing")
 	}
-	if broken.ConfigError == "" {
-		t.Error("broken.service ConfigError is empty")
+	if broken.LoadState != string(LoadStateBadSetting) {
+		t.Errorf("broken.service LoadState = %q", broken.LoadState)
 	}
 }
 
@@ -84,7 +84,7 @@ func TestListUnitsInvalidTimer(t *testing.T) {
 	if broken == nil {
 		t.Fatal("broken.timer missing")
 	}
-	if broken.Type != "timer" || broken.ConfigError == "" {
+	if broken.Type != "timer" || broken.LoadState != string(LoadStateBadSetting) {
 		t.Errorf("broken.timer = %+v", broken)
 	}
 }
@@ -122,8 +122,8 @@ func TestReloadSkipsInvalidUnit(t *testing.T) {
 	if _, err := manager.QueryStatus("removed"); err == nil {
 		t.Error("removed still exists")
 	}
-	if got := daemon.configError(unit.ID{Name: "broken", Type: unit.TypeService}); got == "" {
-		t.Error("broken ConfigError is empty")
+	if got, _ := daemon.loadState(unit.ID{Name: "broken", Type: unit.TypeService}); got != LoadStateBadSetting {
+		t.Errorf("broken LoadState = %q", got)
 	}
 }
 
@@ -142,8 +142,8 @@ func TestReloadTimersSkipsInvalidTimer(t *testing.T) {
 	if _, err := store.ReadTimerState("broken.timer"); err != nil {
 		t.Errorf("ReadTimerState() error = %v", err)
 	}
-	if got := daemon.configError(unit.ID{Name: "broken", Type: unit.TypeTimer}); got == "" {
-		t.Error("broken timer ConfigError is empty")
+	if got, _ := daemon.loadState(unit.ID{Name: "broken", Type: unit.TypeTimer}); got != LoadStateBadSetting {
+		t.Errorf("broken timer LoadState = %q", got)
 	}
 }
 
@@ -161,8 +161,11 @@ func TestStatusInvalidUnit(t *testing.T) {
 	if err := json.Unmarshal(response.Payload, &status); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if status.ConfigError == "" {
-		t.Error("ConfigError is empty")
+	if status.LoadState != string(LoadStateBadSetting) {
+		t.Errorf("LoadState = %q", status.LoadState)
+	}
+	if status.LoadError == "" {
+		t.Error("LoadError is empty")
 	}
 }
 
@@ -180,36 +183,39 @@ func TestTimerStatusInvalidUnit(t *testing.T) {
 	if err := json.Unmarshal(response.Payload, &status); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if status.ConfigError == "" {
-		t.Error("ConfigError is empty")
+	if status.LoadState != string(LoadStateBadSetting) {
+		t.Errorf("LoadState = %q", status.LoadState)
+	}
+	if status.LoadError == "" {
+		t.Error("LoadError is empty")
 	}
 }
 
-func TestConfigErrorSurvivesHeartbeat(t *testing.T) {
+func TestLoadErrorSurvivesHeartbeat(t *testing.T) {
 	daemon, _ := newTestDaemon(t, scmfake.New(), storagefake.New())
 	id := unit.ID{Name: "app", Type: unit.TypeService}
-	daemon.setConfigError(id, errors.New("boom"))
+	daemon.setLoadError(id, LoadStateBadSetting, errors.New("boom"))
 
 	daemon.updateFromEvent(protocol.StateEvent{Unit: "app.service", State: protocol.StateActive})
 
-	if got := daemon.configError(id); got != "boom" {
-		t.Errorf("ConfigError = %q", got)
+	if state, msg := daemon.loadState(id); state != LoadStateBadSetting || msg != "boom" {
+		t.Errorf("load state = %q, %q", state, msg)
 	}
 }
 
-func TestConfigErrorClearedOnValidUnit(t *testing.T) {
+func TestLoadErrorClearedOnValidUnit(t *testing.T) {
 	store := storagefake.New()
 	store.WriteUnit("app.service", []byte("[Service]\nExecStart=x\n"))
 
 	daemon, _ := newTestDaemon(t, scmfake.New(), store)
 	id := unit.ID{Name: "app", Type: unit.TypeService}
-	daemon.setConfigError(id, errors.New("boom"))
+	daemon.setLoadError(id, LoadStateBadSetting, errors.New("boom"))
 
 	if _, err := daemon.status(id); err != nil {
 		t.Fatalf("status() error = %v", err)
 	}
-	if got := daemon.configError(id); got != "" {
-		t.Errorf("ConfigError = %q", got)
+	if state, msg := daemon.loadState(id); state != LoadStateLoaded || msg != "" {
+		t.Errorf("load state = %q, %q", state, msg)
 	}
 }
 

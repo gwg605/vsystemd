@@ -29,20 +29,14 @@ func serviceStatusLines(cfg config.Config, id unit.ID, status protocol.StatusRes
 	}
 
 	active := status.SystemdState
-	if status.ConfigError != "" {
-		active += " invalid"
-	}
 	if status.SystemdState != "inactive (dead)" && !status.LastTransition.IsZero() {
 		active += fmt.Sprintf(" since %s; %s ago", formatTime(status.LastTransition), formatDelta(time.Since(status.LastTransition)))
 	}
 
 	lines := []string{
 		header,
-		fmt.Sprintf("%12s %s", "Loaded:", "loaded ("+loaded+")"),
+		fmt.Sprintf("%12s %s", "Loaded:", loadedLine(status.LoadState, loaded, status.LoadError)),
 		fmt.Sprintf("%12s %s", "Active:", active),
-	}
-	if status.ConfigError != "" {
-		lines = append(lines, fmt.Sprintf("%12s %s", "Config:", status.ConfigError))
 	}
 	if status.PID != 0 {
 		lines = append(lines, fmt.Sprintf("%12s %d", "Main PID:", status.PID))
@@ -81,20 +75,14 @@ func timerStatusLines(cfg config.Config, id unit.ID, status protocol.StatusRespo
 	}
 
 	active := status.SystemdState
-	if status.ConfigError != "" {
-		active += " invalid"
-	}
 	if status.ActiveSince != nil {
 		active += fmt.Sprintf(" since %s; %s ago", formatTime(*status.ActiveSince), formatDelta(time.Since(*status.ActiveSince)))
 	}
 
 	lines := []string{
 		header,
-		fmt.Sprintf("%12s %s", "Loaded:", "loaded ("+loaded+")"),
+		fmt.Sprintf("%12s %s", "Loaded:", loadedLine(status.LoadState, loaded, status.LoadError)),
 		fmt.Sprintf("%12s %s", "Active:", active),
-	}
-	if status.ConfigError != "" {
-		lines = append(lines, fmt.Sprintf("%12s %s", "Config:", status.ConfigError))
 	}
 	if status.NextRun != nil {
 		lines = append(lines, fmt.Sprintf("%12s %s; %s left", "Trigger:", formatTime(*status.NextRun), formatDelta(time.Until(*status.NextRun))))
@@ -116,15 +104,37 @@ func enabledDisabled(value bool) string {
 	return "disabled"
 }
 
-func printUnits(list protocol.ListUnitsResponse) {
-	fmt.Printf("%-24s %-24s %s\n", "UNIT", "STATE", "DESCRIPTION")
-	for _, entry := range list.Units {
-		state := entry.SystemdState
-		if entry.ConfigError != "" {
-			state += " invalid"
-		}
-		fmt.Printf("%-24s %-24s %s\n", entry.Unit, state, entry.Description)
+func loadedLine(state, detail, reason string) string {
+	if state == "" || state == "loaded" {
+		return "loaded (" + detail + ")"
 	}
+	if reason != "" {
+		return state + " (Reason: " + reason + ")"
+	}
+	return state
+}
+
+func printUnits(list protocol.ListUnitsResponse) {
+	fmt.Printf("%-28s %-10s %-9s %-9s %s\n", "UNIT", "LOAD", "ACTIVE", "SUB", "DESCRIPTION")
+	for _, entry := range list.Units {
+		active, sub := splitState(entry.SystemdState)
+		load := entry.LoadState
+		if load == "" {
+			load = "loaded"
+		}
+		unit := entry.Unit
+		if active == "failed" || load != "loaded" {
+			unit = "● " + unit
+		}
+		fmt.Printf("%-28s %-10s %-9s %-9s %s\n", unit, load, active, sub, entry.Description)
+	}
+}
+
+func splitState(state string) (string, string) {
+	if open := strings.Index(state, " ("); open >= 0 && strings.HasSuffix(state, ")") {
+		return state[:open], state[open+2 : len(state)-1]
+	}
+	return state, state
 }
 
 func timerActive(entry protocol.UnitStatus) bool {
