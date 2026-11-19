@@ -11,6 +11,7 @@ import (
 	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
 	"github.com/gwg605/vsystemd/internal/transport"
 	transportfake "github.com/gwg605/vsystemd/internal/transport/fake"
+	"github.com/gwg605/vsystemd/internal/unit"
 )
 
 func TestReload(t *testing.T) {
@@ -42,7 +43,7 @@ OnCalendar=daily
 	if err := manager.CreateService(scm.ServiceConfig{
 		Name:       "removed",
 		BinaryPath: "old",
-		StartType:  scm.StartTypeAutomatic,
+		StartType:  scm.StartTypeDisabled,
 	}); err != nil {
 		t.Fatalf("CreateService(removed) error = %v", err)
 	}
@@ -105,5 +106,45 @@ func TestReloadKeepsManagerService(t *testing.T) {
 	}
 	if _, err := manager.QueryStatus(config.ManagerServiceName); err != nil {
 		t.Errorf("manager service was removed by reload: %v", err)
+	}
+}
+
+func TestReloadKeepsMissingUnitService(t *testing.T) {
+	store := storagefake.New()
+	manager := scmfake.New()
+	if err := manager.CreateService(scm.ServiceConfig{Name: "orphan", StartType: scm.StartTypeAutomatic}); err != nil {
+		t.Fatalf("CreateService(orphan) error = %v", err)
+	}
+
+	daemon, _ := newTestDaemon(t, manager, store)
+	if err := daemon.reload(); err != nil {
+		t.Fatalf("reload() error = %v", err)
+	}
+
+	if _, err := manager.QueryStatus("orphan"); err != nil {
+		t.Errorf("orphan was removed: %v", err)
+	}
+	if got := daemon.configError(unit.ID{Name: "orphan", Type: unit.TypeService}); got == "" {
+		t.Error("orphan ConfigError is empty")
+	}
+}
+
+func TestReloadDeletesDisabledMissingUnit(t *testing.T) {
+	store := storagefake.New()
+	manager := scmfake.New()
+	if err := manager.CreateService(scm.ServiceConfig{Name: "orphan", StartType: scm.StartTypeDisabled}); err != nil {
+		t.Fatalf("CreateService(orphan) error = %v", err)
+	}
+
+	daemon, _ := newTestDaemon(t, manager, store)
+	if err := daemon.reload(); err != nil {
+		t.Fatalf("reload() error = %v", err)
+	}
+
+	if _, err := manager.QueryStatus("orphan"); err == nil {
+		t.Error("orphan still exists")
+	}
+	if _, ok := daemon.State("orphan.service"); ok {
+		t.Error("orphan state was not cleared")
 	}
 }

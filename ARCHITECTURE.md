@@ -56,22 +56,28 @@ All other timer directives (`OnUnitActiveSec=`, `OnUnitInactiveSec=`, `Persisten
 
 ### `systemctl enable foo.service`
 
-- If service does not exist in SCM: `CreateService()` with `START_TYPE = AUTO_START`
-- If service already exists in SCM: `ChangeServiceConfig(START_TYPE = AUTO_START)`
+- A valid unit file is required unless the service already exists in SCM:
+  - unit missing, service missing → error
+  - unit present, service missing → `CreateService()` with `START_TYPE = AUTO_START`
+  - unit missing, service present → only `START_TYPE = AUTO_START` is changed
+  - unit present, service present → `ChangeServiceConfig(START_TYPE = AUTO_START)` with updated parameters
 - Password: taken from `--password`, `--password-file`, or `--password-stdin` (only one source). If none is given, an empty password is passed; there is no interactive prompt
 
 ### `systemctl disable foo.service`
 
-- If the service exists in SCM: `StopService()` (and wait for `SERVICE_STOPPED`), then `DeleteService()`
+- If the service exists in SCM: `ChangeServiceConfig(START_TYPE = DISABLED)`
 - If the service is not registered in SCM: no-op
-- This is symmetric to `enable`: the SCM entry is removed
+- `disable` neither stops nor removes the service; the SCM entry is removed by
+  `daemon-reload` once the unit file is gone
 
 ### `systemctl daemon-reload`
 
 - Routed through daemon (Channel 2)
 - Daemon scans `system\` directory, diffs against currently registered services in SCM:
-  - Unit exists, SCM entry exists → `ChangeServiceConfig()` (update)
-  - Unit missing, SCM entry exists → `StopService()` + `DeleteService()`
+  - Unit exists and parses, SCM entry exists → `ChangeServiceConfig()` (update)
+  - Unit exists but does not parse, SCM entry exists → kept and marked invalid (the parse error is shown)
+  - Unit missing, SCM entry exists and `START_TYPE = DISABLED` → `StopService()` + `DeleteService()`
+  - Unit missing, SCM entry exists and enabled → kept and marked invalid (`configuration file is missing`)
   - Unit exists, SCM entry missing → no action (wait for `enable`)
 - On Windows, `ListServices()` returns only services created by vsystemd (marked with `LoadOrderGroup = "vsystemd"`), so unrelated SCM services are never modified
 - Daemon reloads OnCalendar schedules from updated timer unit files
@@ -88,6 +94,9 @@ All other timer directives (`OnUnitActiveSec=`, `OnUnitInactiveSec=`, `Persisten
   `Active` with `since`, and `Main PID`/`Exit code`/`Restart`/`Error` when relevant
 - `status foo.timer` prints `Loaded`/`Active`/`Trigger`/`Triggers`; the log tail
   comes from the service the timer activates
+- Appends `invalid` to `Active` and prints a `Config:` line when the unit
+  configuration cannot be loaded (unreadable/unparseable file, or a missing file
+  for an enabled service)
 
 ### `systemctl list-units`
 

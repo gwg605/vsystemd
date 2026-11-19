@@ -48,7 +48,7 @@ func (m *Manager) UpdateService(cfg scm.ServiceConfig) error {
 	defer m.mu.Unlock()
 	svc, ok := m.services[cfg.Name]
 	if !ok {
-		return fmt.Errorf("update service %s: not found", cfg.Name)
+		return fmt.Errorf("update service %s: %w", cfg.Name, scm.ErrNotFound)
 	}
 	startType := svc.config.StartType
 	svc.config = cfg
@@ -63,16 +63,27 @@ func (m *Manager) Config(name string) (scm.ServiceConfig, error) {
 	defer m.mu.Unlock()
 	svc, ok := m.services[name]
 	if !ok {
-		return scm.ServiceConfig{}, fmt.Errorf("get config %s: not found", name)
+		return scm.ServiceConfig{}, fmt.Errorf("get config %s: %w", name, scm.ErrNotFound)
 	}
 	return svc.config, nil
+}
+
+func (m *Manager) SetStartType(name string, startType scm.StartType) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	svc, ok := m.services[name]
+	if !ok {
+		return fmt.Errorf("set start type %s: %w", name, scm.ErrNotFound)
+	}
+	svc.config.StartType = startType
+	return nil
 }
 
 func (m *Manager) DeleteService(name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.services[name]; !ok {
-		return fmt.Errorf("delete service %s: not found", name)
+		return fmt.Errorf("delete service %s: %w", name, scm.ErrNotFound)
 	}
 	delete(m.services, name)
 	return nil
@@ -83,7 +94,7 @@ func (m *Manager) StartService(name string) error {
 	defer m.mu.Unlock()
 	svc, ok := m.services[name]
 	if !ok {
-		return fmt.Errorf("start service %s: not found", name)
+		return fmt.Errorf("start service %s: %w", name, scm.ErrNotFound)
 	}
 	if svc.status.State == scm.StateRunning {
 		return nil
@@ -100,7 +111,7 @@ func (m *Manager) StopService(name string) error {
 	defer m.mu.Unlock()
 	svc, ok := m.services[name]
 	if !ok {
-		return fmt.Errorf("stop service %s: not found", name)
+		return fmt.Errorf("stop service %s: %w", name, scm.ErrNotFound)
 	}
 	if svc.status.State == scm.StateStopped {
 		return nil
@@ -116,7 +127,7 @@ func (m *Manager) QueryStatus(name string) (scm.ServiceStatus, error) {
 	defer m.mu.Unlock()
 	svc, ok := m.services[name]
 	if !ok {
-		return scm.ServiceStatus{}, fmt.Errorf("query service %s: not found", name)
+		return scm.ServiceStatus{}, fmt.Errorf("query service %s: %w", name, scm.ErrNotFound)
 	}
 	return svc.status, nil
 }

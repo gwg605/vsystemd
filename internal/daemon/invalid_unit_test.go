@@ -95,10 +95,13 @@ func TestReloadSkipsInvalidUnit(t *testing.T) {
 	store.WriteUnit("broken.service", []byte(brokenUnit))
 
 	manager := scmfake.New()
-	for _, name := range []string{"app", "broken", "removed"} {
+	for _, name := range []string{"app", "broken"} {
 		if err := manager.CreateService(scm.ServiceConfig{Name: name, BinaryPath: "old"}); err != nil {
 			t.Fatalf("CreateService(%s) error = %v", name, err)
 		}
+	}
+	if err := manager.CreateService(scm.ServiceConfig{Name: "removed", BinaryPath: "old", StartType: scm.StartTypeDisabled}); err != nil {
+		t.Fatalf("CreateService(removed) error = %v", err)
 	}
 
 	daemon, _ := newTestDaemon(t, manager, store)
@@ -207,5 +210,83 @@ func TestConfigErrorClearedOnValidUnit(t *testing.T) {
 	}
 	if got := daemon.configError(id); got != "" {
 		t.Errorf("ConfigError = %q", got)
+	}
+}
+
+func TestStatusForgottenAfterUnitRemoved(t *testing.T) {
+	store := storagefake.New()
+	store.WriteUnit("broken.service", []byte(brokenUnit))
+
+	daemon, client := newControlClient(t, scmfake.New(), store)
+	controlRequest(t, client, protocol.TypeStatusRequest, protocol.StatusRequest{Unit: "broken.service"})
+	if _, ok := daemon.State("broken.service"); !ok {
+		t.Fatal("state was not recorded")
+	}
+
+	store.DeleteUnit("broken.service")
+	response := controlRequest(t, client, protocol.TypeStatusRequest, protocol.StatusRequest{Unit: "broken.service"})
+	if response.Type != protocol.TypeErrorResponse {
+		t.Fatalf("response type = %q", response.Type)
+	}
+	if _, ok := daemon.State("broken.service"); ok {
+		t.Error("state was not forgotten")
+	}
+}
+
+func TestTimerStatusForgottenAfterUnitRemoved(t *testing.T) {
+	store := storagefake.New()
+	store.WriteUnit("broken.timer", []byte(brokenUnit))
+
+	daemon, client := newControlClient(t, scmfake.New(), store)
+	controlRequest(t, client, protocol.TypeStatusRequest, protocol.StatusRequest{Unit: "broken.timer"})
+	if _, ok := daemon.State("broken.timer"); !ok {
+		t.Fatal("state was not recorded")
+	}
+
+	store.DeleteUnit("broken.timer")
+	response := controlRequest(t, client, protocol.TypeStatusRequest, protocol.StatusRequest{Unit: "broken.timer"})
+	if response.Type != protocol.TypeErrorResponse {
+		t.Fatalf("response type = %q", response.Type)
+	}
+	if _, ok := daemon.State("broken.timer"); ok {
+		t.Error("state was not forgotten")
+	}
+}
+
+func TestListUnitsPrunesMissingState(t *testing.T) {
+	store := storagefake.New()
+	store.WriteUnit("broken.service", []byte(brokenUnit))
+
+	daemon, client := newControlClient(t, scmfake.New(), store)
+	controlRequest(t, client, protocol.TypeListUnits, nil)
+	if _, ok := daemon.State("broken.service"); !ok {
+		t.Fatal("state was not recorded")
+	}
+
+	store.DeleteUnit("broken.service")
+	controlRequest(t, client, protocol.TypeListUnits, nil)
+	if _, ok := daemon.State("broken.service"); ok {
+		t.Error("state was not pruned")
+	}
+}
+
+func TestReloadPrunesMissingState(t *testing.T) {
+	store := storagefake.New()
+	store.WriteUnit("broken.service", []byte(brokenUnit))
+
+	daemon, _ := newTestDaemon(t, scmfake.New(), store)
+	if _, err := daemon.status(unit.ID{Name: "broken", Type: unit.TypeService}); err != nil {
+		t.Fatalf("status() error = %v", err)
+	}
+	if _, ok := daemon.State("broken.service"); !ok {
+		t.Fatal("state was not recorded")
+	}
+
+	store.DeleteUnit("broken.service")
+	if err := daemon.reload(); err != nil {
+		t.Fatalf("reload() error = %v", err)
+	}
+	if _, ok := daemon.State("broken.service"); ok {
+		t.Error("state was not pruned by reload")
 	}
 }

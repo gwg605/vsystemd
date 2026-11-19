@@ -75,9 +75,40 @@ func TestEnableRejectsManager(t *testing.T) {
 	}
 }
 
-func TestDisableRemovesService(t *testing.T) {
+func TestEnablePresentWithoutUnitFile(t *testing.T) {
 	ctrl, manager, _ := newTestController(t)
-	if err := manager.CreateService(scm.ServiceConfig{Name: "app"}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: "app", BinaryPath: "old", StartType: scm.StartTypeDisabled}); err != nil {
+		t.Fatalf("CreateService() error = %v", err)
+	}
+
+	id := unit.ID{Name: "app", Type: unit.TypeService}
+	if _, err := ctrl.Enable(id, `C:\vsystemd\vsystemd.exe`, "", "", false); err != nil {
+		t.Fatalf("Enable() error = %v", err)
+	}
+
+	cfg, err := manager.Config("app")
+	if err != nil {
+		t.Fatalf("Config() error = %v", err)
+	}
+	if cfg.StartType != scm.StartTypeAutomatic {
+		t.Errorf("StartType = %v", cfg.StartType)
+	}
+	if cfg.BinaryPath != "old" {
+		t.Errorf("BinaryPath = %q, want unchanged", cfg.BinaryPath)
+	}
+}
+
+func TestEnableMissingWithoutUnitFile(t *testing.T) {
+	ctrl, _, _ := newTestController(t)
+	id := unit.ID{Name: "app", Type: unit.TypeService}
+	if _, err := ctrl.Enable(id, `C:\vsystemd\vsystemd.exe`, "", "", false); err == nil {
+		t.Fatal("Enable() error = nil without a unit file")
+	}
+}
+
+func TestDisableSetsStartType(t *testing.T) {
+	ctrl, manager, _ := newTestController(t)
+	if err := manager.CreateService(scm.ServiceConfig{Name: "app", StartType: scm.StartTypeAutomatic}); err != nil {
 		t.Fatalf("CreateService() error = %v", err)
 	}
 
@@ -85,8 +116,15 @@ func TestDisableRemovesService(t *testing.T) {
 	if err := ctrl.Disable(id); err != nil {
 		t.Fatalf("Disable() error = %v", err)
 	}
-	if _, err := manager.QueryStatus("app"); err == nil {
-		t.Error("service still exists after Disable")
+	if _, err := manager.QueryStatus("app"); err != nil {
+		t.Fatalf("service was removed: %v", err)
+	}
+	cfg, err := manager.Config("app")
+	if err != nil {
+		t.Fatalf("Config() error = %v", err)
+	}
+	if cfg.StartType != scm.StartTypeDisabled {
+		t.Errorf("StartType = %v", cfg.StartType)
 	}
 }
 
