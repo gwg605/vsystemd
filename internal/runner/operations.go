@@ -45,7 +45,6 @@ var errOperationCancelled = errors.New("operation cancelled")
 type processOperation struct {
 	role        opRole
 	cmd         *exec.Cmd
-	proc        processHandle
 	stdin       io.WriteCloser
 	interruptib bool
 	processID   uint32
@@ -72,14 +71,9 @@ func (o *processOperation) start() error {
 	}
 
 	pid := o.cmd.Process.Pid
-	proc, err := openProcessHandle(pid)
-	if err != nil {
-		slog.Warn("runner: open process handle failed", "pid", pid, "error", err)
-	}
 
 	o.mu.Lock()
 	o.stdin = stdin
-	o.proc = proc
 	o.processID = uint32(pid)
 	o.running = true
 	o.mu.Unlock()
@@ -95,13 +89,11 @@ func (o *processOperation) wait() {
 	o.running = false
 	stdin := o.stdin
 	o.stdin = nil
-	proc := o.proc
 	o.mu.Unlock()
 
 	if stdin != nil {
 		stdin.Close()
 	}
-	proc.close()
 
 	code, waitErr := processExitCode(err)
 	o.finish(opResult{role: o.role, code: code, err: waitErr, cancelled: o.isCancelled()})
