@@ -73,13 +73,6 @@ func (r *RestartController) RestartCount() int {
 	return r.restartCount
 }
 
-func (r *RestartController) Reset() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.attempts = nil
-	r.restartCount = 0
-}
-
 func (r *RestartController) prune(now time.Time) {
 	cutoff := now.Add(-r.interval)
 	index := 0

@@ -42,11 +42,6 @@ func TestRestartCount(t *testing.T) {
 	if got := controller.RestartCount(); got != 2 {
 		t.Errorf("RestartCount() = %d", got)
 	}
-
-	controller.Reset()
-	if got := controller.RestartCount(); got != 0 {
-		t.Errorf("RestartCount() = %d after reset", got)
-	}
 }
 
 func TestStartLimit(t *testing.T) {
@@ -70,10 +65,5 @@ func TestStartLimit(t *testing.T) {
 	now = now.Add(time.Minute + time.Second)
 	if !controller.AllowStart() {
 		t.Error("AllowStart() = false after interval elapsed")
-	}
-
-	controller.Reset()
-	if !controller.AllowStart() {
-		t.Error("AllowStart() = false after reset")
 	}
 }
