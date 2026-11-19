@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/akamensky/argparse"
-	"golang.org/x/term"
 
 	vsystemd "github.com/gwg605/vsystemd"
 	"github.com/gwg605/vsystemd/internal/config"
@@ -261,21 +260,13 @@ func enableService(id unit.ID, password, passwordFile string, passwordStdin bool
 	if err != nil {
 		return err
 	}
-	account := unitUser(parsed.Service.User, id.Name)
-	resolvedPassword, err := resolvePassword(account, password, passwordFile, passwordStdin)
+	resolvedPassword, err := resolvePassword(password, passwordFile, passwordStdin)
 	if err != nil {
 		return err
 	}
 
-	serviceConfig := scm.ServiceConfig{
-		Name:         id.Name,
-		BinaryPath:   `"` + executable + `" --mode=run --unit=` + id.String(),
-		StartType:    scm.StartTypeAutomatic,
-		Dependencies: unitDependencies(parsed),
-		User:         account,
-		Password:     resolvedPassword,
-		Description:  parsed.Description,
-	}
+	serviceConfig := scm.NewServiceConfig(parsed, executable, scm.StartTypeAutomatic)
+	serviceConfig.SetPassword(resolvedPassword)
 
 	manager := scm.New()
 	if _, err := manager.QueryStatus(id.Name); err != nil {
@@ -630,33 +621,7 @@ func vsystemdPath() (string, error) {
 	return path, nil
 }
 
-func unitDependencies(file *unit.UnitFile) []string {
-	seen := make(map[string]struct{})
-	var dependencies []string
-	for _, names := range [][]string{file.Requires, file.After} {
-		for _, name := range names {
-			id, err := unit.ParseID(name)
-			if err != nil || id.Type != unit.TypeService {
-				continue
-			}
-			if _, ok := seen[id.Name]; ok {
-				continue
-			}
-			seen[id.Name] = struct{}{}
-			dependencies = append(dependencies, id.Name)
-		}
-	}
-	return dependencies
-}
-
-func unitUser(user, serviceName string) string {
-	if user != "" {
-		return user
-	}
-	return `NT SERVICE\` + serviceName
-}
-
-func resolvePassword(account, provided, passwordFile string, stdin bool) (string, error) {
+func resolvePassword(provided, passwordFile string, stdin bool) (string, error) {
 	sources := 0
 	if provided != "" {
 		sources++
@@ -678,24 +643,9 @@ func resolvePassword(account, provided, passwordFile string, stdin bool) (string
 		return readPasswordFile(passwordFile)
 	case stdin:
 		return readPassword(os.Stdin)
-	}
-
-	if !passwordRequired(account) {
+	default:
 		return "", nil
 	}
-
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		fmt.Fprintf(os.Stderr, "warning: no password provided for %s; attempting with an empty password\n", account)
-		return "", nil
-	}
-
-	fmt.Printf("Password for %s: ", account)
-	password, err := term.ReadPassword(int(os.Stdin.Fd()))
-	fmt.Println()
-	if err != nil {
-		return "", fmt.Errorf("read password: %w", err)
-	}
-	return string(password), nil
 }
 
 func readPasswordFile(path string) (string, error) {
@@ -716,15 +666,4 @@ func readPassword(r io.Reader) (string, error) {
 
 func trimPassword(value string) string {
 	return strings.TrimRight(value, "\r\n")
-}
-
-func passwordRequired(account string) bool {
-	switch strings.ToLower(account) {
-	case "localsystem", "system",
-		"nt authority\\system",
-		"nt authority\\localservice", "local service", "localservice",
-		"nt authority\\networkservice", "network service", "networkservice":
-		return false
-	}
-	return !strings.HasPrefix(strings.ToLower(account), `nt service\`)
 }

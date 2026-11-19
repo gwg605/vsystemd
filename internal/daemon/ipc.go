@@ -107,8 +107,8 @@ func (d *Daemon) verifyRunnerAccount(source transport.Peer) error {
 	if err != nil || parsed.Service == nil {
 		return nil
 	}
-	expected := unitUser(parsed.Service.User, id.Name)
-	if !strings.EqualFold(account, expected) {
+	expected := scm.NewAccount(parsed.Service.User, id.Name)
+	if !strings.EqualFold(string(account), string(expected)) {
 		return fmt.Errorf("forbidden: state event from %s with unexpected account %q", source, account)
 	}
 	return nil

@@ -81,43 +81,7 @@ func (d *Daemon) desiredServices() (map[string]scm.ServiceConfig, error) {
 			slog.Warn("daemon: ignored unit directive", "unit", id, "warning", warning)
 		}
 
-		services[id.Name] = scm.ServiceConfig{
-			Name:         id.Name,
-			BinaryPath:   runnerCommand(d.binaryPath, id.String()),
-			Dependencies: unitDependencies(parsed),
-			User:         unitUser(parsed.Service.User, id.Name),
-			Description:  parsed.Description,
-		}
+		services[id.Name] = scm.NewServiceConfig(parsed, d.binaryPath, scm.StartTypeNoChange)
 	}
 	return services, nil
-}
-
-func runnerCommand(binaryPath, unitName string) string {
-	return `"` + binaryPath + `" --mode=run --unit=` + unitName
-}
-
-func unitDependencies(file *unit.UnitFile) []string {
-	seen := make(map[string]struct{})
-	var dependencies []string
-	for _, names := range [][]string{file.Requires, file.After} {
-		for _, name := range names {
-			id, err := unit.ParseID(name)
-			if err != nil || id.Type != unit.TypeService {
-				continue
-			}
-			if _, ok := seen[id.Name]; ok {
-				continue
-			}
-			seen[id.Name] = struct{}{}
-			dependencies = append(dependencies, id.Name)
-		}
-	}
-	return dependencies
-}
-
-func unitUser(user, serviceName string) string {
-	if user != "" {
-		return user
-	}
-	return `NT SERVICE\` + serviceName
 }

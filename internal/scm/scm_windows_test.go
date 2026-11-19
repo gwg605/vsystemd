@@ -69,7 +69,7 @@ func TestWindowsServiceConfig(t *testing.T) {
 		StartType:    StartTypeAutomatic,
 		Dependencies: []string{"db"},
 		User:         `NT SERVICE\app`,
-		Password:     "secret",
+		password:     "secret",
 		Description:  "Example",
 	}
 
@@ -92,7 +92,7 @@ func TestWindowsServiceConfig(t *testing.T) {
 	if !reflect.DeepEqual(got.Dependencies, cfg.Dependencies) {
 		t.Errorf("Dependencies = %v", got.Dependencies)
 	}
-	if got.ServiceStartName != cfg.User || got.Password != cfg.Password {
+	if got.ServiceStartName != string(cfg.User) || got.Password != cfg.password {
 		t.Errorf("account = %q/%q", got.ServiceStartName, got.Password)
 	}
 	if got.DisplayName != cfg.Name || got.Description != cfg.Description {
@@ -147,8 +147,8 @@ func TestServiceConfigFrom(t *testing.T) {
 	if got.User != `NT SERVICE\app` || got.DisplayName != "App Service" || got.Description != "Example" {
 		t.Errorf("user/display/description = %q/%q/%q", got.User, got.DisplayName, got.Description)
 	}
-	if got.Password != "" {
-		t.Errorf("Password = %q", got.Password)
+	if got.password != "" {
+		t.Errorf("password = %q", got.password)
 	}
 }
 

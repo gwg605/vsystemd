@@ -45,3 +45,24 @@ type TimerUnit struct {
 	OnStartupSec time.Duration
 	Unit         string
 }
+
+// Dependencies returns the service units referenced by After=/Requires=,
+// de-duplicated and in declaration order.
+func (u *UnitFile) Dependencies() []string {
+	seen := make(map[string]struct{})
+	var dependencies []string
+	for _, names := range [][]string{u.Requires, u.After} {
+		for _, name := range names {
+			id, err := ParseID(name)
+			if err != nil || id.Type != TypeService {
+				continue
+			}
+			if _, ok := seen[id.Name]; ok {
+				continue
+			}
+			seen[id.Name] = struct{}{}
+			dependencies = append(dependencies, id.Name)
+		}
+	}
+	return dependencies
+}
