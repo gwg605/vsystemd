@@ -29,6 +29,9 @@ func serviceStatusLines(cfg config.Config, id unit.ID, status protocol.StatusRes
 	}
 
 	active := status.SystemdState
+	if status.ConfigError != "" {
+		active += " invalid"
+	}
 	if status.SystemdState != "inactive (dead)" && !status.LastTransition.IsZero() {
 		active += fmt.Sprintf(" since %s; %s ago", formatTime(status.LastTransition), formatDelta(time.Since(status.LastTransition)))
 	}
@@ -37,6 +40,9 @@ func serviceStatusLines(cfg config.Config, id unit.ID, status protocol.StatusRes
 		header,
 		fmt.Sprintf("%12s %s", "Loaded:", "loaded ("+loaded+")"),
 		fmt.Sprintf("%12s %s", "Active:", active),
+	}
+	if status.ConfigError != "" {
+		lines = append(lines, fmt.Sprintf("%12s %s", "Config:", status.ConfigError))
 	}
 	if status.PID != 0 {
 		lines = append(lines, fmt.Sprintf("%12s %d", "Main PID:", status.PID))
@@ -75,6 +81,9 @@ func timerStatusLines(cfg config.Config, id unit.ID, status protocol.StatusRespo
 	}
 
 	active := status.SystemdState
+	if status.ConfigError != "" {
+		active += " invalid"
+	}
 	if status.ActiveSince != nil {
 		active += fmt.Sprintf(" since %s; %s ago", formatTime(*status.ActiveSince), formatDelta(time.Since(*status.ActiveSince)))
 	}
@@ -83,6 +92,9 @@ func timerStatusLines(cfg config.Config, id unit.ID, status protocol.StatusRespo
 		header,
 		fmt.Sprintf("%12s %s", "Loaded:", "loaded ("+loaded+")"),
 		fmt.Sprintf("%12s %s", "Active:", active),
+	}
+	if status.ConfigError != "" {
+		lines = append(lines, fmt.Sprintf("%12s %s", "Config:", status.ConfigError))
 	}
 	if status.NextRun != nil {
 		lines = append(lines, fmt.Sprintf("%12s %s; %s left", "Trigger:", formatTime(*status.NextRun), formatDelta(time.Until(*status.NextRun))))
@@ -107,7 +119,11 @@ func enabledDisabled(value bool) string {
 func printUnits(list protocol.ListUnitsResponse) {
 	fmt.Printf("%-24s %-24s %s\n", "UNIT", "STATE", "DESCRIPTION")
 	for _, entry := range list.Units {
-		fmt.Printf("%-24s %-24s %s\n", entry.Unit, entry.SystemdState, entry.Description)
+		state := entry.SystemdState
+		if entry.ConfigError != "" {
+			state += " invalid"
+		}
+		fmt.Printf("%-24s %-24s %s\n", entry.Unit, state, entry.Description)
 	}
 }
 

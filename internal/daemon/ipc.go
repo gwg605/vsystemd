@@ -152,6 +152,9 @@ func (d *Daemon) updateFromEvent(event protocol.StateEvent) {
 	if had && previous.RunnerState == state.RunnerState {
 		state.LastTransition = previous.LastTransition
 	}
+	if had {
+		state.ConfigError = previous.ConfigError
+	}
 	d.states[id.String()] = state
 	d.mu.Unlock()
 

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/gwg605/vsystemd/internal/scm"
+	"github.com/gwg605/vsystemd/internal/unit"
 )
 
 type RunnerState string
@@ -40,6 +41,7 @@ type ServiceState struct {
 	LastTransition time.Time
 	LastSeen       time.Time
 	LastError      string
+	ConfigError    string
 }
 
 func (s ServiceState) Status() SystemdState {
@@ -69,4 +71,40 @@ func (s ServiceState) Status() SystemdState {
 	default:
 		return SystemdInactiveDead
 	}
+}
+
+func (d *Daemon) loadUnit(id unit.ID) (*unit.UnitFile, error) {
+	data, err := d.store.ReadUnit(id.String())
+	if err != nil {
+		return nil, err
+	}
+	return unit.Parse(id, data)
+}
+
+func (d *Daemon) setConfigError(id unit.ID, err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	name := id.String()
+	state := d.states[name]
+	state.Unit = name
+	state.ConfigError = err.Error()
+	d.states[name] = state
+}
+
+func (d *Daemon) clearConfigError(id unit.ID) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	name := id.String()
+	state, ok := d.states[name]
+	if !ok || state.ConfigError == "" {
+		return
+	}
+	state.ConfigError = ""
+	d.states[name] = state
+}
+
+func (d *Daemon) configError(id unit.ID) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.states[id.String()].ConfigError
 }

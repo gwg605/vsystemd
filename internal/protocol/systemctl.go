@@ -35,6 +35,7 @@ type StatusResponse struct {
 	LastError      string     `json:"last_error"`
 	LogTail        []string   `json:"log_tail"`
 	Description    string     `json:"description,omitempty"`
+	ConfigError    string     `json:"config_error,omitempty"`
 	Enabled        *bool      `json:"enabled,omitempty"`
 	Running        *bool      `json:"running,omitempty"`
 	NextRun        *time.Time `json:"next_run,omitempty"`
@@ -49,6 +50,7 @@ type UnitStatus struct {
 	SystemdState string     `json:"systemd_state"`
 	SCMState     scm.State  `json:"scm_state"`
 	Description  string     `json:"description"`
+	ConfigError  string     `json:"config_error,omitempty"`
 	Enabled      *bool      `json:"enabled"`
 	Running      *bool      `json:"running"`
 	NextRun      *time.Time `json:"next_run"`

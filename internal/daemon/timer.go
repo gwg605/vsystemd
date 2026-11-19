@@ -114,13 +114,11 @@ func (d *Daemon) validateTimer(id unit.ID) error {
 	if id.Type != unit.TypeTimer {
 		return fmt.Errorf("unit %s is not a timer", id)
 	}
-	data, err := d.store.ReadUnit(id.String())
-	if err != nil {
-		return fmt.Errorf("timer %s not found", id)
+	if _, err := d.loadUnit(id); err != nil {
+		d.setConfigError(id, err)
+		return fmt.Errorf("timer %s: %w", id, err)
 	}
-	if _, err := unit.Parse(id, data); err != nil {
-		return fmt.Errorf("parse timer %s: %w", id, err)
-	}
+	d.clearConfigError(id)
 	return nil
 }
 
@@ -128,28 +126,31 @@ func (d *Daemon) timerDefinition(id unit.ID) (scheduler.Timer, error) {
 	if id.Type != unit.TypeTimer {
 		return scheduler.Timer{}, fmt.Errorf("unit %s is not a timer", id)
 	}
-	data, err := d.store.ReadUnit(id.String())
+	parsed, err := d.loadUnit(id)
 	if err != nil {
-		return scheduler.Timer{}, fmt.Errorf("timer %s not found", id)
-	}
-	parsed, err := unit.Parse(id, data)
-	if err != nil {
-		return scheduler.Timer{}, fmt.Errorf("parse timer %s: %w", id, err)
+		d.setConfigError(id, err)
+		return scheduler.Timer{}, fmt.Errorf("timer %s: %w", id, err)
 	}
 	for _, warning := range parsed.Warnings {
 		slog.Warn("daemon: ignored timer directive", "unit", id, "warning", warning)
 	}
 	if len(parsed.Timer.OnCalendar) == 0 {
-		return scheduler.Timer{}, fmt.Errorf("timer %s has no OnCalendar", id)
+		err := fmt.Errorf("timer %s has no OnCalendar", id)
+		d.setConfigError(id, err)
+		return scheduler.Timer{}, err
 	}
 
 	target, err := timerTarget(parsed.Timer, id)
 	if err != nil {
+		d.setConfigError(id, err)
 		return scheduler.Timer{}, err
 	}
 	if target.Name == config.ManagerServiceName {
-		return scheduler.Timer{}, fmt.Errorf("timer %s targets the vsystemd manager service", id)
+		err := fmt.Errorf("timer %s targets the vsystemd manager service", id)
+		d.setConfigError(id, err)
+		return scheduler.Timer{}, err
 	}
+	d.clearConfigError(id)
 	return scheduler.Timer{
 		Name:       id.String(),
 		Service:    target.Name,
