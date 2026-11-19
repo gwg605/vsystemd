@@ -135,18 +135,24 @@ func (d *Daemon) updateFromEvent(event runner.StateEvent) {
 		transition = time.Now().UTC()
 	}
 
+	scmState := d.scmState(id)
+
+	d.mu.Lock()
+	previous, had := d.states[id.String()]
 	state := ServiceState{
 		Unit:           id.String(),
-		SCMState:       d.scmState(id),
+		SCMState:       scmState,
 		RunnerState:    RunnerState(event.State),
 		PID:            event.PID,
 		ExitCode:       event.ExitCode,
 		RestartCount:   event.RestartCount,
 		LastTransition: transition,
+		LastSeen:       time.Now().UTC(),
 		LastError:      event.LastError,
 	}
-
-	d.mu.Lock()
+	if had && previous.RunnerState == state.RunnerState {
+		state.LastTransition = previous.LastTransition
+	}
 	d.states[id.String()] = state
 	d.mu.Unlock()
 

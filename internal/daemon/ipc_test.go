@@ -135,17 +135,43 @@ func TestStateEventAccountMismatch(t *testing.T) {
 
 func TestCheckRunnersMarksDead(t *testing.T) {
 	daemon, _ := newTestDaemon(t, scmfake.New(), storagefake.New())
-	daemon.updateFromEvent(runner.StateEvent{
-		Unit:      "app.service",
-		State:     runner.StateActive,
-		PID:       1,
-		Timestamp: time.Now().Add(-2 * config.RunnerDeadAfter),
-	})
+	daemon.mu.Lock()
+	daemon.states["app.service"] = ServiceState{
+		Unit:        "app.service",
+		RunnerState: RunnerStateActive,
+		LastSeen:    time.Now().Add(-2 * config.RunnerDeadAfter),
+	}
+	daemon.mu.Unlock()
 
 	daemon.checkRunners()
 
 	state, ok := daemon.State("app.service")
 	if !ok || state.RunnerState != RunnerStateDead {
 		t.Errorf("state = %+v, ok = %v", state, ok)
+	}
+}
+
+func TestHeartbeatKeepsLastTransition(t *testing.T) {
+	daemon, _ := newTestDaemon(t, scmfake.New(), storagefake.New())
+	daemon.updateFromEvent(runner.StateEvent{
+		Unit:      "app.service",
+		State:     runner.StateActive,
+		PID:       1,
+		Timestamp: time.Now().Add(-time.Hour),
+	})
+	first, _ := daemon.State("app.service")
+
+	daemon.updateFromEvent(runner.StateEvent{
+		Unit:  "app.service",
+		State: runner.StateActive,
+		PID:   1,
+	})
+	second, _ := daemon.State("app.service")
+
+	if !second.LastTransition.Equal(first.LastTransition) {
+		t.Errorf("LastTransition moved on heartbeat: %v -> %v", first.LastTransition, second.LastTransition)
+	}
+	if second.LastSeen.Before(first.LastSeen) {
+		t.Errorf("LastSeen moved backwards: %v -> %v", first.LastSeen, second.LastSeen)
 	}
 }
