@@ -12,29 +12,8 @@ import (
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
-func TestPasswordRequired(t *testing.T) {
-	tests := map[string]bool{
-		`NT SERVICE\app`:              false,
-		`nt service\app`:              false,
-		`LocalSystem`:                 false,
-		`SYSTEM`:                      false,
-		`NT AUTHORITY\SYSTEM`:         false,
-		`NT AUTHORITY\LocalService`:   false,
-		`NT AUTHORITY\NetworkService`: false,
-		`LOCAL SERVICE`:               false,
-		`NETWORK SERVICE`:             false,
-		`CONTOSO\alice`:               true,
-		`.\alice`:                     true,
-	}
-	for account, want := range tests {
-		if got := passwordRequired(account); got != want {
-			t.Errorf("passwordRequired(%q) = %v, want %v", account, got, want)
-		}
-	}
-}
-
 func TestResolvePasswordProvided(t *testing.T) {
-	password, err := resolvePassword(`CONTOSO\alice`, "secret", "", false)
+	password, err := resolvePassword("secret", "", false)
 	if err != nil {
 		t.Fatalf("resolvePassword() error = %v", err)
 	}
@@ -42,7 +21,7 @@ func TestResolvePasswordProvided(t *testing.T) {
 		t.Errorf("password = %q", password)
 	}
 
-	password, err = resolvePassword("LocalSystem", "", "", false)
+	password, err = resolvePassword("", "", false)
 	if err != nil {
 		t.Fatalf("resolvePassword() error = %v", err)
 	}
@@ -52,10 +31,10 @@ func TestResolvePasswordProvided(t *testing.T) {
 }
 
 func TestResolvePasswordConflict(t *testing.T) {
-	if _, err := resolvePassword(`CONTOSO\alice`, "secret", "file", false); err == nil {
+	if _, err := resolvePassword("secret", "file", false); err == nil {
 		t.Error("expected error for --password with --password-file")
 	}
-	if _, err := resolvePassword(`CONTOSO\alice`, "", "file", true); err == nil {
+	if _, err := resolvePassword("", "file", true); err == nil {
 		t.Error("expected error for --password-file with --password-stdin")
 	}
 }
@@ -65,7 +44,7 @@ func TestResolvePasswordFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("secret\r\n"), 0o600); err != nil {
 		t.Fatalf("write password file: %v", err)
 	}
-	password, err := resolvePassword(`CONTOSO\alice`, "", path, false)
+	password, err := resolvePassword("", path, false)
 	if err != nil {
 		t.Fatalf("resolvePassword() error = %v", err)
 	}

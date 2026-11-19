@@ -1,8 +1,15 @@
 package scm
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/gwg605/vsystemd/internal/unit"
+)
 
 type StartType int
+
+// StartTypeNoChange leaves the service start type unchanged on update.
+const StartTypeNoChange StartType = 0
 
 const (
 	StartTypeAutomatic StartType = iota + 1
@@ -36,15 +43,46 @@ var (
 	ErrNotManaged = errors.New("service is not managed by vsystemd")
 )
 
+// Account is an account a service runs under.
+type Account string
+
+// NewAccount resolves the win32 service account for a unit's User= value,
+// defaulting to the per-service virtual account NT SERVICE\<name>.
+func NewAccount(user, serviceName string) Account {
+	if user != "" {
+		return Account(user)
+	}
+	return Account(`NT SERVICE\` + serviceName)
+}
+
 type ServiceConfig struct {
 	Name         string
 	BinaryPath   string
 	StartType    StartType
 	Dependencies []string
-	User         string
-	Password     string
+	User         Account
+	password     string
 	DisplayName  string
 	Description  string
+}
+
+// SetPassword sets the service account password. The password is never exposed
+// by read operations; only the scm package reads it.
+func (c *ServiceConfig) SetPassword(password string) {
+	c.password = password
+}
+
+// NewServiceConfig translates a service unit into an SCM service configuration.
+// The password is left unset; set it with SetPassword when required.
+func NewServiceConfig(file *unit.UnitFile, binaryPath string, startType StartType) ServiceConfig {
+	return ServiceConfig{
+		Name:         file.Name.Name,
+		BinaryPath:   `"` + binaryPath + `" --mode=run --unit=` + file.Name.String(),
+		StartType:    startType,
+		Dependencies: file.Dependencies(),
+		User:         NewAccount(file.Service.User, file.Name.Name),
+		Description:  file.Description,
+	}
 }
 
 type ServiceStatus struct {
@@ -62,8 +100,8 @@ type Manager interface {
 	StopService(name string) error
 	QueryStatus(name string) (ServiceStatus, error)
 	QueryStatuses() ([]ServiceStatus, error)
-	// ListServices returns the configuration of every managed service. Password
-	// is never populated because SCM does not expose it.
+	// ListServices returns the configuration of every managed service. The
+	// password is never populated because SCM does not expose it.
 	ListServices() ([]ServiceConfig, error)
 	// GetServiceByHandle returns the configuration of the managed service the
 	// process handle belongs to, or ErrNotService if it is not a service.

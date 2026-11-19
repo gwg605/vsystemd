@@ -52,7 +52,7 @@ func (m *Manager) UpdateService(cfg scm.ServiceConfig) error {
 	}
 	startType := svc.config.StartType
 	svc.config = cfg
-	if cfg.StartType == 0 {
+	if cfg.StartType == scm.StartTypeNoChange {
 		svc.config.StartType = startType
 	}
 	return nil
@@ -139,7 +139,7 @@ func (m *Manager) ListServices() ([]scm.ServiceConfig, error) {
 	defer m.mu.Unlock()
 	configs := make([]scm.ServiceConfig, 0, len(m.services))
 	for _, svc := range m.services {
-		configs = append(configs, readConfig(svc.config))
+		configs = append(configs, svc.config)
 	}
 	sort.Slice(configs, func(i, j int) bool {
 		return configs[i].Name < configs[j].Name
@@ -158,7 +158,7 @@ func (m *Manager) GetServiceByHandle(handle scm.ProcessHandle) (scm.ServiceConfi
 	if !ok {
 		return scm.ServiceConfig{}, scm.ErrNotService
 	}
-	return readConfig(svc.config), nil
+	return svc.config, nil
 }
 
 // SetProcessService registers a process handle as belonging to a service so
@@ -167,9 +167,4 @@ func (m *Manager) SetProcessService(handle scm.ProcessHandle, name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.processServices[handle] = name
-}
-
-func readConfig(config scm.ServiceConfig) scm.ServiceConfig {
-	config.Password = ""
-	return config
 }

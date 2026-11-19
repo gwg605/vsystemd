@@ -58,7 +58,7 @@ func (windowsManager) UpdateService(cfg ServiceConfig) error {
 	defer service.Close()
 
 	config := windowsServiceConfig(cfg)
-	if cfg.StartType == 0 {
+	if cfg.StartType == StartTypeNoChange {
 		config.StartType = windows.SERVICE_NO_CHANGE
 	}
 	if err := service.UpdateConfig(config); err != nil {
@@ -310,7 +310,7 @@ func serviceConfigFrom(name string, config mgr.Config) ServiceConfig {
 		BinaryPath:   config.BinaryPathName,
 		StartType:    serviceStartType(config.StartType),
 		Dependencies: config.Dependencies,
-		User:         config.ServiceStartName,
+		User:         Account(config.ServiceStartName),
 		DisplayName:  config.DisplayName,
 		Description:  config.Description,
 	}
@@ -514,9 +514,9 @@ func windowsServiceConfig(cfg ServiceConfig) mgr.Config {
 		BinaryPathName:   cfg.BinaryPath,
 		LoadOrderGroup:   managedServiceGroup,
 		Dependencies:     cfg.Dependencies,
-		ServiceStartName: cfg.User,
+		ServiceStartName: string(cfg.User),
 		DisplayName:      displayName,
-		Password:         cfg.Password,
+		Password:         cfg.password,
 		Description:      cfg.Description,
 	}
 }

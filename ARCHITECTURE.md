@@ -58,8 +58,7 @@ All other timer directives (`OnUnitActiveSec=`, `OnUnitInactiveSec=`, `Persisten
 
 - If service does not exist in SCM: `CreateService()` with `START_TYPE = AUTO_START`
 - If service already exists in SCM: `ChangeServiceConfig(START_TYPE = AUTO_START)`
-- If `User=` requires a password (domain\user): request interactively or via `--password`, `--password-file`, or `--password-stdin` (only one source); attempt creation even if no password provided
-- System accounts (LocalSystem, LocalService, NetworkService, `NT SERVICE\*`): no password needed
+- Password: taken from `--password`, `--password-file`, or `--password-stdin` (only one source). If none is given, an empty password is passed; there is no interactive prompt
 
 ### `systemctl disable foo.service`
 
@@ -223,13 +222,16 @@ All other dependency types (`Wants=`, `BindsTo=`, `PartOf=`, `Conflicts=`, `Befo
 
 ### Supported in v1
 
-| Value | Password required |
+| Value | Notes |
 |---|---|
-| `NT SERVICE\<service-name>` (default if omitted) | No (virtual account, auto-created by Windows) |
-| `LocalSystem` | No |
-| `NT AUTHORITY\LocalService` | No |
-| `NT AUTHORITY\NetworkService` | No |
-| `DOMAIN\user` | Yes (prompted at enable time) |
+| `NT SERVICE\<service-name>` (default if omitted) | Virtual account, auto-created by Windows |
+| `LocalSystem` | |
+| `NT AUTHORITY\LocalService` | |
+| `NT AUTHORITY\NetworkService` | |
+| `DOMAIN\user` | Password supplied via `--password`, `--password-file`, or `--password-stdin` |
+
+There is no separate "password required" rule: if a password is supplied it is
+used, otherwise an empty password is passed.
 
 ### Default behavior
 

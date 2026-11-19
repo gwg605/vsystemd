@@ -84,7 +84,7 @@ func sendRunnerEvent(t *testing.T, network *transportfake.Network, user string, 
 	t.Helper()
 	runnerTransport := network.New(
 		transport.DefaultConfig(),
-		transport.NewPeer(transport.PeerRunner, "app.service", false).WithService(scm.ServiceConfig{User: user}),
+		transport.NewPeer(transport.PeerRunner, "app.service", false).WithService(scm.ServiceConfig{User: scm.Account(user)}),
 		nil,
 	)
 	payload, err := json.Marshal(event)

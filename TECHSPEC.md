@@ -258,16 +258,23 @@ type Manager interface {
     ListServices() ([]ServiceStatus, error)
 }
 
+type Account string
+
 type ServiceConfig struct {
     Name         string
     BinaryPath   string
     StartType    StartType
     Dependencies []string
-    User         string
-    Password     string
+    User         Account
+    password     string
     Description  string
 }
 ```
+
+`NewServiceConfig(unit, binaryPath, startType)` транслирует unit-файл в
+`ServiceConfig`; `NewAccount(user, name)` резолвит win32-аккаунт. Пароль
+устанавливается методом `SetPassword` и никогда не возвращается при чтении
+(поле неэкспортируемое).
 
 `Storage` абстрагирует только persistence-операции: unit-файлы и состояние
 таймеров. Логи ведутся отдельным компонентом `logwriter`.
