@@ -149,11 +149,12 @@ func (d *Daemon) checkRunners() {
 		default:
 			continue
 		}
-		if now.Sub(state.LastTransition) < config.RunnerDeadAfter {
+		if now.Sub(state.LastSeen) < config.RunnerDeadAfter {
 			continue
 		}
 		state.RunnerState = RunnerStateDead
 		state.LastTransition = now
+		state.LastSeen = now
 		d.states[name] = state
 		slog.Warn("daemon: runner heartbeat lost", "unit", name)
 	}

@@ -38,6 +38,7 @@ type ServiceState struct {
 	ExitCode       int
 	RestartCount   int
 	LastTransition time.Time
+	LastSeen       time.Time
 	LastError      string
 }
 
