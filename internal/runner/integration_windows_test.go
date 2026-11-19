@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sys/windows/svc"
 
 	"github.com/gwg605/vsystemd/internal/config"
+	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/storage"
 	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
 	"github.com/gwg605/vsystemd/internal/transport"
@@ -65,9 +66,9 @@ func waitForDone(t *testing.T, done <-chan struct{}) {
 	}
 }
 
-func collectStates(collector *stateCollector) []StateEvent {
+func collectStates(collector *stateCollector) []protocol.StateEvent {
 	close(collector.events)
-	var states []StateEvent
+	var states []protocol.StateEvent
 	for event := range collector.events {
 		states = append(states, event)
 	}
@@ -92,10 +93,10 @@ func TestRunnerStartStop(t *testing.T) {
 	if len(states) < 3 {
 		t.Fatalf("states = %v", states)
 	}
-	if states[0].State != StateActivating || states[1].State != StateActive {
+	if states[0].State != protocol.StateActivating || states[1].State != protocol.StateActive {
 		t.Errorf("states = %v", states)
 	}
-	if states[len(states)-1].State != StateInactive {
+	if states[len(states)-1].State != protocol.StateInactive {
 		t.Errorf("last state = %q", states[len(states)-1].State)
 	}
 	if data := waitForFile(t, stopFile); string(data) != "stopped\n" {
@@ -117,7 +118,7 @@ func TestRunnerRestartOnFailure(t *testing.T) {
 	states := collectStates(collector)
 	var restarts int
 	for _, event := range states {
-		if event.State == StateRestarting {
+		if event.State == protocol.StateRestarting {
 			restarts++
 		}
 	}
@@ -125,7 +126,7 @@ func TestRunnerRestartOnFailure(t *testing.T) {
 		t.Errorf("restart events = %d", restarts)
 	}
 	last := states[len(states)-1]
-	if last.State != StateInactive {
+	if last.State != protocol.StateInactive {
 		t.Errorf("last state = %q", last.State)
 	}
 	if last.RestartCount != 1 {
@@ -149,7 +150,7 @@ func TestRunnerStartLimitExhaustion(t *testing.T) {
 
 	states := collectStates(collector)
 	last := states[len(states)-1]
-	if last.State != StateFailed {
+	if last.State != protocol.StateFailed {
 		t.Errorf("last state = %q", last.State)
 	}
 	if last.RestartCount != 1 {

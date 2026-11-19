@@ -124,7 +124,7 @@ Messages:
 runner → daemon:  StateEvent { unit, state, pid, exit_code, restart_count, timestamp, last_error }
 ```
 
-The runner keeps a persistent connection and sends a `StateEvent` on every state change and periodically as a heartbeat. The daemon never pushes and never sends a status request.
+The runner keeps a persistent connection and sends a `StateEvent` on every state change and periodically as a heartbeat. The daemon never pushes and never sends a status request. The wire types (`StateEvent`, message type, state values) are defined in `internal/protocol`.
 
 Behavior when the daemon is unavailable:
 - The runner operates normally; sends fail and are logged

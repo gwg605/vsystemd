@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/gwg605/vsystemd/internal/protocol"
-	"github.com/gwg605/vsystemd/internal/runner"
 	"github.com/gwg605/vsystemd/internal/scm"
 	"github.com/gwg605/vsystemd/internal/transport"
 	"github.com/gwg605/vsystemd/internal/unit"
@@ -18,7 +17,7 @@ import (
 func (d *Daemon) handle(source transport.Peer, msg transport.Message) error {
 	slog.Debug("daemon: message received", "from", source.String(), "type", msg.Type)
 	switch msg.Type {
-	case runner.MessageStateEvent:
+	case protocol.MessageStateEvent:
 		return d.handleStateEvent(source, msg)
 	case protocol.TypeStatusRequest:
 		if err := authorizeControl(source); err != nil {
@@ -70,7 +69,7 @@ func (d *Daemon) handleStateEvent(source transport.Peer, msg transport.Message) 
 	if source.Type() != transport.PeerRunner {
 		return fmt.Errorf("forbidden: state event from %s", source)
 	}
-	var event runner.StateEvent
+	var event protocol.StateEvent
 	if err := json.Unmarshal(msg.Payload, &event); err != nil {
 		slog.Error("daemon: decode state event failed", "from", source.String(), "error", err)
 		return fmt.Errorf("decode state event: %w", err)
@@ -121,7 +120,7 @@ func (d *Daemon) State(unit string) (ServiceState, bool) {
 	return state, ok
 }
 
-func (d *Daemon) updateFromEvent(event runner.StateEvent) {
+func (d *Daemon) updateFromEvent(event protocol.StateEvent) {
 	if event.Unit == "" {
 		return
 	}

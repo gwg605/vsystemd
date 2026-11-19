@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/gwg605/vsystemd/internal/protocol"
-	"github.com/gwg605/vsystemd/internal/runner"
 	scmfake "github.com/gwg605/vsystemd/internal/scm/fake"
 	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
 	"github.com/gwg605/vsystemd/internal/transport"
@@ -44,12 +43,12 @@ func TestStateEventUnitMismatch(t *testing.T) {
 	runnerTransport := network.New(transport.DefaultConfig(), transport.NewPeer(transport.PeerRunner, "app.service", false), nil)
 	t.Cleanup(func() { runnerTransport.Close() })
 
-	payload, err := json.Marshal(runner.StateEvent{Unit: "other.service", State: runner.StateActive, PID: 1})
+	payload, err := json.Marshal(protocol.StateEvent{Unit: "other.service", State: protocol.StateActive, PID: 1})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	err = runnerTransport.Send(runnerTransport.Target(transport.PeerDaemon), transport.Message{
-		Type:    runner.MessageStateEvent,
+		Type:    protocol.MessageStateEvent,
 		Payload: payload,
 	})
 	if err == nil {
@@ -66,12 +65,12 @@ func TestStateEventFromControlRejected(t *testing.T) {
 	client := network.New(transport.DefaultConfig(), transport.NewPeer(transport.PeerControl, "systemctl_3", true), nil)
 	t.Cleanup(func() { client.Close() })
 
-	payload, err := json.Marshal(runner.StateEvent{Unit: "app.service", State: runner.StateActive})
+	payload, err := json.Marshal(protocol.StateEvent{Unit: "app.service", State: protocol.StateActive})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	if err := client.Send(client.Target(transport.PeerDaemon), transport.Message{
-		Type:    runner.MessageStateEvent,
+		Type:    protocol.MessageStateEvent,
 		Payload: payload,
 	}); err == nil {
 		t.Fatal("Send() error = nil, want rejection")

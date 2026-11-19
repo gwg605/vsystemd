@@ -6,51 +6,29 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/transport"
 )
 
-const (
-	daemonPeer = "daemon"
-
-	MessageStateEvent = "state_event"
-)
-
-const (
-	StateActivating   = "activating"
-	StateActive       = "active"
-	StateInactive     = "inactive"
-	StateFailed       = "failed"
-	StateRestarting   = "restarting"
-	StateDeactivating = "deactivating"
-)
-
-type StateEvent struct {
-	Unit         string    `json:"unit"`
-	State        string    `json:"state"`
-	PID          uint32    `json:"pid"`
-	ExitCode     int       `json:"exit_code"`
-	RestartCount int       `json:"restart_count"`
-	Timestamp    time.Time `json:"timestamp"`
-	LastError    string    `json:"last_error"`
-}
+const daemonPeer = "daemon"
 
 type stateReporter struct {
 	transport transport.Transport
 	unit      string
 
 	mu    sync.Mutex
-	state StateEvent
+	state protocol.StateEvent
 }
 
 func newStateReporter(tr transport.Transport, unit string) *stateReporter {
 	return &stateReporter{
 		transport: tr,
 		unit:      unit,
-		state:     StateEvent{Unit: unit, State: StateInactive},
+		state:     protocol.StateEvent{Unit: unit, State: protocol.StateInactive},
 	}
 }
 
-func (r *stateReporter) Report(event StateEvent) error {
+func (r *stateReporter) Report(event protocol.StateEvent) error {
 	if event.Unit == "" {
 		event.Unit = r.unit
 	}
@@ -74,7 +52,7 @@ func (r *stateReporter) Report(event StateEvent) error {
 		"exit_code", event.ExitCode,
 		"restart_count", event.RestartCount)
 	if err := r.transport.Send(r.transport.Target(transport.PeerDaemon), transport.Message{
-		Type:    MessageStateEvent,
+		Type:    protocol.MessageStateEvent,
 		Payload: payload,
 	}); err != nil {
 		slog.Warn("runner: report state failed", "unit", event.Unit, "state", event.State, "error", err)
@@ -83,7 +61,7 @@ func (r *stateReporter) Report(event StateEvent) error {
 	return nil
 }
 
-func (r *stateReporter) State() StateEvent {
+func (r *stateReporter) State() protocol.StateEvent {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.state

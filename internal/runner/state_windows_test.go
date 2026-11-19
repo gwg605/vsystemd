@@ -8,6 +8,7 @@ import (
 
 	"golang.org/x/sys/windows/svc"
 
+	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
@@ -27,17 +28,17 @@ func TestControlHandlerReportsStates(t *testing.T) {
 	waitForDone(t, done)
 	close(collector.events)
 
-	var states []string
+	var states []protocol.State
 	for event := range collector.events {
 		states = append(states, event.State)
 	}
 	if len(states) < 3 {
 		t.Fatalf("states = %v", states)
 	}
-	if states[0] != StateActivating || states[1] != StateActive {
+	if states[0] != protocol.StateActivating || states[1] != protocol.StateActive {
 		t.Errorf("states = %v", states)
 	}
-	if states[len(states)-1] != StateFailed {
+	if states[len(states)-1] != protocol.StateFailed {
 		t.Errorf("last state = %q", states[len(states)-1])
 	}
 }

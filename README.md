@@ -41,7 +41,7 @@ internal/
   daemon/            daemon state, reload, IPC, timer management
   logging/           slog setup
   logwriter/         timestamped log files with rotation
-  protocol/          systemctl <-> daemon message types
+  protocol/          IPC message types (systemctl/runner <-> daemon)
   runner/            process management, restart logic, SCM handler, logs
   scheduler/         OnCalendar scheduler
   scm/               Windows SCM integration (+ fake/)
