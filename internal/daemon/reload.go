@@ -44,7 +44,7 @@ func (d *Daemon) reload() error {
 				continue
 			}
 			if service.StartType != scm.StartTypeDisabled {
-				d.setConfigError(id, errConfigurationMissing)
+				d.setLoadError(id, LoadStateNotFound, errConfigurationMissing)
 				slog.Warn("daemon: keeping service without unit file", "service", service.Name)
 				continue
 			}
@@ -115,11 +115,11 @@ func (d *Daemon) desiredServices() (map[string]scm.ServiceConfig, map[string]boo
 
 		parsed, err := d.loadUnit(id)
 		if err != nil {
-			d.setConfigError(id, err)
+			d.markLoadError(id, err)
 			slog.Warn("daemon: invalid unit", "unit", id, "error", err)
 			continue
 		}
-		d.clearConfigError(id)
+		d.clearLoadError(id)
 		for _, warning := range parsed.Warnings {
 			slog.Warn("daemon: ignored unit directive", "unit", id, "warning", warning)
 		}

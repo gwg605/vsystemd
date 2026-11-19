@@ -258,9 +258,10 @@ by a blank line and the last lines from the current/latest managed file, or from
 the explicit `file:`/`append:` target if one is configured. For a `.timer` the
 tail comes from the service it activates.
 
-When a unit's configuration cannot be loaded (unreadable or unparseable unit
-file, or a missing unit file for an enabled service), `status` and `list-units`
-append `invalid` to the state and print a `Config:` line with the error.
+When a unit's configuration cannot be loaded (unparseable file, or a missing
+unit file for an enabled service), `status` reports it in the `Loaded:` line as
+`bad-setting`, `error`, or `not-found` with a `Reason:`. `list-units` prints
+`UNIT LOAD ACTIVE SUB DESCRIPTION` and marks failed or problem units with `●`.
 
 Log timestamps are written in UTC with a `Z` suffix. Timer `last_run`, `next_run`
 and `active_since` values in `timers.json` are also stored in UTC.
@@ -277,7 +278,7 @@ Set `"log_level": "debug"` in `config.json` for verbose daemon/runner logs.
 | `disable <unit>.service` | SCM | Set the service start type to disabled (does not stop or remove it; `daemon-reload` removes it once the unit file is gone) |
 | `start/stop/restart <unit>.service` | SCM | Control the service |
 | `status <unit>` | daemon | systemd-style status block and log tail |
-| `list-units` | daemon | List known units and states |
+| `list-units` | daemon | List known units (`UNIT LOAD ACTIVE SUB DESCRIPTION`) |
 | `list-timers` | daemon | List active timers with next/last run times; `--all` includes stopped and disabled timers |
 | `daemon-reload` | daemon | Rescan units and update SCM entries |
 | `enable/disable <unit>.timer` | daemon | Persist timer enabled state |

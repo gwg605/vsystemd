@@ -153,7 +153,8 @@ func (d *Daemon) updateFromEvent(event protocol.StateEvent) {
 		state.LastTransition = previous.LastTransition
 	}
 	if had {
-		state.ConfigError = previous.ConfigError
+		state.LoadState = previous.LoadState
+		state.LoadError = previous.LoadError
 	}
 	d.states[id.String()] = state
 	d.mu.Unlock()

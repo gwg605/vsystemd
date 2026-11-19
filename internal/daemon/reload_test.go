@@ -124,8 +124,8 @@ func TestReloadKeepsMissingUnitService(t *testing.T) {
 	if _, err := manager.QueryStatus("orphan"); err != nil {
 		t.Errorf("orphan was removed: %v", err)
 	}
-	if got := daemon.configError(unit.ID{Name: "orphan", Type: unit.TypeService}); got == "" {
-		t.Error("orphan ConfigError is empty")
+	if got, _ := daemon.loadState(unit.ID{Name: "orphan", Type: unit.TypeService}); got != LoadStateNotFound {
+		t.Errorf("orphan LoadState = %q", got)
 	}
 }
 

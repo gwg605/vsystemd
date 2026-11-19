@@ -83,22 +83,19 @@ func (d *Daemon) status(id unit.ID) (protocol.StatusResponse, error) {
 	cached, _ := d.State(name)
 	scmStatus, scmErr := d.manager.QueryStatus(id.Name)
 
-	data, readErr := d.store.ReadUnit(name)
-	if errors.Is(scmErr, scm.ErrNotFound) && readErr != nil {
+	parsed, loadErr := d.loadUnit(id)
+	if state, ok := loadErrorState(loadErr); errors.Is(scmErr, scm.ErrNotFound) && ok && state == LoadStateNotFound {
 		d.forgetUnit(id)
 		return protocol.StatusResponse{}, fmt.Errorf("unit %s not found", name)
 	}
 
 	description := ""
-	if readErr == nil {
-		parsed, parseErr := unit.Parse(id, data)
-		if parseErr != nil {
-			d.setConfigError(id, parseErr)
-			slog.Warn("daemon: invalid unit", "unit", id, "error", parseErr)
-		} else {
-			d.clearConfigError(id)
-			description = parsed.Description
-		}
+	if loadErr != nil {
+		d.markLoadError(id, loadErr)
+		slog.Warn("daemon: invalid unit", "unit", id, "error", loadErr)
+	} else {
+		d.clearLoadError(id)
+		description = parsed.Description
 	}
 
 	state := cached
@@ -116,6 +113,7 @@ func (d *Daemon) status(id unit.ID) (protocol.StatusResponse, error) {
 	}
 
 	logTail := d.logTail(id)
+	loadState, loadError := d.loadState(id)
 
 	return protocol.StatusResponse{
 		Unit:           name,
@@ -128,7 +126,8 @@ func (d *Daemon) status(id unit.ID) (protocol.StatusResponse, error) {
 		LastError:      state.LastError,
 		LogTail:        logTail,
 		Description:    description,
-		ConfigError:    d.configError(id),
+		LoadState:      string(loadState),
+		LoadError:      loadError,
 		Enabled:        serviceEnabled(d.manager, id.Name),
 	}, nil
 }
@@ -182,18 +181,19 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 		}
 		seen[id.String()] = true
 
-		parsed, parseErr := d.loadUnit(id)
-		if parseErr != nil {
-			d.setConfigError(id, parseErr)
-			slog.Warn("daemon: invalid unit", "unit", id, "error", parseErr)
+		parsed, loadErr := d.loadUnit(id)
+		if loadErr != nil {
+			d.markLoadError(id, loadErr)
+			slog.Warn("daemon: invalid unit", "unit", id, "error", loadErr)
 		} else {
-			d.clearConfigError(id)
+			d.clearLoadError(id)
 		}
+		loadState, _ := d.loadState(id)
 
-		entry := protocol.UnitStatus{Unit: id.String(), ConfigError: d.configError(id)}
+		entry := protocol.UnitStatus{Unit: id.String(), LoadState: string(loadState)}
 		if id.Type == unit.TypeTimer {
 			entry.Type = "timer"
-			if parseErr == nil {
+			if loadErr == nil {
 				if target, err := timerTarget(parsed.Timer, id); err == nil {
 					entry.Activates = target.String()
 				}
@@ -204,7 +204,7 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 		}
 
 		entry.Type = "service"
-		if parseErr == nil {
+		if loadErr == nil {
 			entry.Description = parsed.Description
 		}
 		state := d.serviceState(id, scmByName)
@@ -222,6 +222,7 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 		if seen[id.String()] {
 			continue
 		}
+		d.setLoadError(id, LoadStateNotFound, errConfigurationMissing)
 		state := d.serviceState(id, scmByName)
 		units = append(units, protocol.UnitStatus{
 			Unit:         id.String(),
@@ -229,7 +230,7 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 			SystemdState: string(state.Status()),
 			SCMState:     state.SCMState,
 			Description:  cfg.Description,
-			ConfigError:  d.configError(id),
+			LoadState:    string(LoadStateNotFound),
 		})
 	}
 
@@ -252,17 +253,16 @@ func (d *Daemon) serviceState(id unit.ID, services map[string]scm.ServiceStatus)
 
 func (d *Daemon) timerStatus(id unit.ID) (protocol.StatusResponse, error) {
 	name := id.String()
-	data, err := d.store.ReadUnit(name)
-	if err != nil {
+	parsed, loadErr := d.loadUnit(id)
+	if state, ok := loadErrorState(loadErr); ok && state == LoadStateNotFound {
 		d.forgetUnit(id)
 		return protocol.StatusResponse{}, fmt.Errorf("unit %s not found", name)
 	}
-	parsed, parseErr := unit.Parse(id, data)
-	if parseErr != nil {
-		d.setConfigError(id, parseErr)
-		slog.Warn("daemon: invalid unit", "unit", id, "error", parseErr)
+	if loadErr != nil {
+		d.markLoadError(id, loadErr)
+		slog.Warn("daemon: invalid unit", "unit", id, "error", loadErr)
 	} else {
-		d.clearConfigError(id)
+		d.clearLoadError(id)
 	}
 
 	state, err := d.store.ReadTimerState(name)
@@ -277,14 +277,16 @@ func (d *Daemon) timerStatus(id unit.ID) (protocol.StatusResponse, error) {
 		systemdState = SystemdActiveWaiting
 	}
 
+	loadState, loadError := d.loadState(id)
 	response := protocol.StatusResponse{
 		Unit:         name,
 		SystemdState: string(systemdState),
 		Enabled:      &enabled,
 		Running:      &running,
-		ConfigError:  d.configError(id),
+		LoadState:    string(loadState),
+		LoadError:    loadError,
 	}
-	if parseErr == nil {
+	if loadErr == nil {
 		response.Description = parsed.Description
 		if target, err := timerTarget(parsed.Timer, id); err == nil {
 			response.Activates = target.String()

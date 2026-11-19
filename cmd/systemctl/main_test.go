@@ -96,6 +96,43 @@ func TestTimerStatusLines(t *testing.T) {
 	}
 }
 
+func TestServiceStatusLinesBadSetting(t *testing.T) {
+	status := protocol.StatusResponse{
+		Unit:         "app.service",
+		SystemdState: "inactive (dead)",
+		LoadState:    "bad-setting",
+		LoadError:    "missing [Service] section",
+	}
+	id := unit.ID{Name: "app", Type: unit.TypeService}
+
+	lines := serviceStatusLines(config.Config{SystemDir: `C:\units`}, id, status)
+	if lines[1] != `     Loaded: bad-setting (Reason: missing [Service] section)` {
+		t.Errorf("loaded = %q", lines[1])
+	}
+	if lines[2] != "     Active: inactive (dead)" {
+		t.Errorf("active = %q", lines[2])
+	}
+}
+
+func TestSplitState(t *testing.T) {
+	tests := []struct {
+		in     string
+		active string
+		sub    string
+	}{
+		{"active (running)", "active", "running"},
+		{"inactive (dead)", "inactive", "dead"},
+		{"active (waiting)", "active", "waiting"},
+		{"failed", "failed", "failed"},
+	}
+	for _, test := range tests {
+		active, sub := splitState(test.in)
+		if active != test.active || sub != test.sub {
+			t.Errorf("splitState(%q) = %q, %q", test.in, active, sub)
+		}
+	}
+}
+
 func TestServiceStatusLines(t *testing.T) {
 	enabled := true
 	lastTransition := time.Now().Add(-40 * time.Minute).UTC()

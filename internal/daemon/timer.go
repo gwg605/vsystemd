@@ -115,10 +115,10 @@ func (d *Daemon) validateTimer(id unit.ID) error {
 		return fmt.Errorf("unit %s is not a timer", id)
 	}
 	if _, err := d.loadUnit(id); err != nil {
-		d.setConfigError(id, err)
+		d.markLoadError(id, err)
 		return fmt.Errorf("timer %s: %w", id, err)
 	}
-	d.clearConfigError(id)
+	d.clearLoadError(id)
 	return nil
 }
 
@@ -128,7 +128,7 @@ func (d *Daemon) timerDefinition(id unit.ID) (scheduler.Timer, error) {
 	}
 	parsed, err := d.loadUnit(id)
 	if err != nil {
-		d.setConfigError(id, err)
+		d.markLoadError(id, err)
 		return scheduler.Timer{}, fmt.Errorf("timer %s: %w", id, err)
 	}
 	for _, warning := range parsed.Warnings {
@@ -136,21 +136,21 @@ func (d *Daemon) timerDefinition(id unit.ID) (scheduler.Timer, error) {
 	}
 	if len(parsed.Timer.OnCalendar) == 0 {
 		err := fmt.Errorf("timer %s has no OnCalendar", id)
-		d.setConfigError(id, err)
+		d.setLoadError(id, LoadStateBadSetting, err)
 		return scheduler.Timer{}, err
 	}
 
 	target, err := timerTarget(parsed.Timer, id)
 	if err != nil {
-		d.setConfigError(id, err)
+		d.setLoadError(id, LoadStateBadSetting, err)
 		return scheduler.Timer{}, err
 	}
 	if target.Name == config.ManagerServiceName {
 		err := fmt.Errorf("timer %s targets the vsystemd manager service", id)
-		d.setConfigError(id, err)
+		d.setLoadError(id, LoadStateBadSetting, err)
 		return scheduler.Timer{}, err
 	}
-	d.clearConfigError(id)
+	d.clearLoadError(id)
 	return scheduler.Timer{
 		Name:       id.String(),
 		Service:    target.Name,

@@ -75,9 +75,9 @@ All other timer directives (`OnUnitActiveSec=`, `OnUnitInactiveSec=`, `Persisten
 - Routed through daemon (Channel 2)
 - Daemon scans `system\` directory, diffs against currently registered services in SCM:
   - Unit exists and parses, SCM entry exists → `ChangeServiceConfig()` (update)
-  - Unit exists but does not parse, SCM entry exists → kept and marked invalid (the parse error is shown)
+  - Unit exists but does not parse, SCM entry exists → kept with load state `bad-setting`
   - Unit missing, SCM entry exists and `START_TYPE = DISABLED` → `StopService()` + `DeleteService()`
-  - Unit missing, SCM entry exists and enabled → kept and marked invalid (`configuration file is missing`)
+  - Unit missing, SCM entry exists and enabled → kept with load state `not-found`
   - Unit exists, SCM entry missing → no action (wait for `enable`)
 - On Windows, `ListServices()` returns only services created by vsystemd (marked with `LoadOrderGroup = "vsystemd"`), so unrelated SCM services are never modified
 - Daemon reloads OnCalendar schedules from updated timer unit files
@@ -94,14 +94,16 @@ All other timer directives (`OnUnitActiveSec=`, `OnUnitInactiveSec=`, `Persisten
   `Active` with `since`, and `Main PID`/`Exit code`/`Restart`/`Error` when relevant
 - `status foo.timer` prints `Loaded`/`Active`/`Trigger`/`Triggers`; the log tail
   comes from the service the timer activates
-- Appends `invalid` to `Active` and prints a `Config:` line when the unit
-  configuration cannot be loaded (unreadable/unparseable file, or a missing file
-  for an enabled service)
+- `Loaded:` shows the load state: `loaded` normally, or `bad-setting` / `error`
+  / `not-found` (with `Reason: <message>`) when the unit file cannot be loaded
 
 ### `systemctl list-units`
 
 - Routed through daemon (Channel 2)
 - Combines SCM `EnumServicesStatus` + unit files in `system\`
+- Prints `UNIT LOAD ACTIVE SUB DESCRIPTION`; `LOAD` is the load state
+  (`loaded`/`bad-setting`/`error`/`not-found`) and `ACTIVE`/`SUB` are split from
+  the computed state. A `●` prefix marks units that failed or have a load error
 
 ---
 
