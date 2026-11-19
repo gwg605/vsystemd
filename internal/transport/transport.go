@@ -94,6 +94,9 @@ type Transport interface {
 	Close() error
 }
 
+// Factory builds a Transport for a local peer and message handler.
+type Factory func(local Peer, handler MsgHandler) (Transport, error)
+
 type peerOptions struct {
 	name string
 }

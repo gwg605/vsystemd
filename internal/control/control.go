@@ -11,20 +11,14 @@ import (
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
-// TransportFactory builds a client transport for daemon requests.
-type TransportFactory func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error)
-
-// StoreFactory opens the unit store on demand.
-type StoreFactory func() (storage.Storage, error)
-
 // Controller executes systemctl commands against the SCM and the daemon.
 type Controller struct {
 	manager   scm.Manager
-	transport TransportFactory
-	store     StoreFactory
+	transport transport.Factory
+	store     storage.Factory
 }
 
-func New(manager scm.Manager, transport TransportFactory, store StoreFactory) *Controller {
+func New(manager scm.Manager, transport transport.Factory, store storage.Factory) *Controller {
 	return &Controller{manager: manager, transport: transport, store: store}
 }
 

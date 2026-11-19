@@ -19,8 +19,6 @@ import (
 
 const daemonPeer = "daemon"
 
-type TransportFactory func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error)
-
 type Daemon struct {
 	manager     scm.Manager
 	store       storage.Storage
@@ -41,7 +39,7 @@ type Daemon struct {
 	loopStarted bool
 }
 
-func New(manager scm.Manager, store storage.Storage, binaryPath, logsDir string, logRotation logwriter.Rotation, newTransport TransportFactory) (*Daemon, error) {
+func New(manager scm.Manager, store storage.Storage, binaryPath, logsDir string, logRotation logwriter.Rotation, newTransport transport.Factory) (*Daemon, error) {
 	if newTransport == nil {
 		return nil, errors.New("transport factory is required")
 	}
