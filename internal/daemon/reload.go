@@ -11,7 +11,7 @@ import (
 
 func (d *Daemon) reload() error {
 	slog.Info("daemon: reload started")
-	desired, err := d.desiredServices()
+	desired, present, err := d.desiredServices()
 	if err != nil {
 		slog.Error("daemon: reload failed to build desired services", "error", err)
 		return err
@@ -29,6 +29,10 @@ func (d *Daemon) reload() error {
 		}
 		desiredConfig, ok := desired[service.Name]
 		if !ok {
+			if present[service.Name] {
+				slog.Warn("daemon: keeping service with invalid unit", "service", service.Name)
+				continue
+			}
 			slog.Info("daemon: removing service", "service", service.Name)
 			if err := d.manager.StopService(service.Name); err != nil {
 				slog.Error("daemon: stop service failed", "service", service.Name, "error", err)
@@ -54,34 +58,37 @@ func (d *Daemon) reload() error {
 	return nil
 }
 
-func (d *Daemon) desiredServices() (map[string]scm.ServiceConfig, error) {
+func (d *Daemon) desiredServices() (map[string]scm.ServiceConfig, map[string]bool, error) {
 	names, err := d.store.ListUnits()
 	if err != nil {
-		return nil, fmt.Errorf("list units: %w", err)
+		return nil, nil, fmt.Errorf("list units: %w", err)
 	}
 
 	services := make(map[string]scm.ServiceConfig)
+	present := make(map[string]bool)
 	for _, name := range names {
 		id, err := unit.ParseID(name)
 		if err != nil {
-			return nil, fmt.Errorf("unit %s: %w", name, err)
+			slog.Warn("daemon: skip unit", "unit", name, "error", err)
+			continue
 		}
 		if id.Type != unit.TypeService {
 			continue
 		}
-		data, err := d.store.ReadUnit(id.String())
+		present[id.Name] = true
+
+		parsed, err := d.loadUnit(id)
 		if err != nil {
-			return nil, fmt.Errorf("read unit %s: %w", id, err)
+			d.setConfigError(id, err)
+			slog.Warn("daemon: invalid unit", "unit", id, "error", err)
+			continue
 		}
-		parsed, err := unit.Parse(id, data)
-		if err != nil {
-			return nil, fmt.Errorf("parse unit %s: %w", id, err)
-		}
+		d.clearConfigError(id)
 		for _, warning := range parsed.Warnings {
 			slog.Warn("daemon: ignored unit directive", "unit", id, "warning", warning)
 		}
 
 		services[id.Name] = scm.NewServiceConfig(parsed, d.binaryPath, scm.StartTypeNoChange)
 	}
-	return services, nil
+	return services, present, nil
 }
