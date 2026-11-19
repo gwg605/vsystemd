@@ -174,7 +174,8 @@ The daemon must be running for `status`, `list-units`, `list-timers`,
 
 `enable` reads the unit file, creates or updates the SCM service, sets its start
 type to automatic, and registers `vsystemd.exe --mode=run --unit=<unit>` as its
-binary:
+binary. Creating a service requires a valid unit file; updating an existing
+service without a unit file only changes its start type:
 
 ```powershell
 .\bin\systemctl.exe daemon-reload
@@ -182,8 +183,11 @@ binary:
 .\bin\systemctl.exe start foo.service
 ```
 
-`daemon-reload` updates existing managed services and removes services whose
-unit files were deleted. It does not create SCM entries for new units — run
+`disable` sets the service start type to disabled; it does not stop or remove the
+service. `daemon-reload` updates existing managed services. A service whose unit
+file was deleted is removed from SCM only if it is disabled; otherwise it is kept
+and flagged as invalid until the unit file is restored or the service is
+disabled. `daemon-reload` does not create SCM entries for new units — run
 `enable` for those.
 
 `start`, `stop`, and `restart` operate directly on SCM. `status` and
@@ -254,6 +258,10 @@ by a blank line and the last lines from the current/latest managed file, or from
 the explicit `file:`/`append:` target if one is configured. For a `.timer` the
 tail comes from the service it activates.
 
+When a unit's configuration cannot be loaded (unreadable or unparseable unit
+file, or a missing unit file for an enabled service), `status` and `list-units`
+append `invalid` to the state and print a `Config:` line with the error.
+
 Log timestamps are written in UTC with a `Z` suffix. Timer `last_run`, `next_run`
 and `active_since` values in `timers.json` are also stored in UTC.
 
@@ -264,9 +272,9 @@ Set `"log_level": "debug"` in `config.json` for verbose daemon/runner logs.
 | Command | Route | Description |
 |---|---|---|
 | `--version` | — | Print the systemctl version |
-| `enable <unit>.service` | SCM | Create/update the service and set automatic start; a service account password is taken from the flags below if given |
+| `enable <unit>.service` | SCM | Create the service (requires a valid unit file) or update an existing one and set automatic start; a service account password is taken from the flags below if given |
 | `enable <unit>.service --password-file <path>` / `--password-stdin` | SCM | Supply the service account password without putting it on the command line |
-| `disable <unit>.service` | SCM | Stop and remove the service from SCM |
+| `disable <unit>.service` | SCM | Set the service start type to disabled (does not stop or remove it; `daemon-reload` removes it once the unit file is gone) |
 | `start/stop/restart <unit>.service` | SCM | Control the service |
 | `status <unit>` | daemon | systemd-style status block and log tail |
 | `list-units` | daemon | List known units and states |

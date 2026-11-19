@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -79,11 +80,12 @@ func (d *Daemon) status(id unit.ID) (protocol.StatusResponse, error) {
 	}
 
 	name := id.String()
-	cached, hasCached := d.State(name)
+	cached, _ := d.State(name)
 	scmStatus, scmErr := d.manager.QueryStatus(id.Name)
 
 	data, readErr := d.store.ReadUnit(name)
-	if scmErr != nil && !hasCached && readErr != nil {
+	if errors.Is(scmErr, scm.ErrNotFound) && readErr != nil {
+		d.forgetUnit(id)
 		return protocol.StatusResponse{}, fmt.Errorf("unit %s not found", name)
 	}
 
@@ -166,6 +168,7 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 	}
 
 	seen := make(map[string]bool)
+	existing := make(map[string]bool)
 	units := make([]protocol.UnitStatus, 0, len(unitNames)+len(configs))
 	for _, name := range unitNames {
 		id, err := unit.ParseID(name)
@@ -173,6 +176,7 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 			slog.Warn("daemon: skip unit", "unit", name, "error", err)
 			continue
 		}
+		existing[id.String()] = true
 		if id.Name == config.ManagerServiceName {
 			continue
 		}
@@ -210,10 +214,11 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 	}
 
 	for _, cfg := range configs {
+		id := unit.ID{Name: cfg.Name, Type: unit.TypeService}
+		existing[id.String()] = true
 		if cfg.Name == config.ManagerServiceName {
 			continue
 		}
-		id := unit.ID{Name: cfg.Name, Type: unit.TypeService}
 		if seen[id.String()] {
 			continue
 		}
@@ -224,8 +229,11 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 			SystemdState: string(state.Status()),
 			SCMState:     state.SCMState,
 			Description:  cfg.Description,
+			ConfigError:  d.configError(id),
 		})
 	}
+
+	d.pruneStates(existing)
 
 	sort.Slice(units, func(i, j int) bool {
 		return units[i].Unit < units[j].Unit
@@ -246,6 +254,7 @@ func (d *Daemon) timerStatus(id unit.ID) (protocol.StatusResponse, error) {
 	name := id.String()
 	data, err := d.store.ReadUnit(name)
 	if err != nil {
+		d.forgetUnit(id)
 		return protocol.StatusResponse{}, fmt.Errorf("unit %s not found", name)
 	}
 	parsed, parseErr := unit.Parse(id, data)

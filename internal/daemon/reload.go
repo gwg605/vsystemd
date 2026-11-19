@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -8,6 +9,8 @@ import (
 	"github.com/gwg605/vsystemd/internal/scm"
 	"github.com/gwg605/vsystemd/internal/unit"
 )
+
+var errConfigurationMissing = errors.New("configuration file is missing")
 
 func (d *Daemon) reload() error {
 	slog.Info("daemon: reload started")
@@ -23,17 +26,29 @@ func (d *Daemon) reload() error {
 		return fmt.Errorf("list services: %w", err)
 	}
 
+	existing, err := d.existingUnits(services)
+	if err != nil {
+		slog.Error("daemon: reload failed to list units", "error", err)
+		return err
+	}
+
 	for _, service := range services {
 		if service.Name == config.ManagerServiceName {
 			continue
 		}
 		desiredConfig, ok := desired[service.Name]
 		if !ok {
+			id := unit.ID{Name: service.Name, Type: unit.TypeService}
 			if present[service.Name] {
 				slog.Warn("daemon: keeping service with invalid unit", "service", service.Name)
 				continue
 			}
-			slog.Info("daemon: removing service", "service", service.Name)
+			if service.StartType != scm.StartTypeDisabled {
+				d.setConfigError(id, errConfigurationMissing)
+				slog.Warn("daemon: keeping service without unit file", "service", service.Name)
+				continue
+			}
+			slog.Info("daemon: removing disabled service without unit file", "service", service.Name)
 			if err := d.manager.StopService(service.Name); err != nil {
 				slog.Error("daemon: stop service failed", "service", service.Name, "error", err)
 				return fmt.Errorf("stop service %s: %w", service.Name, err)
@@ -42,6 +57,7 @@ func (d *Daemon) reload() error {
 				slog.Error("daemon: delete service failed", "service", service.Name, "error", err)
 				return fmt.Errorf("delete service %s: %w", service.Name, err)
 			}
+			d.forgetUnit(id)
 			continue
 		}
 		slog.Info("daemon: updating service", "service", service.Name)
@@ -50,12 +66,32 @@ func (d *Daemon) reload() error {
 			return fmt.Errorf("update service %s: %w", service.Name, err)
 		}
 	}
+	d.pruneStates(existing)
 	if err := d.reloadTimers(); err != nil {
 		slog.Error("daemon: reload timers failed", "error", err)
 		return err
 	}
 	slog.Info("daemon: reload finished")
 	return nil
+}
+
+func (d *Daemon) existingUnits(services []scm.ServiceConfig) (map[string]bool, error) {
+	names, err := d.store.ListUnits()
+	if err != nil {
+		return nil, fmt.Errorf("list units: %w", err)
+	}
+	existing := make(map[string]bool, len(names)+len(services))
+	for _, name := range names {
+		id, err := unit.ParseID(name)
+		if err != nil {
+			continue
+		}
+		existing[id.String()] = true
+	}
+	for _, cfg := range services {
+		existing[unit.ID{Name: cfg.Name, Type: unit.TypeService}.String()] = true
+	}
+	return existing, nil
 }
 
 func (d *Daemon) desiredServices() (map[string]scm.ServiceConfig, map[string]bool, error) {

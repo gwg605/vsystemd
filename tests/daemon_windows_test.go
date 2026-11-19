@@ -19,7 +19,7 @@ func TestDaemonReload(t *testing.T) {
 	if err := env.manager.CreateService(scm.ServiceConfig{Name: "app", BinaryPath: "old"}); err != nil {
 		t.Fatalf("CreateService(app) error = %v", err)
 	}
-	if err := env.manager.CreateService(scm.ServiceConfig{Name: "removed", BinaryPath: "old"}); err != nil {
+	if err := env.manager.CreateService(scm.ServiceConfig{Name: "removed", BinaryPath: "old", StartType: scm.StartTypeDisabled}); err != nil {
 		t.Fatalf("CreateService(removed) error = %v", err)
 	}
 

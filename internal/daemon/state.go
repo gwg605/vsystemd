@@ -108,3 +108,19 @@ func (d *Daemon) configError(id unit.ID) string {
 	defer d.mu.Unlock()
 	return d.states[id.String()].ConfigError
 }
+
+func (d *Daemon) forgetUnit(id unit.ID) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.states, id.String())
+}
+
+func (d *Daemon) pruneStates(existing map[string]bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for name := range d.states {
+		if !existing[name] {
+			delete(d.states, name)
+		}
+	}
+}

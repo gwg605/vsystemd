@@ -95,6 +95,8 @@ type ServiceStatus struct {
 type Manager interface {
 	CreateService(cfg ServiceConfig) error
 	UpdateService(cfg ServiceConfig) error
+	// SetStartType changes only the start type of an existing managed service.
+	SetStartType(name string, startType StartType) error
 	DeleteService(name string) error
 	StartService(name string) error
 	StopService(name string) error
