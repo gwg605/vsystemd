@@ -2,9 +2,8 @@ package control
 
 import (
 	"fmt"
-	"os"
-	"strings"
 
+	"github.com/gwg605/vsystemd/internal/env"
 	"github.com/gwg605/vsystemd/internal/storage"
 	"github.com/gwg605/vsystemd/internal/unit"
 )
@@ -33,19 +32,6 @@ func unitPathWarnings(store storage.Storage, parsed *unit.UnitFile) []string {
 		}
 	}
 
-	for _, file := range parsed.Service.EnvironmentFiles {
-		optional := strings.HasPrefix(file, "-")
-		path := strings.TrimPrefix(file, "-")
-		if err := store.ValidatePath(path); err != nil {
-			warnings = append(warnings, err.Error())
-			continue
-		}
-		if err := store.InputReadable(path); err != nil {
-			if optional && os.IsNotExist(err) {
-				continue
-			}
-			warnings = append(warnings, fmt.Sprintf("environment file %s: %v", path, err))
-		}
-	}
+	warnings = append(warnings, env.ValidateFiles(parsed.Service.EnvironmentFiles)...)
 	return warnings
 }

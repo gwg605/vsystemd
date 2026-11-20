@@ -3,16 +3,11 @@ package runner
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"reflect"
-	"sort"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/gwg605/vsystemd/internal/unit"
-	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
 )
 
 func TestProcessHelper(t *testing.T) {
@@ -121,138 +116,4 @@ func TestParseCommand(t *testing.T) {
 	if !reflect.DeepEqual(cmd.args, []string{"--flag", "hello world"}) {
 		t.Errorf("args = %v", cmd.args)
 	}
-}
-
-func TestExpandEnv(t *testing.T) {
-	lookup := map[string]string{"path": `C:\bin`, "name": "app"}
-	tests := map[string]string{
-		"%PATH%":     `C:\bin`,
-		"x-%NAME%-y": "x-app-y",
-		"%MISSING%":  "",
-		"100%%":      "100%",
-		"%%PATH%%":   "%PATH%",
-		"%PATH":      "%PATH",
-		"plain":      "plain",
-	}
-	for input, want := range tests {
-		if got := expandEnv(input, lookup); got != want {
-			t.Errorf("expandEnv(%q) = %q, want %q", input, got, want)
-		}
-	}
-}
-
-func TestBuildEnvironment(t *testing.T) {
-	t.Setenv("MY_PARENT", "parent-value")
-	service := &unit.ServiceUnit{
-		Environment: map[string]string{"UNIT_VAR": "unit-value", "OVERRIDE": "from-unit"},
-	}
-	defaults := environmentDefaults{
-		Inherit: []string{"MY_PARENT", "NOT_SET_VAR"},
-		Vars: map[string]string{
-			"DERIVED":  "pre-%MY_PARENT%-post",
-			"OVERRIDE": "from-config",
-		},
-	}
-
-	env := environmentMap(t, service, defaults)
-
-	if env["MY_PARENT"] != "parent-value" {
-		t.Errorf("MY_PARENT = %q", env["MY_PARENT"])
-	}
-	if _, ok := env["NOT_SET_VAR"]; ok {
-		t.Errorf("NOT_SET_VAR should not be set")
-	}
-	if env["DERIVED"] != "pre-parent-value-post" {
-		t.Errorf("DERIVED = %q", env["DERIVED"])
-	}
-	if env["OVERRIDE"] != "from-unit" {
-		t.Errorf("OVERRIDE = %q, want unit value to win", env["OVERRIDE"])
-	}
-	if env["UNIT_VAR"] != "unit-value" {
-		t.Errorf("UNIT_VAR = %q", env["UNIT_VAR"])
-	}
-}
-
-func TestBuildEnvironmentCaseInsensitive(t *testing.T) {
-	service := &unit.ServiceUnit{
-		Environment: map[string]string{"OVERRIDE": "from-unit"},
-	}
-	defaults := environmentDefaults{
-		Vars: map[string]string{"Override": "from-config"},
-	}
-
-	lines, err := buildEnvironment(storagefake.New(), service, defaults)
-	if err != nil {
-		t.Fatalf("buildEnvironment() error = %v", err)
-	}
-	env := make(map[string]string)
-	for _, line := range lines {
-		key, value, _ := strings.Cut(line, "=")
-		env[key] = value
-	}
-
-	if env["Override"] != "from-unit" {
-		t.Errorf("Override = %q, want the unit value and the first-seen name", env["Override"])
-	}
-	if _, ok := env["OVERRIDE"]; ok {
-		t.Error("duplicate OVERRIDE entry present")
-	}
-	if !sort.StringsAreSorted(lines) {
-		t.Errorf("environment is not sorted: %v", lines)
-	}
-}
-
-func TestBuildEnvironmentFile(t *testing.T) {
-	dir := t.TempDir()
-	envFile := filepath.Join(dir, "app.env")
-	if err := os.WriteFile(envFile, []byte("FROM_FILE=filevalue\n# comment\n"), 0o644); err != nil {
-		t.Fatalf("write env file: %v", err)
-	}
-	service := &unit.ServiceUnit{
-		EnvironmentFiles: []string{envFile, "-" + filepath.Join(dir, "missing.env")},
-		Environment:      map[string]string{"FROM_UNIT": "unitvalue"},
-	}
-
-	env := environmentMap(t, service, environmentDefaults{})
-
-	if env["FROM_FILE"] != "filevalue" {
-		t.Errorf("FROM_FILE = %q", env["FROM_FILE"])
-	}
-	if env["FROM_UNIT"] != "unitvalue" {
-		t.Errorf("FROM_UNIT = %q", env["FROM_UNIT"])
-	}
-}
-
-func TestRequiredEnvironmentFileMissing(t *testing.T) {
-	service := &unit.ServiceUnit{
-		EnvironmentFiles: []string{filepath.Join(t.TempDir(), "missing.env")},
-	}
-	if _, err := buildEnvironment(storagefake.New(), service, environmentDefaults{}); err == nil {
-		t.Fatal("buildEnvironment() error = nil")
-	}
-}
-
-func TestEnvironmentFileInvalidPathRejected(t *testing.T) {
-	separator := string(filepath.Separator)
-	dotdot := t.TempDir() + separator + ".." + separator + "x.env"
-	for _, file := range []string{"relative.env", "-relative.env", dotdot, "-" + dotdot} {
-		service := &unit.ServiceUnit{EnvironmentFiles: []string{file}}
-		if _, err := buildEnvironment(storagefake.New(), service, environmentDefaults{}); err == nil {
-			t.Errorf("buildEnvironment() error = nil for EnvironmentFile %q, want error", file)
-		}
-	}
-}
-
-func environmentMap(t *testing.T, service *unit.ServiceUnit, defaults environmentDefaults) map[string]string {
-	t.Helper()
-	lines, err := buildEnvironment(storagefake.New(), service, defaults)
-	if err != nil {
-		t.Fatalf("buildEnvironment() error = %v", err)
-	}
-	env := make(map[string]string)
-	for _, line := range lines {
-		key, value, _ := strings.Cut(line, "=")
-		env[key] = value
-	}
-	return env
 }
