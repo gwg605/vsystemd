@@ -161,18 +161,12 @@ func (d *Daemon) status(id unit.ID) (protocol.StatusResponse, error) {
 }
 
 func serviceEnabled(manager scm.Manager, name string) *bool {
-	configs, err := manager.ListServices()
+	cfg, err := manager.GetService(name)
 	if err != nil {
 		return nil
 	}
-	for _, cfg := range configs {
-		if cfg.Name != name {
-			continue
-		}
-		enabled := cfg.StartType != scm.StartTypeDisabled && cfg.StartType != scm.StartTypeManual
-		return &enabled
-	}
-	return nil
+	enabled := cfg.StartType != scm.StartTypeDisabled && cfg.StartType != scm.StartTypeManual
+	return &enabled
 }
 
 func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {

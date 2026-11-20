@@ -105,6 +105,8 @@ type Manager interface {
 	// ListServices returns the configuration of every managed service. The
 	// password is never populated because SCM does not expose it.
 	ListServices() ([]ServiceConfig, error)
+	// GetService returns the configuration of a single managed service.
+	GetService(name string) (ServiceConfig, error)
 	// GetServiceByHandle returns the configuration of the managed service the
 	// process handle belongs to, or ErrNotService if it is not a service.
 	GetServiceByHandle(handle ProcessHandle) (ServiceConfig, error)
