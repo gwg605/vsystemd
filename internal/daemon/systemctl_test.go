@@ -182,14 +182,9 @@ func TestListUnits(t *testing.T) {
 	store.WriteUnit("app.service", []byte("[Unit]\nDescription=App\n[Service]\nExecStart=x\n"))
 	store.WriteUnit("job.timer", []byte("[Unit]\nDescription=Job\n[Timer]\nOnCalendar=daily\n"))
 	lastRun := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
-	nextRun := time.Date(2026, 11, 9, 11, 0, 0, 0, time.UTC)
-	if err := store.WriteTimerState("job.timer", storage.TimerState{
-		Enabled: true,
-		LastRun: lastRun,
-		NextRun: nextRun,
-	}); err != nil {
-		t.Fatalf("WriteTimerState() error = %v", err)
-	}
+	writeTimerDB(t, store, map[string]timerRecord{
+		"job.timer": {OnCalendar: []string{"daily"}, Enabled: true, LastRun: lastRun},
+	})
 
 	manager := scmfake.New()
 	if err := manager.CreateService(scm.ServiceConfig{Name: "app"}); err != nil {
@@ -202,7 +197,10 @@ func TestListUnits(t *testing.T) {
 		t.Fatalf("CreateService(orphan) error = %v", err)
 	}
 
-	_, client := newControlClient(t, manager, store)
+	daemon, client := newControlClient(t, manager, store)
+	if err := daemon.Start(); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
 	response := controlRequest(t, client, protocol.TypeListUnits, nil)
 	if response.Type != protocol.TypeListUnitsResponse || response.RequestID == "" {
 		t.Fatalf("response = %+v", response)
@@ -239,13 +237,13 @@ func TestListUnits(t *testing.T) {
 	if timer.Type != "timer" || timer.Enabled == nil || !*timer.Enabled {
 		t.Errorf("timer = %+v", timer)
 	}
-	if timer.Running == nil || *timer.Running {
+	if timer.Running == nil || !*timer.Running {
 		t.Errorf("timer running = %v", timer.Running)
 	}
 	if timer.LastRun == nil || !timer.LastRun.Equal(lastRun) {
 		t.Errorf("timer last run = %v", timer.LastRun)
 	}
-	if timer.NextRun == nil || !timer.NextRun.Equal(nextRun) {
+	if timer.NextRun == nil || timer.NextRun.IsZero() {
 		t.Errorf("timer next run = %v", timer.NextRun)
 	}
 

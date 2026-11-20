@@ -11,6 +11,7 @@ import (
 	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/scm"
 	"github.com/gwg605/vsystemd/internal/storage"
+	"github.com/gwg605/vsystemd/internal/timermgr"
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
@@ -58,13 +59,14 @@ type unitEntry struct {
 type UnitsList struct {
 	store   storage.Storage
 	manager scm.Manager
+	timers  *timermgr.Manager
 
 	mu    sync.RWMutex
 	units map[string]unitEntry
 }
 
-func newUnitsList(store storage.Storage, manager scm.Manager) *UnitsList {
-	return &UnitsList{store: store, manager: manager, units: make(map[string]unitEntry)}
+func newUnitsList(store storage.Storage, manager scm.Manager, timers *timermgr.Manager) *UnitsList {
+	return &UnitsList{store: store, manager: manager, timers: timers, units: make(map[string]unitEntry)}
 }
 
 func (l *UnitsList) entry(id unit.ID) (unitEntry, bool) {
@@ -210,15 +212,12 @@ func (l *UnitsList) mergeServices(next map[string]unitEntry, present map[string]
 }
 
 func (l *UnitsList) mergeTimers(next map[string]unitEntry, present map[string]bool) error {
-	states, err := l.store.ListTimerStates()
+	configs, err := l.timers.ListTimers()
 	if err != nil {
-		return fmt.Errorf("list timer states: %w", err)
+		return fmt.Errorf("list timers: %w", err)
 	}
-	for name, state := range states {
-		if !state.Enabled {
-			continue
-		}
-		id, err := unit.ParseID(name)
+	for _, cfg := range configs {
+		id, err := unit.ParseID(cfg.Name)
 		if err != nil || id.Type != unit.TypeTimer {
 			continue
 		}

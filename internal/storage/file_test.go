@@ -1,12 +1,11 @@
 package storage
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
-	"time"
 )
 
 func newTestStorage(t *testing.T) (Storage, Paths) {
@@ -57,91 +56,47 @@ func TestFileUnits(t *testing.T) {
 	}
 }
 
-func TestFileTimerStates(t *testing.T) {
+func TestFileTimers(t *testing.T) {
 	st, _ := newTestStorage(t)
-	state := TimerState{
-		Enabled: true,
-		LastRun: time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC),
-		NextRun: time.Date(2026, 11, 9, 11, 0, 0, 0, time.UTC),
+
+	data, err := st.ReadTimers()
+	if err != nil {
+		t.Fatalf("ReadTimers() error = %v", err)
+	}
+	if data != nil {
+		t.Errorf("ReadTimers() = %q for missing file, want nil", data)
 	}
 
-	got, err := st.ReadTimerState("job.timer")
-	if err != nil {
-		t.Fatalf("ReadTimerState() error = %v", err)
+	first := []byte(`{"job.timer":{"enabled":true}}`)
+	if err := st.WriteTimers(first); err != nil {
+		t.Fatalf("WriteTimers() error = %v", err)
 	}
-	if got != (TimerState{}) {
-		t.Errorf("ReadTimerState() = %+v for missing timer", got)
+	got, err := st.ReadTimers()
+	if err != nil {
+		t.Fatalf("ReadTimers() error = %v", err)
+	}
+	if !bytes.Equal(got, first) {
+		t.Errorf("ReadTimers() = %q, want %q", got, first)
 	}
 
-	if err := st.WriteTimerState("job.timer", state); err != nil {
-		t.Fatalf("WriteTimerState() error = %v", err)
+	second := []byte(`{"job.timer":{"enabled":false}}`)
+	if err := st.WriteTimers(second); err != nil {
+		t.Fatalf("WriteTimers() error = %v", err)
 	}
-	got, err = st.ReadTimerState("job.timer")
+	got, err = st.ReadTimers()
 	if err != nil {
-		t.Fatalf("ReadTimerState() error = %v", err)
+		t.Fatalf("ReadTimers() error = %v", err)
 	}
-	if got != state {
-		t.Errorf("ReadTimerState() = %+v", got)
-	}
-
-	states, err := st.ListTimerStates()
-	if err != nil {
-		t.Fatalf("ListTimerStates() error = %v", err)
-	}
-	if !reflect.DeepEqual(states, map[string]TimerState{"job.timer": state}) {
-		t.Errorf("ListTimerStates() = %v", states)
-	}
-
-	if err := st.DeleteTimerState("job.timer"); err != nil {
-		t.Fatalf("DeleteTimerState() error = %v", err)
-	}
-	states, err = st.ListTimerStates()
-	if err != nil {
-		t.Fatalf("ListTimerStates() error = %v", err)
-	}
-	if len(states) != 0 {
-		t.Errorf("ListTimerStates() = %v after delete", states)
+	if !bytes.Equal(got, second) {
+		t.Errorf("ReadTimers() = %q, want %q", got, second)
 	}
 }
 
-func TestTimerStateStoredInUTC(t *testing.T) {
-	st, paths := newTestStorage(t)
-	zone := time.FixedZone("MSK", 3*60*60)
-	input := TimerState{
-		Enabled:     true,
-		LastRun:     time.Date(2026, 11, 9, 10, 0, 0, 0, zone),
-		NextRun:     time.Date(2026, 11, 9, 11, 0, 0, 0, zone),
-		ActiveSince: time.Date(2026, 11, 9, 9, 0, 0, 0, zone),
-	}
-
-	if err := st.WriteTimerState("job.timer", input); err != nil {
-		t.Fatalf("WriteTimerState() error = %v", err)
-	}
-	got, err := st.ReadTimerState("job.timer")
-	if err != nil {
-		t.Fatalf("ReadTimerState() error = %v", err)
-	}
-	if got.LastRun.Location() != time.UTC || got.NextRun.Location() != time.UTC || got.ActiveSince.Location() != time.UTC {
-		t.Errorf("locations = %v/%v/%v", got.LastRun.Location(), got.NextRun.Location(), got.ActiveSince.Location())
-	}
-	if !got.LastRun.Equal(input.LastRun) || !got.NextRun.Equal(input.NextRun) || !got.ActiveSince.Equal(input.ActiveSince) {
-		t.Errorf("times changed: %+v", got)
-	}
-
-	data, err := os.ReadFile(paths.TimersFile)
-	if err != nil {
-		t.Fatalf("read timer file: %v", err)
-	}
-	if !strings.Contains(string(data), "Z\"") {
-		t.Errorf("timer file has no UTC timestamps: %s", data)
-	}
-}
-
-func TestTimerStateWriteLeavesNoTempFile(t *testing.T) {
+func TestWriteTimersLeavesNoTempFile(t *testing.T) {
 	st, paths := newTestStorage(t)
 
-	if err := st.WriteTimerState("job.timer", TimerState{Enabled: true}); err != nil {
-		t.Fatalf("WriteTimerState() error = %v", err)
+	if err := st.WriteTimers([]byte(`{}`)); err != nil {
+		t.Fatalf("WriteTimers() error = %v", err)
 	}
 
 	entries, err := os.ReadDir(filepath.Dir(paths.TimersFile))
@@ -157,27 +112,6 @@ func TestTimerStateWriteLeavesNoTempFile(t *testing.T) {
 	}
 	if !reflect.DeepEqual(names, []string{"timers.json"}) {
 		t.Errorf("timer dir = %v, want [timers.json]", names)
-	}
-}
-
-func TestTimerStateWriteReplacesExisting(t *testing.T) {
-	st, _ := newTestStorage(t)
-
-	first := TimerState{Enabled: true, LastRun: time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)}
-	if err := st.WriteTimerState("job.timer", first); err != nil {
-		t.Fatalf("WriteTimerState() error = %v", err)
-	}
-	second := TimerState{Enabled: true, LastRun: time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)}
-	if err := st.WriteTimerState("job.timer", second); err != nil {
-		t.Fatalf("WriteTimerState() error = %v", err)
-	}
-
-	got, err := st.ReadTimerState("job.timer")
-	if err != nil {
-		t.Fatalf("ReadTimerState() error = %v", err)
-	}
-	if got != second {
-		t.Errorf("ReadTimerState() = %+v, want %+v", got, second)
 	}
 }
 

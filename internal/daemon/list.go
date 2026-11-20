@@ -66,13 +66,13 @@ func (d *Daemon) runnerState(id unit.ID) ServiceState {
 }
 
 func fillTimerState(entry *protocol.UnitStatus, d *Daemon, id unit.ID) {
-	timerState, err := d.store.ReadTimerState(id.String())
+	status, err := d.timers.QueryStatus(id.String())
 	if err != nil {
 		return
 	}
 
-	enabled := timerState.Enabled
-	running := d.sched.Has(id.String())
+	enabled := status.Enabled
+	running := status.Running
 	entry.Enabled = &enabled
 	entry.Running = &running
 	if running {
@@ -80,12 +80,12 @@ func fillTimerState(entry *protocol.UnitStatus, d *Daemon, id unit.ID) {
 	} else {
 		entry.SystemdState = string(SystemdInactiveDead)
 	}
-	if !timerState.LastRun.IsZero() {
-		lastRun := timerState.LastRun
+	if !status.LastRun.IsZero() {
+		lastRun := status.LastRun
 		entry.LastRun = &lastRun
 	}
-	if !timerState.NextRun.IsZero() {
-		nextRun := timerState.NextRun
+	if !status.NextRun.IsZero() {
+		nextRun := status.NextRun
 		entry.NextRun = &nextRun
 	}
 }

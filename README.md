@@ -43,9 +43,9 @@ internal/
   logwriter/         timestamped log files with rotation
   protocol/          IPC message types (systemctl/runner <-> daemon)
   runner/            process management, restart logic, SCM handler, logs
-  scheduler/         OnCalendar scheduler
+  timermgr/          timer database and OnCalendar scheduler
   scm/               Windows SCM integration (+ fake/)
-  storage/           unit files and timer persistence (+ fake/)
+  storage/           unit files and raw timer persistence (+ fake/)
   transport/         transport interface, request matching (+ fake/)
   transport/pipe/    named pipe transport
   unit/              unit file parser and models
@@ -207,8 +207,8 @@ or timer commands until then.
 
 - `enable` persists `enabled=true`; the timer is started automatically when the
   daemon starts;
-- `start` adds the timer to the scheduler immediately;
-- `stop` removes it from the scheduler and clears `next_run` while keeping
+- `start` puts the timer in the schedule immediately;
+- `stop` removes it from the schedule and clears `next_run` while keeping
   `last_run` for history;
 - `disable` persists `enabled=false` but does not stop a running timer.
 
@@ -220,7 +220,7 @@ Inspect timers with:
 .\bin\systemctl.exe list-timers --all
 ```
 
-`list-timers` shows only timers currently in the scheduler; `--all` also lists
+`list-timers` shows only timers currently in the schedule; `--all` also lists
 timers that are stopped or disabled.
 
 Timer times are displayed in the local timezone with a numeric UTC offset.
@@ -287,7 +287,7 @@ Set `"log_level": "debug"` in `config.json` for verbose daemon/runner logs.
 | `list-timers` | daemon | List active timers with next/last run times; `--all` includes stopped and disabled timers |
 | `daemon-reload` | daemon | Rescan units and update SCM entries |
 | `enable/disable <unit>.timer` | daemon | Persist timer enabled state |
-| `start/stop <unit>.timer` | daemon | Add/remove timer from scheduler |
+| `start/stop <unit>.timer` | daemon | Add/remove timer from the schedule |
 | `--log [none\|stdout\|stderr]` | — | Enable diagnostic logging (default `none`) |
 
 `systemctl` must be run elevated: the daemon rejects control connections from

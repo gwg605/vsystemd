@@ -83,7 +83,7 @@ because `service2` declares a dependency on `service1`.
 ```
 
 `enable` persists `enabled=true` (the timer will be started automatically when the
-daemon starts). `start` adds the timer to the scheduler immediately.
+daemon starts). `start` puts the timer in the schedule immediately.
 
 Inspect the timer:
 

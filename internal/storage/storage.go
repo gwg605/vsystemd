@@ -2,38 +2,18 @@ package storage
 
 import (
 	"path/filepath"
-	"time"
 )
 
 const defaultRoot = `C:\ProgramData\vsystemd`
 
-type TimerState struct {
-	Enabled     bool      `json:"enabled"`
-	LastRun     time.Time `json:"last_run"`
-	NextRun     time.Time `json:"next_run"`
-	ActiveSince time.Time `json:"active_since"`
-}
-
-func (s TimerState) UTC() TimerState {
-	if !s.LastRun.IsZero() {
-		s.LastRun = s.LastRun.UTC()
-	}
-	if !s.NextRun.IsZero() {
-		s.NextRun = s.NextRun.UTC()
-	}
-	if !s.ActiveSince.IsZero() {
-		s.ActiveSince = s.ActiveSince.UTC()
-	}
-	return s
-}
-
 type Storage interface {
 	ListUnits() ([]string, error)
 	ReadUnit(name string) ([]byte, error)
-	ReadTimerState(name string) (TimerState, error)
-	WriteTimerState(name string, state TimerState) error
-	DeleteTimerState(name string) error
-	ListTimerStates() (map[string]TimerState, error)
+	// ReadTimers returns the raw contents of the timers file, or nil when it
+	// does not exist. The layout of the data is owned by the caller.
+	ReadTimers() ([]byte, error)
+	// WriteTimers atomically replaces the timers file with data.
+	WriteTimers(data []byte) error
 
 	// ValidatePath rejects a path that is not a plain absolute file path.
 	ValidatePath(path string) error

@@ -20,7 +20,7 @@ func (d *Daemon) reload() error {
 		slog.Error("daemon: reload failed to update services", "error", err)
 		return err
 	}
-	if err := d.reloadTimers(); err != nil {
+	if err := d.syncTimers(); err != nil {
 		slog.Error("daemon: reload timers failed", "error", err)
 		return err
 	}

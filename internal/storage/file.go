@@ -1,8 +1,6 @@
 package storage
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -54,76 +52,24 @@ func (s *fileStorage) ReadUnit(name string) ([]byte, error) {
 	return data, nil
 }
 
-func (s *fileStorage) ReadTimerState(name string) (TimerState, error) {
+func (s *fileStorage) ReadTimers() ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	states, err := s.loadTimerStates()
-	if err != nil {
-		return TimerState{}, err
-	}
-	return states[name], nil
-}
-
-func (s *fileStorage) WriteTimerState(name string, state TimerState) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	states, err := s.loadTimerStates()
-	if err != nil {
-		return err
-	}
-	states[name] = state.UTC()
-	return s.saveTimerStates(states)
-}
-
-func (s *fileStorage) DeleteTimerState(name string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	states, err := s.loadTimerStates()
-	if err != nil {
-		return err
-	}
-	delete(states, name)
-	return s.saveTimerStates(states)
-}
-
-func (s *fileStorage) ListTimerStates() (map[string]TimerState, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.loadTimerStates()
-}
-
-func (s *fileStorage) loadTimerStates() (map[string]TimerState, error) {
-	states := make(map[string]TimerState)
 	data, err := os.ReadFile(s.paths.TimersFile)
 	if errors.Is(err, os.ErrNotExist) {
-		return states, nil
+		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read timer state: %w", err)
+		return nil, fmt.Errorf("read timers: %w", err)
 	}
-	if len(bytes.TrimSpace(data)) == 0 {
-		return states, nil
-	}
-	if err := json.Unmarshal(data, &states); err != nil {
-		return nil, fmt.Errorf("parse timer state: %w", err)
-	}
-	for name, state := range states {
-		states[name] = state.UTC()
-	}
-	return states, nil
+	return data, nil
 }
 
-func (s *fileStorage) saveTimerStates(states map[string]TimerState) error {
-	normalized := make(map[string]TimerState, len(states))
-	for name, state := range states {
-		normalized[name] = state.UTC()
-	}
-	data, err := json.MarshalIndent(normalized, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode timer state: %w", err)
-	}
+func (s *fileStorage) WriteTimers(data []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := writeFileAtomic(s.paths.TimersFile, data, 0o644); err != nil {
-		return fmt.Errorf("write timer state: %w", err)
+		return fmt.Errorf("write timers: %w", err)
 	}
 	return nil
 }
