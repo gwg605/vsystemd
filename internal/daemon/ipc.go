@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -158,4 +159,92 @@ func (d *Daemon) updateFromEvent(event protocol.StateEvent) {
 		"runner_state", event.State,
 		"pid", state.PID,
 		"exit_code", state.ExitCode)
+}
+
+func (d *Daemon) handleStatusRequest(source transport.Peer, msg transport.Message) error {
+	var request protocol.StatusRequest
+	if err := json.Unmarshal(msg.Payload, &request); err != nil {
+		return d.respondError(source, msg.ID, err)
+	}
+	id, err := unit.ParseID(request.Unit)
+	if err != nil {
+		return d.respondError(source, msg.ID, err)
+	}
+	slog.Debug("daemon: status request", "from", source.String(), "unit", id)
+
+	response, err := d.status(id)
+	if err != nil {
+		return d.respondError(source, msg.ID, err)
+	}
+	return d.respond(source, protocol.TypeStatusResponse, msg.ID, response)
+}
+
+func (d *Daemon) handleListUnits(source transport.Peer, msg transport.Message) error {
+	slog.Debug("daemon: list units request", "from", source.String())
+	response, err := d.listUnits()
+	if err != nil {
+		return d.respondError(source, msg.ID, err)
+	}
+	return d.respond(source, protocol.TypeListUnitsResponse, msg.ID, response)
+}
+
+func (d *Daemon) handleDaemonReload(source transport.Peer, msg transport.Message) error {
+	slog.Info("daemon: reload request", "from", source.String())
+	if err := d.reload(); err != nil {
+		return d.respondError(source, msg.ID, err)
+	}
+	return d.respond(source, protocol.TypeReloadResult, msg.ID, protocol.ReloadResult{Success: true})
+}
+
+func (d *Daemon) handleVerifyUnitFile(source transport.Peer, msg transport.Message) error {
+	var request protocol.VerifyUnitFileRequest
+	if err := json.Unmarshal(msg.Payload, &request); err != nil {
+		return d.respondError(source, msg.ID, err)
+	}
+	id, err := unit.ParseID(request.Unit)
+	if err != nil {
+		return d.respondError(source, msg.ID, err)
+	}
+	if err := d.verifyUnitFile(id, request.Content); err != nil {
+		return d.respondError(source, msg.ID, err)
+	}
+	return d.respond(source, protocol.TypeVerifyUnitResult, msg.ID, protocol.VerifyUnitResult{Success: true})
+}
+
+// verifyUnitFile checks that the given content matches the unit in the list.
+func (d *Daemon) verifyUnitFile(id unit.ID, content []byte) error {
+	entry, ok := d.units.entry(id)
+	if !ok {
+		return fmt.Errorf("unit %s is not in the daemon list; run daemon-reload", id)
+	}
+	if entry.loadState != LoadStateLoaded {
+		return fmt.Errorf("unit %s: %s", id, entry.loadError)
+	}
+	if sha256.Sum256(content) != entry.contentHash {
+		return fmt.Errorf("unit %s changed since daemon-reload", id)
+	}
+	return nil
+}
+
+func (d *Daemon) respond(target transport.Peer, msgType, requestID string, payload any) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		slog.Error("daemon: encode response failed", "type", msgType, "error", err)
+		return fmt.Errorf("encode %s: %w", msgType, err)
+	}
+	if err := d.transport.Send(target, transport.Message{
+		Type:      msgType,
+		RequestID: requestID,
+		Payload:   data,
+	}); err != nil {
+		slog.Warn("daemon: send response failed", "to", target.String(), "type", msgType, "error", err)
+		return err
+	}
+	slog.Debug("daemon: response sent", "to", target.String(), "type", msgType, "request_id", requestID)
+	return nil
+}
+
+func (d *Daemon) respondError(target transport.Peer, requestID string, err error) error {
+	slog.Warn("daemon: request failed", "to", target.String(), "request_id", requestID, "error", err)
+	return d.respond(target, protocol.TypeErrorResponse, requestID, protocol.ErrorResponse{Error: err.Error()})
 }
