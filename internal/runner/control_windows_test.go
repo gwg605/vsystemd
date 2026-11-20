@@ -10,7 +10,7 @@ import (
 
 	"golang.org/x/sys/windows/svc"
 
-	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
+	"github.com/gwg605/vsystemd/internal/env"
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
@@ -46,7 +46,7 @@ func waitForFile(t *testing.T, path string) []byte {
 }
 
 func newTestHandler(service *unit.ServiceUnit) *controlHandler {
-	return newControlHandler(service, newRestartController(service), environmentDefaults{}, nil, storagefake.New())
+	return newControlHandler(service, newRestartController(service), env.Defaults{}, nil)
 }
 
 func TestControlHandlerStop(t *testing.T) {

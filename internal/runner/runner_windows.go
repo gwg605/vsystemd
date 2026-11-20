@@ -12,6 +12,7 @@ import (
 	"golang.org/x/sys/windows/svc"
 
 	"github.com/gwg605/vsystemd/internal/config"
+	"github.com/gwg605/vsystemd/internal/env"
 	"github.com/gwg605/vsystemd/internal/logwriter"
 	"github.com/gwg605/vsystemd/internal/storage"
 	"github.com/gwg605/vsystemd/internal/transport"
@@ -70,12 +71,12 @@ func NewRunner(name string, store storage.Factory, newTransport transport.Factor
 		return nil, fmt.Errorf("create log streamer: %w", err)
 	}
 
-	env := environmentDefaults{
+	defaults := env.Defaults{
 		Inherit: cfg.Environment.InheritList(),
 		Vars:    cfg.Environment.Vars,
 	}
 	restart := newRestartController(parsed.Service)
-	handler := newControlHandler(parsed.Service, restart, env, logs, st)
+	handler := newControlHandler(parsed.Service, restart, defaults, logs)
 
 	tr, err := newTransport(transport.NewPeer(transport.PeerRunner, id.String(), false), nil)
 	if err != nil {

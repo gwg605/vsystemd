@@ -12,8 +12,8 @@ import (
 
 	"golang.org/x/sys/windows/svc"
 
+	"github.com/gwg605/vsystemd/internal/env"
 	"github.com/gwg605/vsystemd/internal/protocol"
-	"github.com/gwg605/vsystemd/internal/storage"
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
@@ -79,19 +79,17 @@ type controlHandler struct {
 	service     *unit.ServiceUnit
 	restart     *restartController
 	reporter    *stateReporter
-	env         environmentDefaults
+	defaults    env.Defaults
 	logs        *logStreamer
-	store       storage.Storage
 	stopTimeout time.Duration
 }
 
-func newControlHandler(service *unit.ServiceUnit, restart *restartController, env environmentDefaults, logs *logStreamer, store storage.Storage) *controlHandler {
+func newControlHandler(service *unit.ServiceUnit, restart *restartController, defaults env.Defaults, logs *logStreamer) *controlHandler {
 	return &controlHandler{
 		service:     service,
 		restart:     restart,
-		env:         env,
+		defaults:    defaults,
 		logs:        logs,
-		store:       store,
 		stopTimeout: resolveStopTimeout(service),
 	}
 }
@@ -525,7 +523,7 @@ func (h *controlHandler) newProcess(role opRole, line string, report func(opResu
 }
 
 func (h *controlHandler) environment() ([]string, error) {
-	return buildEnvironment(h.store, h.service, h.env)
+	return env.Build(h.service.Environment, h.service.EnvironmentFiles, h.defaults)
 }
 
 func (h *controlHandler) writers() (io.Writer, io.Writer) {
