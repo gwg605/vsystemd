@@ -6,6 +6,7 @@ import (
 
 	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/scm"
+	"github.com/gwg605/vsystemd/internal/svcconfig"
 	"github.com/gwg605/vsystemd/internal/unit"
 )
 
@@ -74,7 +75,7 @@ func (d *Daemon) desiredServices() map[string]scm.ServiceConfig {
 		if entry.id.Type != unit.TypeService || entry.loadState != LoadStateLoaded || entry.parsed == nil {
 			continue
 		}
-		services[entry.id.Name] = scm.NewServiceConfig(entry.parsed, d.binaryPath, scm.StartTypeNoChange)
+		services[entry.id.Name] = svcconfig.FromUnit(entry.parsed, d.binaryPath, scm.StartTypeNoChange)
 	}
 	return services
 }

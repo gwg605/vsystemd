@@ -2,8 +2,6 @@ package scm
 
 import (
 	"errors"
-
-	"github.com/gwg605/vsystemd/internal/unit"
 )
 
 type StartType int
@@ -70,19 +68,6 @@ type ServiceConfig struct {
 // by read operations; only the scm package reads it.
 func (c *ServiceConfig) SetPassword(password string) {
 	c.password = password
-}
-
-// NewServiceConfig translates a service unit into an SCM service configuration.
-// The password is left unset; set it with SetPassword when required.
-func NewServiceConfig(file *unit.UnitFile, binaryPath string, startType StartType) ServiceConfig {
-	return ServiceConfig{
-		Name:         file.Name.Name,
-		BinaryPath:   `"` + binaryPath + `" --mode=run --unit=` + file.Name.String(),
-		StartType:    startType,
-		Dependencies: file.Dependencies(),
-		User:         NewAccount(file.Service.User, file.Name.Name),
-		Description:  file.Description,
-	}
 }
 
 type ServiceStatus struct {
