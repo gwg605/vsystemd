@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/scheduler"
 	"github.com/gwg605/vsystemd/internal/transport"
@@ -114,11 +113,13 @@ func (d *Daemon) validateTimer(id unit.ID) error {
 	if id.Type != unit.TypeTimer {
 		return fmt.Errorf("unit %s is not a timer", id)
 	}
-	if _, err := d.loadUnit(id); err != nil {
-		d.markLoadError(id, err)
-		return fmt.Errorf("timer %s: %w", id, err)
+	entry, ok := d.units.entry(id)
+	if !ok {
+		return fmt.Errorf("timer %s not found", id)
 	}
-	d.clearLoadError(id)
+	if entry.loadState != LoadStateLoaded {
+		return fmt.Errorf("timer %s: %s", id, entry.loadError)
+	}
 	return nil
 }
 
@@ -126,35 +127,21 @@ func (d *Daemon) timerDefinition(id unit.ID) (scheduler.Timer, error) {
 	if id.Type != unit.TypeTimer {
 		return scheduler.Timer{}, fmt.Errorf("unit %s is not a timer", id)
 	}
-	parsed, err := d.loadUnit(id)
+	entry, ok := d.units.entry(id)
+	if !ok || entry.parsed == nil {
+		return scheduler.Timer{}, fmt.Errorf("timer %s not found", id)
+	}
+	if entry.loadState != LoadStateLoaded {
+		return scheduler.Timer{}, fmt.Errorf("timer %s: %s", id, entry.loadError)
+	}
+	target, err := timerTarget(entry.parsed.Timer, id)
 	if err != nil {
-		d.markLoadError(id, err)
-		return scheduler.Timer{}, fmt.Errorf("timer %s: %w", id, err)
-	}
-	for _, warning := range parsed.Warnings {
-		slog.Warn("daemon: ignored timer directive", "unit", id, "warning", warning)
-	}
-	if len(parsed.Timer.OnCalendar) == 0 {
-		err := fmt.Errorf("timer %s has no OnCalendar", id)
-		d.setLoadError(id, LoadStateBadSetting, err)
 		return scheduler.Timer{}, err
 	}
-
-	target, err := timerTarget(parsed.Timer, id)
-	if err != nil {
-		d.setLoadError(id, LoadStateBadSetting, err)
-		return scheduler.Timer{}, err
-	}
-	if target.Name == config.ManagerServiceName {
-		err := fmt.Errorf("timer %s targets the vsystemd manager service", id)
-		d.setLoadError(id, LoadStateBadSetting, err)
-		return scheduler.Timer{}, err
-	}
-	d.clearLoadError(id)
 	return scheduler.Timer{
 		Name:       id.String(),
 		Service:    target.Name,
-		OnCalendar: parsed.Timer.OnCalendar,
+		OnCalendar: entry.parsed.Timer.OnCalendar,
 	}, nil
 }
 
@@ -169,39 +156,30 @@ func timerTarget(timer *unit.TimerUnit, id unit.ID) (unit.ID, error) {
 
 func (d *Daemon) startTimers() error {
 	slog.Info("daemon: starting enabled timers")
-	units, err := d.store.ListUnits()
-	if err != nil {
-		return fmt.Errorf("list units: %w", err)
-	}
 	states, err := d.store.ListTimerStates()
 	if err != nil {
 		return fmt.Errorf("list timer states: %w", err)
 	}
 
 	known := make(map[string]bool)
-	for _, name := range units {
-		id, err := unit.ParseID(name)
+	for _, entry := range d.units.all() {
+		if entry.id.Type != unit.TypeTimer {
+			continue
+		}
+		known[entry.id.String()] = true
+		if !states[entry.id.String()].Enabled {
+			continue
+		}
+		definition, err := d.timerDefinition(entry.id)
 		if err != nil {
-			slog.Warn("daemon: skip timer", "unit", name, "error", err)
-			continue
-		}
-		if id.Type != unit.TypeTimer {
-			continue
-		}
-		known[id.String()] = true
-		if !states[id.String()].Enabled {
-			continue
-		}
-		definition, err := d.timerDefinition(id)
-		if err != nil {
-			slog.Warn("daemon: skip timer", "unit", id, "error", err)
+			slog.Warn("daemon: skip timer", "unit", entry.id, "error", err)
 			continue
 		}
 		if err := d.sched.Add(definition); err != nil {
-			slog.Warn("daemon: add timer to scheduler failed", "unit", id, "error", err)
+			slog.Warn("daemon: add timer to scheduler failed", "unit", entry.id, "error", err)
 			continue
 		}
-		slog.Info("daemon: timer started", "unit", id, "service", definition.Service)
+		slog.Info("daemon: timer started", "unit", entry.id, "service", definition.Service)
 	}
 
 	d.timerMu.Lock()
@@ -212,10 +190,6 @@ func (d *Daemon) startTimers() error {
 
 func (d *Daemon) reloadTimers() error {
 	slog.Info("daemon: reloading timers")
-	units, err := d.store.ListUnits()
-	if err != nil {
-		return fmt.Errorf("list units: %w", err)
-	}
 	states, err := d.store.ListTimerStates()
 	if err != nil {
 		return fmt.Errorf("list timer states: %w", err)
@@ -223,19 +197,14 @@ func (d *Daemon) reloadTimers() error {
 
 	names := make(map[string]bool)
 	var definitions []scheduler.Timer
-	for _, name := range units {
-		id, err := unit.ParseID(name)
-		if err != nil {
-			slog.Warn("daemon: skip timer", "unit", name, "error", err)
+	for _, entry := range d.units.all() {
+		if entry.id.Type != unit.TypeTimer {
 			continue
 		}
-		if id.Type != unit.TypeTimer {
-			continue
-		}
-		names[id.String()] = true
-		definition, err := d.timerDefinition(id)
+		names[entry.id.String()] = true
+		definition, err := d.timerDefinition(entry.id)
 		if err != nil {
-			slog.Warn("daemon: skip timer", "unit", id, "error", err)
+			slog.Warn("daemon: skip timer", "unit", entry.id, "error", err)
 			continue
 		}
 		definitions = append(definitions, definition)

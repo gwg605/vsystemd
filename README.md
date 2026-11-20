@@ -172,10 +172,11 @@ The daemon must be running for `status`, `list-units`, `list-timers`,
 
 ### 5. Enable and start services
 
-`enable` reads the unit file, creates or updates the SCM service, sets its start
-type to automatic, and registers `vsystemd.exe --mode=run --unit=<unit>` as its
-binary. Creating a service requires a valid unit file; updating an existing
-service without a unit file only changes its start type:
+`enable` reads the unit file, asks the daemon to verify it against the daemon's
+unit list, then creates or updates the SCM service, sets its start type to
+automatic, and registers `vsystemd.exe --mode=run --unit=<unit>` as its binary.
+A valid unit file is required, and it must match the version known to the daemon,
+so run `daemon-reload` after editing a unit file:
 
 ```powershell
 .\bin\systemctl.exe daemon-reload
@@ -189,6 +190,10 @@ file was deleted is removed from SCM only if it is disabled; otherwise it is kep
 and flagged as invalid until the unit file is restored or the service is
 disabled. `daemon-reload` does not create SCM entries for new units — run
 `enable` for those.
+
+The daemon keeps its own in-memory copy of the units and only refreshes it on
+`daemon-reload`, so edits to unit files are not visible to `status`, `list-units`
+or timer commands until then.
 
 `start`, `stop`, and `restart` operate directly on SCM. `status` and
 `list-units` are served by the daemon.
@@ -273,7 +278,7 @@ Set `"log_level": "debug"` in `config.json` for verbose daemon/runner logs.
 | Command | Route | Description |
 |---|---|---|
 | `--version` | — | Print the systemctl version |
-| `enable <unit>.service` | SCM | Create the service (requires a valid unit file) or update an existing one and set automatic start; a service account password is taken from the flags below if given |
+| `enable <unit>.service` | SCM+daemon | Verify the unit file against the daemon's list, then create or update the service and set automatic start; requires a prior `daemon-reload`. A service account password is taken from the flags below if given |
 | `enable <unit>.service --password-file <path>` / `--password-stdin` | SCM | Supply the service account password without putting it on the command line |
 | `disable <unit>.service` | SCM | Set the service start type to disabled (does not stop or remove it; `daemon-reload` removes it once the unit file is gone) |
 | `start/stop/restart <unit>.service` | SCM | Control the service |

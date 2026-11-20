@@ -72,6 +72,25 @@ func (c *Controller) DaemonReload() error {
 	return nil
 }
 
+func (c *Controller) verifyUnitFile(id unit.ID, content []byte) error {
+	response, err := c.request(protocol.TypeVerifyUnitFile, protocol.VerifyUnitFileRequest{Unit: id.String(), Content: content})
+	if err != nil {
+		return err
+	}
+	if err := responseError(response); err != nil {
+		return err
+	}
+
+	var result protocol.VerifyUnitResult
+	if err := json.Unmarshal(response.Payload, &result); err != nil {
+		return err
+	}
+	if !result.Success {
+		return fmt.Errorf("daemon rejected unit %s", id)
+	}
+	return nil
+}
+
 func (c *Controller) timerRequest(msgType string, request protocol.TimerRequest) error {
 	response, err := c.request(msgType, request)
 	if err != nil {

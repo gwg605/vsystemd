@@ -18,6 +18,8 @@ const (
 	TypeTimerStart        = "timer_start"
 	TypeTimerStop         = "timer_stop"
 	TypeTimerResult       = "timer_result"
+	TypeVerifyUnitFile    = "verify_unit_file"
+	TypeVerifyUnitResult  = "verify_unit_result"
 )
 
 type StatusRequest struct {
@@ -83,4 +85,13 @@ type TimerResult struct {
 	Running bool      `json:"running"`
 	LastRun time.Time `json:"last_run"`
 	NextRun time.Time `json:"next_run"`
+}
+
+type VerifyUnitFileRequest struct {
+	Unit    string `json:"unit"`
+	Content []byte `json:"content"`
+}
+
+type VerifyUnitResult struct {
+	Success bool `json:"success"`
 }

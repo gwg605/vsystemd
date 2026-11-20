@@ -153,9 +153,6 @@ func (s *Scheduler) Reload(timers []Timer) error {
 		if !ok {
 			slog.Info("scheduler: removing timer on reload", "unit", name)
 			s.stop(name)
-			if err := s.store.DeleteTimerState(name); err != nil {
-				slog.Warn("scheduler: delete timer state failed", "unit", name, "error", err)
-			}
 			continue
 		}
 		if changed(old, newTimer) {
