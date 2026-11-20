@@ -56,11 +56,12 @@ All other timer directives (`OnUnitActiveSec=`, `OnUnitInactiveSec=`, `Persisten
 
 ### `systemctl enable foo.service`
 
-- A valid unit file is required unless the service already exists in SCM:
-  - unit missing, service missing → error
-  - unit present, service missing → `CreateService()` with `START_TYPE = AUTO_START`
-  - unit missing, service present → only `START_TYPE = AUTO_START` is changed
-  - unit present, service present → `ChangeServiceConfig(START_TYPE = AUTO_START)` with updated parameters
+- A valid unit file is required; a missing file is an error
+- The file must match the version known to the daemon: systemctl sends it to the
+  daemon (`VerifyUnitFile`). A unit unknown to the daemon, with a load error, or
+  differing from the daemon's copy is rejected — run `daemon-reload` first
+- On success: `CreateService()` (new) or `ChangeServiceConfig()` (existing) with
+  `START_TYPE = AUTO_START` and the unit's parameters
 - Password: taken from `--password`, `--password-file`, or `--password-stdin` (only one source). If none is given, an empty password is passed; there is no interactive prompt
 
 ### `systemctl disable foo.service`
@@ -73,14 +74,21 @@ All other timer directives (`OnUnitActiveSec=`, `OnUnitInactiveSec=`, `Persisten
 ### `systemctl daemon-reload`
 
 - Routed through daemon (Channel 2)
-- Daemon scans `system\` directory, diffs against currently registered services in SCM:
-  - Unit exists and parses, SCM entry exists → `ChangeServiceConfig()` (update)
-  - Unit exists but does not parse, SCM entry exists → kept with load state `bad-setting`
-  - Unit missing, SCM entry exists and `START_TYPE = DISABLED` → `StopService()` + `DeleteService()`
-  - Unit missing, SCM entry exists and enabled → kept with load state `not-found`
-  - Unit exists, SCM entry missing → no action (wait for `enable`)
-- On Windows, `ListServices()` returns only services created by vsystemd (marked with `LoadOrderGroup = "vsystemd"`), so unrelated SCM services are never modified
-- Daemon reloads OnCalendar schedules from updated timer unit files
+- The daemon rebuilds its in-memory unit list (the source of truth) from the
+  `system\` directory, SCM services and enabled timers:
+  - file present and parses → `loaded` (the last successful parse is kept as the target)
+  - file present but does not parse → `bad-setting` (last successful parse kept)
+  - file missing, SCM entry exists (or timer `enabled`) → `not-found`
+  - no file, no SCM entry, not an enabled timer → dropped
+- It then diffs the list against SCM:
+  - entry loaded, SCM entry exists → `ChangeServiceConfig()` (update)
+  - entry present but not loaded, SCM entry exists → kept
+  - file missing, SCM entry exists and `START_TYPE = DISABLED` → `StopService()` + `DeleteService()`
+  - file missing, SCM entry exists and enabled → kept with load state `not-found`
+  - unit exists, SCM entry missing → no action (wait for `enable`)
+- A failure to read the `system\` directory or list SCM services aborts the reload
+  with an error (the current list is kept); the daemon stays running
+- Daemon reloads OnCalendar schedules from the list
 
 ### `systemctl start/stop/restart`
 
@@ -157,6 +165,23 @@ Commands routed through daemon:
 
 Commands that bypass daemon (direct SCM):
 - `enable`, `disable`, `start`, `stop`, `restart` for `.service` units
+
+---
+
+## Unit List
+
+The daemon keeps an in-memory unit list (`UnitsList`) as the source of truth for
+unit configuration. It is built at startup and updated only by `daemon-reload`;
+reads (`status`, `list-units`, timer commands, runner-account checks) never touch
+unit files.
+
+- Each entry keeps the last successfully parsed unit (`parsed`), the current
+  load state (`loaded`/`bad-setting`/`error`/`not-found`), the load error, and
+  the file's content hash.
+- File edits are not visible to the daemon until `daemon-reload` (like systemd).
+  `enable` therefore requires a prior `daemon-reload`.
+- `enable/disable/start/stop/restart` for `.service` units bypass the daemon and
+  read SCM directly; `enable` additionally verifies the file with the daemon.
 
 ---
 

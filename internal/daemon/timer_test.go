@@ -207,12 +207,15 @@ func TestReloadTimers(t *testing.T) {
 		t.Error("new enabled timer was not started")
 	}
 
+	if !daemon.units.keys()["b.timer"] {
+		t.Error("orphan timer was dropped from the list")
+	}
 	state, err := store.ReadTimerState("b.timer")
 	if err != nil {
 		t.Fatalf("ReadTimerState(b) error = %v", err)
 	}
-	if state.Enabled || !state.LastRun.IsZero() || !state.NextRun.IsZero() {
-		t.Errorf("removed timer state = %+v", state)
+	if !state.Enabled {
+		t.Errorf("orphan timer state was cleared: %+v", state)
 	}
 }
 

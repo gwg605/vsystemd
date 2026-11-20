@@ -27,6 +27,7 @@ type Daemon struct {
 	logRotation logwriter.Rotation
 	transport   transport.Transport
 	sched       *scheduler.Scheduler
+	units       *UnitsList
 
 	mu     sync.Mutex
 	states map[string]ServiceState
@@ -52,9 +53,13 @@ func New(manager scm.Manager, store storage.Storage, binaryPath, logsDir string,
 		logRotation: logRotation,
 		states:      make(map[string]ServiceState),
 		sched:       scheduler.New(manager, store),
+		units:       newUnitsList(store, manager),
 		knownTimers: make(map[string]bool),
 		loopStop:    make(chan struct{}),
 		loopDone:    make(chan struct{}),
+	}
+	if err := daemon.units.rebuild(); err != nil {
+		slog.Warn("daemon: initial unit list build failed", "error", err)
 	}
 	tr, err := newTransport(transport.NewPeer(transport.PeerDaemon, daemonPeer, false), daemon.handle)
 	if err != nil {

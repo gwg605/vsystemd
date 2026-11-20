@@ -1,20 +1,43 @@
 package control
 
 import (
+	"encoding/json"
 	"testing"
 
+	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/scm"
 	scmfake "github.com/gwg605/vsystemd/internal/scm/fake"
 	"github.com/gwg605/vsystemd/internal/storage"
 	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
+	"github.com/gwg605/vsystemd/internal/transport"
+	transportfake "github.com/gwg605/vsystemd/internal/transport/fake"
 	"github.com/gwg605/vsystemd/internal/unit"
 )
+
+func newVerifyTransport(t *testing.T) transport.Factory {
+	t.Helper()
+	network := transportfake.NewNetwork()
+	var daemon *transportfake.Transport
+	daemon = network.New(transport.DefaultConfig(), transport.NewPeer(transport.PeerDaemon, "daemon", false), func(source transport.Peer, msg transport.Message) error {
+		if msg.Type != protocol.TypeVerifyUnitFile {
+			return nil
+		}
+		payload, err := json.Marshal(protocol.VerifyUnitResult{Success: true})
+		if err != nil {
+			return err
+		}
+		return daemon.Send(source, transport.Message{Type: protocol.TypeVerifyUnitResult, RequestID: msg.ID, Payload: payload})
+	})
+	return func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
+		return network.New(transport.DefaultConfig(), local, handler), nil
+	}
+}
 
 func newTestController(t *testing.T) (*Controller, *scmfake.Manager, *storagefake.Storage) {
 	t.Helper()
 	manager := scmfake.New()
 	store := storagefake.New()
-	ctrl := New(manager, nil, func() (storage.Storage, error) { return store, nil })
+	ctrl := New(manager, newVerifyTransport(t), func() (storage.Storage, error) { return store, nil })
 	return ctrl, manager, store
 }
 
@@ -75,31 +98,12 @@ func TestEnableRejectsManager(t *testing.T) {
 	}
 }
 
-func TestEnablePresentWithoutUnitFile(t *testing.T) {
+func TestEnableWithoutUnitFile(t *testing.T) {
 	ctrl, manager, _ := newTestController(t)
-	if err := manager.CreateService(scm.ServiceConfig{Name: "app", BinaryPath: "old", StartType: scm.StartTypeDisabled}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: "app", StartType: scm.StartTypeDisabled}); err != nil {
 		t.Fatalf("CreateService() error = %v", err)
 	}
 
-	id := unit.ID{Name: "app", Type: unit.TypeService}
-	if _, err := ctrl.Enable(id, `C:\vsystemd\vsystemd.exe`, "", "", false); err != nil {
-		t.Fatalf("Enable() error = %v", err)
-	}
-
-	cfg, err := manager.Config("app")
-	if err != nil {
-		t.Fatalf("Config() error = %v", err)
-	}
-	if cfg.StartType != scm.StartTypeAutomatic {
-		t.Errorf("StartType = %v", cfg.StartType)
-	}
-	if cfg.BinaryPath != "old" {
-		t.Errorf("BinaryPath = %q, want unchanged", cfg.BinaryPath)
-	}
-}
-
-func TestEnableMissingWithoutUnitFile(t *testing.T) {
-	ctrl, _, _ := newTestController(t)
 	id := unit.ID{Name: "app", Type: unit.TypeService}
 	if _, err := ctrl.Enable(id, `C:\vsystemd\vsystemd.exe`, "", "", false); err == nil {
 		t.Fatal("Enable() error = nil without a unit file")

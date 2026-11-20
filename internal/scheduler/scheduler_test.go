@@ -200,12 +200,4 @@ func TestReloadDiff(t *testing.T) {
 	if newA == oldA {
 		t.Error("changed timer was not restarted")
 	}
-
-	state, err := store.ReadTimerState("b.timer")
-	if err != nil {
-		t.Fatalf("ReadTimerState() error = %v", err)
-	}
-	if !state.LastRun.IsZero() || !state.NextRun.IsZero() || state.Enabled {
-		t.Errorf("removed timer state = %+v", state)
-	}
 }

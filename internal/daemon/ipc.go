@@ -49,6 +49,11 @@ func (d *Daemon) handle(source transport.Peer, msg transport.Message) error {
 			return d.respondError(source, msg.ID, err)
 		}
 		return d.handleTimerStop(source, msg)
+	case protocol.TypeVerifyUnitFile:
+		if err := authorizeControl(source); err != nil {
+			return d.respondError(source, msg.ID, err)
+		}
+		return d.handleVerifyUnitFile(source, msg)
 	default:
 		return nil
 	}
@@ -88,7 +93,7 @@ func (d *Daemon) handleStateEvent(source transport.Peer, msg transport.Message) 
 }
 
 // verifyRunnerAccount checks that the account the service runs under matches the
-// User= declared by its unit. A missing unit or config is not an error here.
+// User= declared by its unit. A unit that is unknown to the daemon is rejected.
 func (d *Daemon) verifyRunnerAccount(source transport.Peer) error {
 	account := source.ServiceConfig().User
 	if account == "" {
@@ -96,17 +101,13 @@ func (d *Daemon) verifyRunnerAccount(source transport.Peer) error {
 	}
 	id, err := unit.ParseID(source.Name())
 	if err != nil {
-		return nil
+		return fmt.Errorf("forbidden: state event from %s with invalid unit name", source)
 	}
-	data, err := d.store.ReadUnit(id.String())
-	if err != nil {
-		return nil
+	entry, ok := d.units.entry(id)
+	if !ok || entry.parsed == nil || entry.parsed.Service == nil {
+		return fmt.Errorf("forbidden: state event from %s for unknown unit", source)
 	}
-	parsed, err := unit.Parse(id, data)
-	if err != nil || parsed.Service == nil {
-		return nil
-	}
-	expected := scm.NewAccount(parsed.Service.User, id.Name)
+	expected := scm.NewAccount(entry.parsed.Service.User, id.Name)
 	if !strings.EqualFold(string(account), string(expected)) {
 		return fmt.Errorf("forbidden: state event from %s with unexpected account %q", source, account)
 	}
@@ -151,10 +152,6 @@ func (d *Daemon) updateFromEvent(event protocol.StateEvent) {
 	}
 	if had && previous.RunnerState == state.RunnerState {
 		state.LastTransition = previous.LastTransition
-	}
-	if had {
-		state.LoadState = previous.LoadState
-		state.LoadError = previous.LoadError
 	}
 	d.states[id.String()] = state
 	d.mu.Unlock()
