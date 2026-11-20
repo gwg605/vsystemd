@@ -269,6 +269,7 @@ func (s *handlerSession) onControl(request svc.ChangeRequest) {
 }
 
 func (s *handlerSession) onStopTimeout() {
+	s.stopTimer = nil
 	s.stopTimerC = nil
 	if s.phase != phaseStopping || s.stage != stageGraceful {
 		return
@@ -280,6 +281,7 @@ func (s *handlerSession) onStopTimeout() {
 }
 
 func (s *handlerSession) onRestartTimeout() {
+	s.restartTimer = nil
 	s.restartTimerC = nil
 	if s.phase != phaseAutoRestart {
 		return
