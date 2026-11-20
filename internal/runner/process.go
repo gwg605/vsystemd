@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/gwg605/vsystemd/internal/storage"
@@ -24,13 +25,22 @@ func buildEnvironment(store storage.Storage, service *unit.ServiceUnit, defaults
 	parent := parentEnvironment()
 
 	env := make(map[string]string)
+	names := make(map[string]string)
+	set := func(name, value string) {
+		lower := strings.ToLower(name)
+		if _, ok := names[lower]; !ok {
+			names[lower] = name
+		}
+		env[lower] = value
+	}
+
 	for _, name := range defaults.Inherit {
 		if value, ok := parent[strings.ToLower(name)]; ok {
-			env[name] = value
+			set(name, value)
 		}
 	}
 	for key, value := range defaults.Vars {
-		env[key] = expandEnv(value, parent)
+		set(key, expandEnv(value, parent))
 	}
 
 	for _, file := range service.EnvironmentFiles {
@@ -56,18 +66,19 @@ func buildEnvironment(store storage.Storage, service *unit.ServiceUnit, defaults
 			if !ok || key == "" {
 				return nil, fmt.Errorf("%s:%d: invalid environment line", path, lineNo+1)
 			}
-			env[key] = strings.TrimSpace(value)
+			set(key, strings.TrimSpace(value))
 		}
 	}
 
 	for key, value := range service.Environment {
-		env[key] = value
+		set(key, value)
 	}
 
 	result := make([]string, 0, len(env))
-	for key, value := range env {
-		result = append(result, key+"="+value)
+	for lower, value := range env {
+		result = append(result, names[lower]+"="+value)
 	}
+	sort.Strings(result)
 	return result, nil
 }
 

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -169,6 +170,35 @@ func TestBuildEnvironment(t *testing.T) {
 	}
 	if env["UNIT_VAR"] != "unit-value" {
 		t.Errorf("UNIT_VAR = %q", env["UNIT_VAR"])
+	}
+}
+
+func TestBuildEnvironmentCaseInsensitive(t *testing.T) {
+	service := &unit.ServiceUnit{
+		Environment: map[string]string{"OVERRIDE": "from-unit"},
+	}
+	defaults := environmentDefaults{
+		Vars: map[string]string{"Override": "from-config"},
+	}
+
+	lines, err := buildEnvironment(storagefake.New(), service, defaults)
+	if err != nil {
+		t.Fatalf("buildEnvironment() error = %v", err)
+	}
+	env := make(map[string]string)
+	for _, line := range lines {
+		key, value, _ := strings.Cut(line, "=")
+		env[key] = value
+	}
+
+	if env["Override"] != "from-unit" {
+		t.Errorf("Override = %q, want the unit value and the first-seen name", env["Override"])
+	}
+	if _, ok := env["OVERRIDE"]; ok {
+		t.Error("duplicate OVERRIDE entry present")
+	}
+	if !sort.StringsAreSorted(lines) {
+		t.Errorf("environment is not sorted: %v", lines)
 	}
 }
 
