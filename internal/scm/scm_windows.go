@@ -221,6 +221,21 @@ func (windowsManager) ListServices() ([]ServiceConfig, error) {
 	return configs, nil
 }
 
+func (windowsManager) GetService(name string) (ServiceConfig, error) {
+	m, err := connect()
+	if err != nil {
+		return ServiceConfig{}, err
+	}
+	defer m.Disconnect()
+
+	service, config, err := openManaged(m, name)
+	if err != nil {
+		return ServiceConfig{}, err
+	}
+	service.Close()
+	return serviceConfigFrom(name, config), nil
+}
+
 func (windowsManager) GetServiceByHandle(handle ProcessHandle) (ServiceConfig, error) {
 	process := windows.Handle(handle)
 	pid, err := windows.GetProcessId(process)

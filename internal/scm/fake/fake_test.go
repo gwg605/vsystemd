@@ -65,6 +65,14 @@ func TestServiceLifecycle(t *testing.T) {
 		t.Errorf("ListServices() = %v", configs)
 	}
 
+	svc, err := m.GetService("app")
+	if err != nil {
+		t.Fatalf("GetService() error = %v", err)
+	}
+	if svc.StartType != scm.StartTypeDisabled {
+		t.Errorf("GetService() StartType = %v", svc.StartType)
+	}
+
 	statuses, err := m.QueryStatuses()
 	if err != nil {
 		t.Fatalf("QueryStatuses() error = %v", err)
@@ -94,5 +102,8 @@ func TestMissingService(t *testing.T) {
 	}
 	if err := m.DeleteService("missing"); err == nil {
 		t.Error("DeleteService() error = nil")
+	}
+	if _, err := m.GetService("missing"); err == nil {
+		t.Error("GetService() error = nil")
 	}
 }

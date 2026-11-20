@@ -59,11 +59,15 @@ func (m *Manager) UpdateService(cfg scm.ServiceConfig) error {
 }
 
 func (m *Manager) Config(name string) (scm.ServiceConfig, error) {
+	return m.GetService(name)
+}
+
+func (m *Manager) GetService(name string) (scm.ServiceConfig, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	svc, ok := m.services[name]
 	if !ok {
-		return scm.ServiceConfig{}, fmt.Errorf("get config %s: %w", name, scm.ErrNotFound)
+		return scm.ServiceConfig{}, fmt.Errorf("get service %s: %w", name, scm.ErrNotFound)
 	}
 	return svc.config, nil
 }
