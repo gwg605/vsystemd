@@ -104,6 +104,36 @@ func TestStatusResponse(t *testing.T) {
 	}
 }
 
+func TestStatusIgnoresSCMPID(t *testing.T) {
+	store := storagefake.New()
+	store.WriteUnit("app.service", []byte("[Service]\nExecStart=x\n"))
+
+	manager := scmfake.New()
+	if err := manager.CreateService(scm.ServiceConfig{Name: "app"}); err != nil {
+		t.Fatalf("CreateService() error = %v", err)
+	}
+	if err := manager.StartService("app"); err != nil {
+		t.Fatalf("StartService() error = %v", err)
+	}
+
+	_, client := newControlClient(t, manager, store)
+	response := controlRequest(t, client, protocol.TypeStatusRequest, protocol.StatusRequest{Unit: "app.service"})
+	if response.Type != protocol.TypeStatusResponse {
+		t.Fatalf("response type = %q", response.Type)
+	}
+
+	var status protocol.StatusResponse
+	if err := json.Unmarshal(response.Payload, &status); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if status.SCMState != scm.StateRunning {
+		t.Errorf("SCMState = %v", status.SCMState)
+	}
+	if status.PID != 0 {
+		t.Errorf("PID = %d, want 0 (no runner event)", status.PID)
+	}
+}
+
 func TestStatusExplicitLog(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "app.log")
 	if err := os.WriteFile(logPath, []byte("explicit-line\n"), 0o644); err != nil {

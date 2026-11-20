@@ -135,12 +135,6 @@ func (d *Daemon) status(id unit.ID) (protocol.StatusResponse, error) {
 	scmState := scm.State(0)
 	if scmErr == nil {
 		scmState = scmStatus.State
-		if state.PID == 0 {
-			state.PID = scmStatus.PID
-		}
-		if state.ExitCode == 0 && scmStatus.ExitCode != 0 {
-			state.ExitCode = int(scmStatus.ExitCode)
-		}
 	}
 
 	return protocol.StatusResponse{
