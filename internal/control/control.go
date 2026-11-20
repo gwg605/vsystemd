@@ -8,6 +8,7 @@ import (
 	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/scm"
 	"github.com/gwg605/vsystemd/internal/storage"
+	"github.com/gwg605/vsystemd/internal/svcconfig"
 	"github.com/gwg605/vsystemd/internal/transport"
 	"github.com/gwg605/vsystemd/internal/unit"
 )
@@ -55,7 +56,7 @@ func (c *Controller) Enable(id unit.ID, executable string, password, passwordFil
 	if err != nil {
 		return warnings, err
 	}
-	cfg := scm.NewServiceConfig(parsed, executable, scm.StartTypeAutomatic)
+	cfg := svcconfig.FromUnit(parsed, executable, scm.StartTypeAutomatic)
 	cfg.SetPassword(resolvedPassword)
 
 	exists, err := c.serviceExists(id.Name)
