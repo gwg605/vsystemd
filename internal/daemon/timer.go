@@ -241,3 +241,53 @@ func (d *Daemon) reloadTimers() error {
 	slog.Info("daemon: timers reloaded", "count", len(desired))
 	return nil
 }
+
+func (d *Daemon) timerStatus(id unit.ID) (protocol.StatusResponse, error) {
+	name := id.String()
+	entry, inList := d.units.entry(id)
+	if !inList {
+		d.forgetUnit(id)
+		return protocol.StatusResponse{}, fmt.Errorf("unit %s not found", name)
+	}
+
+	state, err := d.store.ReadTimerState(name)
+	if err != nil {
+		return protocol.StatusResponse{}, fmt.Errorf("read timer state %s: %w", name, err)
+	}
+
+	running := d.sched.Has(name)
+	enabled := state.Enabled
+	systemdState := SystemdInactiveDead
+	if running {
+		systemdState = SystemdActiveWaiting
+	}
+
+	response := protocol.StatusResponse{
+		Unit:         name,
+		SystemdState: string(systemdState),
+		Enabled:      &enabled,
+		Running:      &running,
+		LoadState:    string(entry.loadState),
+		LoadError:    entry.loadError,
+	}
+	if entry.parsed != nil {
+		response.Description = entry.parsed.Description
+		if target, err := timerTarget(entry.parsed.Timer, id); err == nil {
+			response.Activates = target.String()
+			response.LogTail = d.logTail(target)
+		}
+	}
+	if running && !state.ActiveSince.IsZero() {
+		activeSince := state.ActiveSince
+		response.ActiveSince = &activeSince
+	}
+	if !state.LastRun.IsZero() {
+		lastRun := state.LastRun
+		response.LastRun = &lastRun
+	}
+	if !state.NextRun.IsZero() {
+		nextRun := state.NextRun
+		response.NextRun = &nextRun
+	}
+	return response, nil
+}
