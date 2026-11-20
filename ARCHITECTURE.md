@@ -10,7 +10,7 @@ Goal: use identical systemd unit files across cross-platform projects, replacing
 Two binaries:
 
 - `vsystemd.exe` — dual-mode binary:
-  - `--mode=daemon` — Windows Service (always running), manages state, reload, SCM registration, OnCalendar scheduler
+  - `--mode=daemon` — Windows Service (always running), manages state, reload, SCM registration, OnCalendar timer manager
   - `--mode=run --unit=foo.service` — registered in SCM as the executable for each service; manages child process lifecycle
 - `systemctl.exe` — CLI compatible with systemctl commands
 
@@ -39,7 +39,7 @@ Supported unit types: `.service`, `.timer`
 
 ### [Timer] directives (v1)
 
-- `OnCalendar=` — handled by daemon internal scheduler
+- `OnCalendar=` — handled by daemon internal timer manager
 - `OnBootSec=` / `OnStartupSec=` — mapped to Task Scheduler BootTrigger with delay
 - `Unit=` — target service name (defaults to same name as timer)
 
@@ -215,14 +215,17 @@ func (s ServiceState) Status() SystemdState
 
 Two mechanisms depending on directive:
 
-### OnCalendar= → daemon internal scheduler
+### OnCalendar= → daemon internal timer manager
 
-Daemon implements a full `OnCalendar` expression parser and scheduler in-process.
+Daemon implements a full `OnCalendar` expression parser and scheduler in-process (`internal/timermgr`).
 
 - Full systemd calendar expression syntax supported (weekdays, ranges, lists, steps, wildcards)
 - Full IANA timezone support via embedded `time/tzdata` (`import _ "time/tzdata"`)
-- Scheduler fires by calling SCM `StartService()` directly
+- The manager is independent of the SCM: when a timer fires it reports the event (timer name + status) through a callback, and the daemon resolves the target service from the timer unit and calls SCM `StartService()`
+- The manager loads its database on `New`, runs the scheduler on `Start` (which schedules every `enabled` timer), and shuts down on `Stop`
+- The timer database (`timers.json`) holds each timer's configuration and administrative `enabled` flag; `running` is runtime-only and is re-derived on `Start`
 - `systemctl stop <unit>.timer` removes the timer from the scheduler and clears its `next_run`, keeping `last_run` for history
+- A timer is deleted only when it is both disabled and stopped
 - Missed ticks are not caught up — if daemon was stopped, scheduling resumes from next future tick
 - If daemon is down, `OnCalendar` timers do not fire (accepted limitation)
 

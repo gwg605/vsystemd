@@ -15,16 +15,15 @@ type Storage struct {
 	mu     sync.Mutex
 	units  map[string][]byte
 	logs   map[string][]byte
-	timers map[string]storage.TimerState
+	timers []byte
 }
 
 var _ storage.Storage = (*Storage)(nil)
 
 func New() *Storage {
 	return &Storage{
-		units:  make(map[string][]byte),
-		logs:   make(map[string][]byte),
-		timers: make(map[string]storage.TimerState),
+		units: make(map[string][]byte),
+		logs:  make(map[string][]byte),
 	}
 }
 
@@ -64,34 +63,17 @@ func (s *Storage) ReadUnit(name string) ([]byte, error) {
 	return append([]byte(nil), data...), nil
 }
 
-func (s *Storage) ReadTimerState(name string) (storage.TimerState, error) {
+func (s *Storage) ReadTimers() ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.timers[name].UTC(), nil
+	return append([]byte(nil), s.timers...), nil
 }
 
-func (s *Storage) WriteTimerState(name string, state storage.TimerState) error {
+func (s *Storage) WriteTimers(data []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.timers[name] = state.UTC()
+	s.timers = append([]byte(nil), data...)
 	return nil
-}
-
-func (s *Storage) DeleteTimerState(name string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.timers, name)
-	return nil
-}
-
-func (s *Storage) ListTimerStates() (map[string]storage.TimerState, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	states := make(map[string]storage.TimerState, len(s.timers))
-	for name, state := range s.timers {
-		states[name] = state.UTC()
-	}
-	return states, nil
 }
 
 func (s *Storage) ValidatePath(path string) error { return storage.ValidatePath(path) }

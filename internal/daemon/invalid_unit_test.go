@@ -7,7 +7,6 @@ import (
 	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/scm"
 	scmfake "github.com/gwg605/vsystemd/internal/scm/fake"
-	"github.com/gwg605/vsystemd/internal/storage"
 	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
 	"github.com/gwg605/vsystemd/internal/transport"
 	"github.com/gwg605/vsystemd/internal/unit"
@@ -128,17 +127,17 @@ func TestReloadSkipsInvalidUnit(t *testing.T) {
 func TestReloadTimersSkipsInvalidTimer(t *testing.T) {
 	store := storagefake.New()
 	store.WriteUnit("broken.timer", []byte(brokenUnit))
-	if err := store.WriteTimerState("broken.timer", storage.TimerState{Enabled: true}); err != nil {
-		t.Fatalf("WriteTimerState() error = %v", err)
-	}
+	writeTimerDB(t, store, map[string]timerRecord{
+		"broken.timer": {OnCalendar: []string{"daily"}, Enabled: true},
+	})
 
 	daemon, _ := newTestDaemon(t, scmfake.New(), store)
 	if err := daemon.reload(); err != nil {
 		t.Fatalf("reload() error = %v", err)
 	}
 
-	if _, err := store.ReadTimerState("broken.timer"); err != nil {
-		t.Errorf("ReadTimerState() error = %v", err)
+	if _, err := daemon.timers.QueryStatus("broken.timer"); err != nil {
+		t.Errorf("broken timer was dropped: %v", err)
 	}
 	if entry, _ := daemon.units.entry(unit.ID{Name: "broken", Type: unit.TypeTimer}); entry.loadState != LoadStateBadSetting {
 		t.Errorf("broken timer LoadState = %q", entry.loadState)

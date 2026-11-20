@@ -11,9 +11,9 @@ import (
 
 	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/logwriter"
-	"github.com/gwg605/vsystemd/internal/scheduler"
 	"github.com/gwg605/vsystemd/internal/scm"
 	"github.com/gwg605/vsystemd/internal/storage"
+	"github.com/gwg605/vsystemd/internal/timermgr"
 	"github.com/gwg605/vsystemd/internal/transport"
 )
 
@@ -26,14 +26,11 @@ type Daemon struct {
 	logsDir     string
 	logRotation logwriter.Rotation
 	transport   transport.Transport
-	sched       *scheduler.Scheduler
+	timers      *timermgr.Manager
 	units       *UnitsList
 
 	mu     sync.Mutex
 	states map[string]ServiceState
-
-	timerMu     sync.Mutex
-	knownTimers map[string]bool
 
 	loopStop    chan struct{}
 	loopDone    chan struct{}
@@ -52,14 +49,20 @@ func New(manager scm.Manager, store storage.Storage, binaryPath, logsDir string,
 		logsDir:     logsDir,
 		logRotation: logRotation,
 		states:      make(map[string]ServiceState),
-		sched:       scheduler.New(manager, store),
-		units:       newUnitsList(store, manager),
-		knownTimers: make(map[string]bool),
 		loopStop:    make(chan struct{}),
 		loopDone:    make(chan struct{}),
 	}
+	timers, err := timermgr.New(store, daemon.onTimerEvent)
+	if err != nil {
+		return nil, fmt.Errorf("create timer manager: %w", err)
+	}
+	daemon.timers = timers
+	daemon.units = newUnitsList(store, manager, timers)
 	if err := daemon.units.rebuild(); err != nil {
 		slog.Warn("daemon: initial unit list build failed", "error", err)
+	}
+	if err := daemon.syncTimers(); err != nil {
+		slog.Warn("daemon: initial timer sync failed", "error", err)
 	}
 	tr, err := newTransport(transport.NewPeer(transport.PeerDaemon, daemonPeer, false), daemon.handle)
 	if err != nil {
@@ -78,8 +81,8 @@ func (d *Daemon) Start() error {
 	slog.Info("daemon: starting")
 	d.cleanupLogs()
 	d.startLoop()
-	if err := d.startTimers(); err != nil {
-		slog.Error("daemon: start timers failed", "error", err)
+	if err := d.timers.Start(); err != nil {
+		slog.Error("daemon: start timer manager failed", "error", err)
 		return err
 	}
 	slog.Info("daemon: started")
@@ -100,11 +103,11 @@ func (d *Daemon) Close() error {
 		<-d.loopDone
 	}
 
-	schedulerErr := d.sched.Close()
+	timersErr := d.timers.Stop()
 	transportErr := d.transport.Close()
-	if schedulerErr != nil {
-		slog.Warn("daemon: close scheduler failed", "error", schedulerErr)
-		return schedulerErr
+	if timersErr != nil {
+		slog.Warn("daemon: close timer manager failed", "error", timersErr)
+		return timersErr
 	}
 	if transportErr != nil {
 		slog.Warn("daemon: close transport failed", "error", transportErr)

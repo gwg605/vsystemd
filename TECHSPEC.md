@@ -22,27 +22,33 @@
 
 ---
 
-## Scheduler
+## Timer manager
 
-**Назначение:** внутренний компонент daemon'а, отвечает за своевременный запуск сервисов по расписанию `OnCalendar=`.
+**Назначение:** внутренний компонент daemon'а (`internal/timermgr`), владеет базой timer'ов и отвечает за своевременный запуск сервисов по расписанию `OnCalendar=`.
 
 **Поведение:**
 
-- Хранит набор активных timer'ов.
+- Хранит набор timer'ов (`TimerConfig{Name, OnCalendar}`) и их статус (`TimerStatus{Enabled, Running, LastRun, NextRun, ActiveSince}`).
+- `Enabled` — административный флаг (в БД), `Running` — рантайм-статус (timer реально в расписании); они независимы.
 - Для каждого timer'а вычисляет следующий момент срабатывания через `CalendarEvent.Next(now)`.
-- Ждёт до этого момента, после чего запускает целевой сервис вызовом `StartService()` через Windows SCM.
+- Ждёт до этого момента, после чего сообщает о срабатывании через колбэк `func(name string, status TimerStatus)`.
+- Демон по имени timer'а находит timer unit, определяет целевой сервис (`Unit=`) и запускает его вызовом `StartService()` через Windows SCM. Менеджер не зависит от SCM.
 - После каждого срабатывания немедленно вычисляет следующий тик и снова ждёт (цикл).
 - Если `CalendarEvent.Next` возвращает `ok=false` (нет будущих тиков) — timer останавливается, в лог пишется предупреждение.
 
 **Политика пропущенных тиков:** пропущенные тики не компенсируются. Если daemon был остановлен, расписание возобновляется с первого будущего тика относительно текущего времени на момент старта.
 
-**Persistence:** после каждого срабатывания Scheduler обновляет `last_run` и `next_run` в `storage.WriteTimerState()`.
+**Persistence:** после каждого изменения (срабатывание, `start`/`stop`, `enable`/`disable`, правка конфига) менеджер сериализует базу в свой JSON-формат и атомарно пишет через `storage.WriteTimers()`; при `New` читает `storage.ReadTimers()`. `Running` не персистится — при `Start()` в расписание ставятся все `enabled`-timer'ы.
 
-**Reload:** при `daemon-reload` Scheduler получает обновлённый набор timer'ов и выполняет diff с текущим состоянием:
+**API:** `SetTimer` (upsert конфига), `DeleteTimer` (только если `disabled` и `stopped`), `Enable`, `StartTimer`, `StopTimer`, `QueryStatus`, `QueryStatuses`, `ListTimers`, `GetTimer`, `Start` (запускает scheduler и ставит `enabled`-timer'ы), `Stop` (останавливает все и завершает работу).
 
-- Новые timer'ы — запускаются (если `enabled=true`).
-- Удалённые timer'ы — останавливаются, запись удаляется из persistence (`DeleteTimerState`).
+**Жизненный цикл:** `New` только загружает БД и не вызывает event handler; `Start` запускает scheduler; `Stop` останавливает все timer'ы и завершает работу (демон зовёт `Start`/`Stop`).
+
+**Reload:** при `daemon-reload` демон синхронизирует БД с юнитами:
+
+- Новые timer'ы — добавляются (`SetTimer`); автостарт `enabled`-timer'ов выполняется только в `Start()`.
 - Timer'ы с изменившимся `OnCalendar=` — перезапускаются.
+- Timer'ы без файла юнита — удаляются только если `disabled` и `stopped`; иначе сохраняются.
 
 ---
 
@@ -123,9 +129,9 @@ Runner держит постоянное соединение и по тайме
 
 **`timer_enable`** — установить `enabled=true/false` для таймера (persist).
 
-**`timer_start`** — добавить таймер в scheduler (не меняет `enabled`).
+**`timer_start`** — поставить таймер в расписание (не меняет `enabled`).
 
-**`timer_stop`** — убрать таймер из scheduler (не меняет `enabled`); `next_run` сбрасывается, `last_run` сохраняется.
+**`timer_stop`** — убрать таймер из расписания (не меняет `enabled`); `next_run` и `active_since` сбрасываются, `last_run` сохраняется.
 
 ---
 
@@ -141,9 +147,9 @@ Runner держит постоянное соединение и по тайме
 
 **`error_response`** — универсальный ответ на любой запрос в случае ошибки обработки. `request_id` содержит `id` того запроса, который вызвал ошибку.
 
-Поля `running`, `next_run`, `last_run`, `active_since`, `activates` заполняются только для юнитов типа `.timer`; для `.service` — `null`/пусто. Поле `enabled` для `.service` вычисляется из SCM `StartType` (`Automatic`/`Boot`/`System` → `true`, `Manual`/`Disabled` → `false`), для `.timer` — из persistence.
+Поля `running`, `next_run`, `last_run`, `active_since`, `activates` заполняются только для юнитов типа `.timer`; для `.service` — `null`/пусто. Поле `enabled` для `.service` вычисляется из SCM `StartType` (`Automatic`/`Boot`/`System` → `true`, `Manual`/`Disabled` → `false`), для `.timer` — из базы timer'ов.
 
-Для `.timer` поле `systemd_state` равно `active (waiting)`, если таймер добавлен в scheduler, иначе `inactive (dead)`. Поле `active_since` содержит момент добавления таймера в scheduler и сбрасывается при `stop`.
+Для `.timer` поле `systemd_state` равно `active (waiting)`, если таймер стоит в расписании, иначе `inactive (dead)`. Поле `active_since` содержит момент добавления таймера в расписание и сбрасывается при `stop`.
 
 ---
 
@@ -192,8 +198,8 @@ Runner держит постоянное соединение и по тайме
 | `last_error` | runner | строка с ошибкой запуска, сгенерированная runner'ом; только последняя; null если ошибок не было |
 | `log_tail` | лог-файл | последние 10 строк из текущего файла `logs\<service>\` или явного `file:`/`append:` файла |
 | `description` | unit-файл | значение `Description=` из секции `[Unit]` |
-| `enabled` | SCM `StartType` / persistence | для `.service` — из SCM; для `.timer` — из `timers.json` |
-| `active_since` | scheduler / persistence | для `.timer` — момент добавления в scheduler; отсутствует у неактивного таймера |
+| `enabled` | SCM `StartType` / timers.json | для `.service` — из SCM; для `.timer` — из `timers.json` |
+| `active_since` | timer manager / timers.json | для `.timer` — момент добавления в расписание; отсутствует у неактивного таймера |
 
 ---
 
@@ -203,7 +209,7 @@ Runner держит постоянное соединение и по тайме
 
 | Бинарь | Режим | Роль |
 |---|---|---|
-| `vsystemd.exe` | `--mode=daemon` | Windows Service, управляет состоянием, scheduler, IPC сервер |
+| `vsystemd.exe` | `--mode=daemon` | Windows Service, управляет состоянием, timer manager, IPC сервер |
 | `vsystemd.exe` | `--mode=run --unit=<name>` | Обёртка процесса, Restart= логика, pipe к daemon |
 | `systemctl.exe` | — | CLI, SCM напрямую или через daemon |
 
@@ -220,7 +226,7 @@ internal/
   transport/            — интерфейс Transport, Message, MsgHandler, Opt
   transport/pipe/       — реализация на named pipes, pipe envelope, lazy connect
   daemon/               — Daemon, ServiceState, логика daemon-reload
-  scheduler/            — OnCalendar= scheduler
+  timermgr/             — база timer'ов и OnCalendar= scheduler
   runner/               — Runner, управление дочерним процессом, Restart= логика
   storage/              — интерфейс Storage + prod реализация + fake реализация
 
@@ -234,18 +240,9 @@ type Storage interface {
     // unit files
     ListUnits() ([]string, error)
     ReadUnit(name string) ([]byte, error)
-    // timer state (persistence)
-    ReadTimerState(name string) (TimerState, error)
-    WriteTimerState(name string, state TimerState) error
-    DeleteTimerState(name string) error
-    ListTimerStates() (map[string]TimerState, error)
-}
-
-type TimerState struct {
-    Enabled     bool
-    LastRun     time.Time
-    NextRun     time.Time
-    ActiveSince time.Time
+    // timers (raw bytes; layout owned by timermgr)
+    ReadTimers() ([]byte, error)
+    WriteTimers(data []byte) error
 }
 
 type Manager interface {
@@ -276,8 +273,9 @@ type ServiceConfig struct {
 устанавливается методом `SetPassword` и никогда не возвращается при чтении
 (поле неэкспортируемое).
 
-`Storage` абстрагирует только persistence-операции: unit-файлы и состояние
-таймеров. Логи ведутся отдельным компонентом `logwriter`.
+`Storage` абстрагирует только persistence-операции: unit-файлы и байты базы
+таймеров (структуру JSON определяет `timermgr`). Логи ведутся отдельным
+компонентом `logwriter`.
 
 На Windows `ListServices()` возвращает только managed-сервисы, помеченные
 `LoadOrderGroup = "vsystemd"`; чужие SCM-сервисы не затрагиваются.
@@ -382,8 +380,8 @@ SCM stop → SERVICE_CONTROL_STOP → drain (ExecStop / Ctrl+C, по тайма�
 
 ### Два независимых состояния
 
-- `enabled` — сохраняется в persistence; определяет автозапуск при старте daemon'а
-- `running` — in-memory; таймер активен в scheduler в рамках текущей сессии
+- `enabled` — сохраняется в БД; определяет автозапуск при `Start()` менеджера (старт daemon'а)
+- `running` — рантайм-статус; таймер реально стоит в расписании в рамках текущей сессии
 
 ### Persistence
 
@@ -392,6 +390,7 @@ SCM stop → SERVICE_CONTROL_STOP → drain (ExecStop / Ctrl+C, по тайма�
 ```json
 {
   "foo.timer": {
+    "on_calendar": ["daily"],
     "enabled": true,
     "last_run": "2026-11-09T10:00:00Z",
     "next_run": "2026-11-09T11:00:00Z",
@@ -400,6 +399,7 @@ SCM stop → SERVICE_CONTROL_STOP → drain (ExecStop / Ctrl+C, по тайма�
 }
 ```
 
+Структуру файла определяет пакет `timermgr`; `storage` хранит только байты.
 `last_run`, `next_run` и `active_since` хранятся и обрабатываются только в UTC (RFC3339 с `Z`).
 При отображении время либо выводится в UTC с явным `Z`, либо конвертируется в
 локальную TZ с указанием зоны.
@@ -412,12 +412,12 @@ SCM stop → SERVICE_CONTROL_STOP → drain (ExecStop / Ctrl+C, по тайма�
 
 | Команда | Эффект |
 |---|---|
-| `systemctl enable foo.timer` | `enabled=true` в persistence; не запускает таймер |
-| `systemctl disable foo.timer` | `enabled=false` в persistence; не останавливает таймер |
-| `systemctl start foo.timer` | добавляет в scheduler (running); не меняет `enabled`; устанавливает `active_since` |
-| `systemctl stop foo.timer` | убирает из scheduler; не меняет `enabled`; сбрасывает `next_run` и `active_since` |
+| `systemctl enable foo.timer` | `enabled=true` в БД; не запускает таймер |
+| `systemctl disable foo.timer` | `enabled=false` в БД; не останавливает таймер |
+| `systemctl start foo.timer` | ставит в расписание (running); не меняет `enabled`; устанавливает `active_since` |
+| `systemctl stop foo.timer` | убирает из расписания; не меняет `enabled`; сбрасывает `next_run` и `active_since` |
 
-При старте daemon'а: все таймеры с `enabled=true` автоматически добавляются в scheduler.
+При `Start()` менеджера: все таймеры с `enabled=true` автоматически ставятся в расписание.
 
 ### Routing
 

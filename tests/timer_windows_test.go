@@ -64,11 +64,17 @@ func TestTimerCommands(t *testing.T) {
 		t.Errorf("disable result = %+v", disable)
 	}
 
-	state, err := env.store.ReadTimerState("job.timer")
+	data, err := env.store.ReadTimers()
 	if err != nil {
-		t.Fatalf("ReadTimerState() error = %v", err)
+		t.Fatalf("ReadTimers() error = %v", err)
 	}
-	if state.Enabled {
+	var records map[string]struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(data, &records); err != nil {
+		t.Fatalf("unmarshal timers: %v", err)
+	}
+	if records["job.timer"].Enabled {
 		t.Error("disabled state was not persisted")
 	}
 }
