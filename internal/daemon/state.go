@@ -33,7 +33,6 @@ const (
 
 type ServiceState struct {
 	Unit           string
-	SCMState       scm.State
 	RunnerState    RunnerState
 	PID            uint32
 	ExitCode       int
@@ -43,8 +42,8 @@ type ServiceState struct {
 	LastError      string
 }
 
-func (s ServiceState) Status() SystemdState {
-	switch s.SCMState {
+func (s ServiceState) Status(scmState scm.State) SystemdState {
+	switch scmState {
 	case scm.StateStartPending:
 		return SystemdActivatingStart
 	case scm.StateStopPending:

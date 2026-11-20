@@ -132,22 +132,21 @@ func (d *Daemon) status(id unit.ID) (protocol.StatusResponse, error) {
 
 	state := cached
 	state.Unit = name
+	scmState := scm.State(0)
 	if scmErr == nil {
-		state.SCMState = scmStatus.State
+		scmState = scmStatus.State
 		if state.PID == 0 {
 			state.PID = scmStatus.PID
 		}
 		if state.ExitCode == 0 && scmStatus.ExitCode != 0 {
 			state.ExitCode = int(scmStatus.ExitCode)
 		}
-	} else {
-		state.SCMState = 0
 	}
 
 	return protocol.StatusResponse{
 		Unit:           name,
-		SystemdState:   string(state.Status()),
-		SCMState:       state.SCMState,
+		SystemdState:   string(state.Status(scmState)),
+		SCMState:       scmState,
 		PID:            state.PID,
 		ExitCode:       state.ExitCode,
 		RestartCount:   state.RestartCount,
@@ -213,9 +212,10 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 		if entry.parsed != nil {
 			item.Description = entry.parsed.Description
 		}
-		state := d.serviceState(id, scmByName)
-		item.SystemdState = string(state.Status())
-		item.SCMState = state.SCMState
+		scmState := scmByName[id.Name].State
+		state := d.runnerState(id)
+		item.SystemdState = string(state.Status(scmState))
+		item.SCMState = scmState
 		units = append(units, item)
 	}
 
@@ -225,12 +225,9 @@ func (d *Daemon) listUnits() (protocol.ListUnitsResponse, error) {
 	return protocol.ListUnitsResponse{Units: units}, nil
 }
 
-func (d *Daemon) serviceState(id unit.ID, services map[string]scm.ServiceStatus) ServiceState {
+func (d *Daemon) runnerState(id unit.ID) ServiceState {
 	state, _ := d.State(id.String())
 	state.Unit = id.String()
-	if service, ok := services[id.Name]; ok {
-		state.SCMState = service.State
-	}
 	return state
 }
 
