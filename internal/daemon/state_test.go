@@ -32,11 +32,10 @@ func TestStatusComputation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			state := ServiceState{
-				SCMState:    tt.scmState,
 				RunnerState: tt.runnerState,
 				ExitCode:    tt.exitCode,
 			}
-			if got := state.Status(); got != tt.want {
+			if got := state.Status(tt.scmState); got != tt.want {
 				t.Errorf("Status() = %q, want %q", got, tt.want)
 			}
 		})

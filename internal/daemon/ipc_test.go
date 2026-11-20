@@ -63,9 +63,6 @@ func TestHandleStateEvent(t *testing.T) {
 	if !ok {
 		t.Fatal("state not found")
 	}
-	if state.SCMState != scm.StateRunning {
-		t.Errorf("SCMState = %v", state.SCMState)
-	}
 	if state.RunnerState != RunnerStateActive {
 		t.Errorf("RunnerState = %q", state.RunnerState)
 	}
@@ -75,7 +72,7 @@ func TestHandleStateEvent(t *testing.T) {
 	if state.LastTransition.IsZero() {
 		t.Error("LastTransition is zero")
 	}
-	if got := state.Status(); got != SystemdActiveRunning {
+	if got := state.Status(scm.StateRunning); got != SystemdActiveRunning {
 		t.Errorf("Status() = %q", got)
 	}
 }
