@@ -520,6 +520,21 @@ Clients (runner/control) do not verify the server: the daemon is the only owner 
 Pipe-transport logs are tagged `[clientPid->serverPid]`, e.g. `pipe: [1110->13241] sent`. `systemctl` enables diagnostic logs with `--log [none|stdout|stderr]` (default `none`).
 
 ### storage
+
+The production `Storage` implementation is file-backed under a fixed root (`C:\ProgramData\vsystemd` by default; see `### Configuration`). The paths are derived by `storage.PathsFromRoot`:
+
+| Data | Path |
+|---|---|
+| unit files | `<root>\system\` |
+| logs | `<root>\logs\` |
+| timer database | `<root>\timers.json` |
+
+- `ListUnits` lists the `.service` and `.timer` files in the system directory; `ReadUnit` reads a unit file.
+- `ReadTimers` / `WriteTimers` read and replace the timer database as raw bytes; `WriteTimers` writes atomically (temp file + `rename`), so a crash mid-write never leaves a corrupt file. The JSON layout is owned by `timermgr`.
+- Path helpers validate custom paths referenced by units: `ValidatePath` rejects anything that is not a plain absolute file path (non-absolute, `..`/`.`, trailing dots or spaces, alternate data streams, device paths `\\.\`/`\\?\`, reserved device names); `OutputWritable` checks that an output file's parent directory exists and is writable, without creating the file; `InputReadable` checks that an input file (`EnvironmentFile=`) can be read.
+
+`storage.New` creates the required directories on startup. Tests use `internal/storage/fake`.
+
 ### unit
 ### systemctl
 ### Unit status computation
