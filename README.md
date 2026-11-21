@@ -161,7 +161,7 @@ The SCM service name is the unit filename without its extension:
 ### 4. Start the daemon
 
 ```powershell
-.\bin\vsystemd.exe --mode=daemon
+vsystemd.exe --mode=daemon
 ```
 
 If the `vsystemd` Windows service does not exist, this command registers it
@@ -179,9 +179,9 @@ A valid unit file is required, and it must match the version known to the daemon
 so run `daemon-reload` after editing a unit file:
 
 ```powershell
-.\bin\systemctl.exe daemon-reload
-.\bin\systemctl.exe enable foo.service
-.\bin\systemctl.exe start foo.service
+systemctl.exe daemon-reload
+systemctl.exe enable foo.service
+systemctl.exe start foo.service
 ```
 
 `disable` sets the service start type to disabled; it does not stop or remove the
@@ -201,8 +201,8 @@ or timer commands until then.
 ### 6. Timers
 
 ```powershell
-.\bin\systemctl.exe enable foo.timer
-.\bin\systemctl.exe start foo.timer
+systemctl.exe enable foo.timer
+systemctl.exe start foo.timer
 ```
 
 - `enable` persists `enabled=true`; the timer is started automatically when the
@@ -215,9 +215,9 @@ or timer commands until then.
 Inspect timers with:
 
 ```powershell
-.\bin\systemctl.exe status foo.timer
-.\bin\systemctl.exe list-timers
-.\bin\systemctl.exe list-timers --all
+systemctl.exe status foo.timer
+systemctl.exe list-timers
+systemctl.exe list-timers --all
 ```
 
 `list-timers` shows only timers currently in the schedule; `--all` also lists
@@ -317,9 +317,9 @@ and a timer, including a diagnostic C++ monitor for console control events.
 ## Uninstall
 
 ```powershell
-.\bin\systemctl.exe stop foo.timer
-.\bin\systemctl.exe disable foo.timer
-.\bin\systemctl.exe stop foo.service
+systemctl.exe stop foo.timer
+systemctl.exe disable foo.timer
+systemctl.exe stop foo.service
 sc.exe delete foo
 
 sc.exe stop vsystemd
