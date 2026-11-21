@@ -3,9 +3,18 @@
 ## Overview
 ### Applications and instances
 
-vsystemd ships two executables. `vsystemd.exe` is dual-mode: depending on its arguments it becomes one of two kinds of runtime instance. The **daemon** is a single Windows service (`--mode=daemon`) that runs for the whole lifetime of the installation; it is the manager and owns the unit registry, service state, the timer manager, and the IPC server. A **runner** is one instance per managed service (`--mode=run --unit=<name>`): it is registered in the Windows SCM as the executable for its service, so SCM starts and stops it; it launches and supervises the service's child process, applies `Restart=`/`RestartSec=` logic, and reports state to the daemon.
+vsystemd has three runtime entities: the **daemon**, **runners**, and the **control** client.
 
-`systemctl.exe` is the user-facing CLI. Operations that SCM can serve go directly to SCM; daemon-specific operations (reload, unit listing, timer management) go through the daemon.
+- **daemon** — the manager. A single, always-running process that owns the unit registry, computes service state, runs the timer manager, and serves the IPC endpoint. It is the source of truth for unit configuration and for daemon-specific operations.
+- **runner** — a per-service process wrapper. There is one runner per managed service; it launches and supervises the service's child process, applies `Restart=`/`RestartSec=` logic, and reports state back to the daemon.
+- **control** — the user-facing CLI (`systemctl.exe`). It is short-lived: it performs a single command and exits. Operations that SCM can serve go directly to SCM; daemon-specific operations (reload, unit listing, timer management) go through the daemon.
+
+All three come from two executables. `vsystemd.exe` is dual-mode and becomes either the daemon or a runner depending on its arguments:
+
+- the daemon starts as `vsystemd.exe --mode=daemon`; it is registered in the Windows SCM as a service and started by SCM (typically at boot);
+- a runner starts as `vsystemd.exe --mode=run --unit=<name>`, where `<name>` is the unit it serves; every managed service is registered in SCM with this command line as its service binary, so SCM starts and stops the runner together with the service.
+
+The control client is the separate `systemctl.exe`, run by the user for each command. It must be elevated: control connections to the daemon are accepted only from an elevated token.
 
 ### Interaction and data flow
 ### Repository structure
