@@ -152,6 +152,29 @@ type Manager interface {
 On Windows, `ListServices()` returns only managed services tagged `LoadOrderGroup = "vsystemd"`; services owned by others are never touched.
 
 ### Storage
+
+`Storage` abstracts persistence: unit files and the raw bytes of the timer database (the JSON layout is owned by `timermgr`). Logs are handled separately by `logwriter`.
+
+```go
+type Storage interface {
+    // unit files
+    ListUnits() ([]string, error)
+    ReadUnit(name string) ([]byte, error)
+    // timers (raw bytes; layout owned by timermgr)
+    ReadTimers() ([]byte, error)
+    WriteTimers(data []byte) error
+
+    // ValidatePath rejects a path that is not a plain absolute file path.
+    ValidatePath(path string) error
+    // OutputWritable reports whether an output file's parent directory exists and is writable.
+    OutputWritable(path string) error
+    // InputReadable reports whether an input file can be read.
+    InputReadable(path string) error
+}
+```
+
+The production implementation is `internal/storage` (files under a fixed root, see `### Configuration`); tests use a fake.
+
 ### Timer manager
 
 ## Protocol
@@ -393,23 +416,6 @@ internal/
 
 tests/                  — интеграционные тесты (fake SCM + fake Storage)
 ```
-
-### Ключевые интерфейсы
-
-```go
-type Storage interface {
-    // unit files
-    ListUnits() ([]string, error)
-    ReadUnit(name string) ([]byte, error)
-    // timers (raw bytes; layout owned by timermgr)
-    ReadTimers() ([]byte, error)
-    WriteTimers(data []byte) error
-}
-```
-
-`Storage` абстрагирует только persistence-операции: unit-файлы и байты базы
-таймеров (структуру JSON определяет `timermgr`). Логи ведутся отдельным
-компонентом `logwriter`.
 
 ### Go module
 
