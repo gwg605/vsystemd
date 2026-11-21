@@ -651,6 +651,35 @@ Rules:
 | `active_since` | timer manager / timers.json | for `.timer` the moment it was put in the schedule; absent when inactive |
 
 ### Logging
+
+Logging is handled by `internal/logwriter`; `Storage` is not involved, except for path validation.
+
+#### Service logs
+
+By default a service's stdout and stderr go to `C:\ProgramData\vsystemd\logs\<service>\<timestamp>.log`:
+
+- `<service>` is the unit name without the extension (`foo.service` → `foo`);
+- `<timestamp>` is the file creation time in UTC, formatted `YYYY-MM-DD_HH-MM-SS.mmm`.
+
+Unit directives:
+
+- `StandardOutput=file:<path>` / `StandardError=file:<path>` — truncate, no rotation;
+- `StandardOutput=append:<path>` / `StandardError=append:<path>` — append, no rotation;
+- `null` — the stream is discarded;
+- any other value (`journal`, garbage) — startup error.
+
+A custom path (`file:`/`append:`) must be **absolute** and a plain file path: no `..`/`.` components, no trailing dots or spaces in components, no alternate data stream (`:`), no device paths (`\\.\`, `\\?\`), and no reserved device names (`CON`, `NUL`, `COM1`, ...); the **parent directory must exist** and be a directory (writable for `file:`/`append:`), and the path must not point at a directory; otherwise it is a startup error (directories are not created automatically). The same canonical path for stdout and stderr uses one writer; `file:` and `append:` on the same path use append for both.
+
+#### vsystemd's own logs
+
+- daemon → `C:\ProgramData\vsystemd\logs\vsystemd\daemon_<timestamp>.log`
+- runner → `C:\ProgramData\vsystemd\logs\vsystemd\<service>_<timestamp>.log`
+- plain text; files are opened in append mode and remain readable;
+- rotation by `logs.max_size_mb` and `logs.max_age_days`;
+- on rotation a new file with a UTC timestamp is created; renames are not used;
+- closed managed logs older than `max_age_days` are deleted;
+- `file:`/`append:` files are neither rotated nor deleted.
+
 ### Configuration
 
 ---
@@ -708,40 +737,6 @@ tests/                  — интеграционные тесты (fake SCM + 
 
 - `OnBootSec=` / `OnStartupSec=` через Windows Task Scheduler
 - `Wants=`, `Before=`, `BindsTo=`, `PartOf=`, `Conflicts=`
-
----
-
-## Логирование
-
-### Логи сервисов
-
-- по умолчанию stdout и stderr → `C:\ProgramData\vsystemd\logs\<service>\<timestamp>.log`
-- `<service>` — имя юнита без расширения (`foo.service` → `foo`)
-- `<timestamp>` — UTC время создания файла, формат `YYYY-MM-DD_HH-MM-SS.mmm`
-- `StandardOutput=file:<path>` / `StandardError=file:<path>` — truncate, без ротации
-- `StandardOutput=append:<path>` / `StandardError=append:<path>` — append, без ротации
-- `null` — поток отбрасывается
-- кастомный путь (`file:`/`append:`) должен быть **абсолютным** и быть обычным
-  файловым путём: без компонент `..`/`.`, без хвостовых точек/пробелов в
-  компонентах, без Alternate Data Stream (`:`), без device-путей (`\\.\`, `\\?\`)
-  и без reserved-имён устройств (`CON`, `NUL`, `COM1`, ...); **родительская папка
-  должна существовать** и быть каталогом (для `file:`/`append:` — доступным на
-  запись), сам путь не должен указывать на каталог; иначе — ошибка запуска
-  (каталоги автоматически не создаются)
-- любое другое значение (`journal`, мусор) — ошибка запуска
-- одинаковый канонический путь для stdout/stderr → один writer
-- `file:` + `append:` на один путь → append для обоих
-
-### Собственные логи vsystemd
-
-- daemon → `C:\ProgramData\vsystemd\logs\vsystemd\daemon_<timestamp>.log`
-- runner → `C:\ProgramData\vsystemd\logs\vsystemd\<service>_<timestamp>.log`
-- формат: plain text
-- файлы открыты на append и доступны на чтение
-- ротация по `logs.max_size_mb` и `logs.max_age_days`
-- при ротации создаётся новый файл с UTC timestamp; переименования не используются
-- закрытые managed-логи старше `max_age_days` удаляются
-- `file:`/`append:` файлы не ротируются и не удаляются
 
 ---
 
