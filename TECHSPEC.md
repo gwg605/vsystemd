@@ -282,7 +282,7 @@ The protocol is the message layer the daemon, runners, and the control client us
 
 Messages are grouped by direction.
 
-#### runner → daemon
+#### 3.2.1 runner → daemon
 
 | Type | request_id | Fire-and-forget | Payload |
 |---|---|---|---|
@@ -290,7 +290,7 @@ Messages are grouped by direction.
 
 **`state_event`** — sent by a runner on every state change of the managed process (start, clean stop, crash, restart) and periodically as a heartbeat. No acknowledgement from the daemon is expected. The wire types (`StateEvent`, the message type, and the `state` values) are defined in `internal/protocol`.
 
-#### systemctl → daemon
+#### 3.2.2 systemctl → daemon
 
 | Type | Expected response | Payload |
 |---|---|---|
@@ -313,7 +313,7 @@ Messages are grouped by direction.
 
 **`timer_stop`** — removes the timer from the schedule (does not change `enabled`); `next_run` and `active_since` are cleared, `last_run` is kept.
 
-#### daemon → systemctl
+#### 3.2.3 daemon → systemctl
 
 | Type | request_id | Payload |
 |---|---|---|
@@ -352,7 +352,7 @@ Responsibilities:
 
 A runner is the per-service process wrapper. It is registered in SCM as the service binary and is started/stopped by SCM; it launches and supervises the service's child process, applies the restart policy, and reports state to the daemon.
 
-#### Components
+#### 4.2.1 Components
 
 | Component | Responsibility |
 |---|---|
@@ -362,11 +362,11 @@ A runner is the per-service process wrapper. It is registered in SCM as the serv
 | `LogStreamer` | Captures the child's stdout/stderr into a `logwriter.Writer` |
 | `StateReporter` | Sends `state_event` to the daemon and drives the heartbeat timer |
 
-#### Lifecycle
+#### 4.2.2 Lifecycle
 
 On SCM start the runner runs `ExecStartPre`, then `ExecStart` (the child process), then `ExecStartPost`, and then monitors the child while it runs. When the child exits it drains (waits for all operations to finish); if `Restart=` is active and the start limit is not exhausted, it waits `RestartSec` and repeats, otherwise it exits. On SCM stop (`SERVICE_CONTROL_STOP`) it drains — running `ExecStop` or sending Ctrl+C, and killing on timeout — and exits.
 
-#### ExecStartPre / ExecStartPost
+#### 4.2.3 ExecStartPre / ExecStartPost
 
 Behavior follows systemd:
 
@@ -374,14 +374,14 @@ Behavior follows systemd:
 - a non-zero `ExecStartPost` exit code makes the service `failed` and the child process is stopped;
 - the `-` prefix (`-/path/to/cmd`) ignores the error and continues.
 
-#### EnvironmentFile=
+#### 4.2.4 EnvironmentFile=
 
 The path must be **absolute** and must not contain a `..` component; otherwise it is a startup error (the `-` prefix does not override this). Missing-file behavior follows systemd:
 
 - `EnvironmentFile=/path` — the file is required; missing → `failed`;
 - `EnvironmentFile=-/path` — the file is optional; missing is ignored.
 
-#### Service environment
+#### 4.2.5 Service environment
 
 Service processes do **not** inherit the runner's environment. The environment is assembled from `config.json` (the `environment` section) and the unit directives, in increasing priority:
 
@@ -392,7 +392,7 @@ Service processes do **not** inherit the runner's environment. The environment i
 
 `runUnit` resolves `environment` into `runner.EnvironmentDefaults` and passes it to the runner; the runner itself stays config-agnostic.
 
-#### Restart policy
+#### 4.2.6 Restart policy
 
 | Directive | Behavior |
 |---|---|
@@ -403,7 +403,7 @@ Service processes do **not** inherit the runner's environment. The environment i
 - `StartLimitBurst=` / `StartLimitIntervalSec=` — as in systemd: N attempts within the interval, then `failed`;
 - between attempts there is a `RestartSec=` pause.
 
-#### Stopping the process
+#### 4.2.7 Stopping the process
 
 On `SERVICE_CONTROL_STOP`:
 
@@ -418,7 +418,7 @@ On `SERVICE_CONTROL_STOP`:
 
 `timermgr` owns the timer database and runs the in-process `OnCalendar` scheduler. It is independent of SCM: when a timer fires it reports the event through a callback, and the daemon resolves the target service from the timer unit and starts it via SCM. See `### 2.4 Timer manager` for the interface and `## 3. Protocol` for the timer messages.
 
-#### Behavior
+#### 4.3.1 Behavior
 
 - Stores the set of timers (`TimerConfig{Name, OnCalendar}`) and their status (`TimerStatus{Enabled, Running, LastRun, NextRun, ActiveSince}`).
 - `Enabled` is an administrative flag (in the database), `Running` is a runtime status (the timer is actually in the schedule); they are independent.
@@ -430,11 +430,11 @@ On `SERVICE_CONTROL_STOP`:
 
 **Missed ticks:** missed ticks are not made up. If the daemon was stopped, the schedule resumes from the first future tick relative to the current time at start.
 
-#### Lifecycle
+#### 4.3.2 Lifecycle
 
 `New` only loads the database and never invokes the event handler; `Start` schedules all enabled timers; `Stop` stops everything and shuts down. The daemon calls `Start`/`Stop`.
 
-#### Persistence
+#### 4.3.3 Persistence
 
 File: `C:\ProgramData\vsystemd\timers.json`
 
@@ -454,7 +454,7 @@ The file layout is owned by `timermgr`; `storage` only keeps the bytes. After ev
 
 `last_run`, `next_run` and `active_since` are stored and handled only in UTC (RFC3339 with `Z`). When displayed, the time is either shown in UTC with an explicit `Z` or converted to the local timezone with the zone indicated.
 
-#### Command semantics
+#### 4.3.4 Command semantics
 
 | Command | Effect |
 |---|---|
@@ -465,7 +465,7 @@ The file layout is owned by `timermgr`; `storage` only keeps the bytes. After ev
 
 On `Start()` all timers with `enabled=true` are automatically put in the schedule. All timer commands (`enable`, `disable`, `start`, `stop`) go through the daemon pipe, not SCM; SCM knows nothing about timers.
 
-#### Reload
+#### 4.3.5 Reload
 
 On `daemon-reload` the daemon synchronizes the database with the units:
 
@@ -473,7 +473,7 @@ On `daemon-reload` the daemon synchronizes the database with the units:
 - timers whose `OnCalendar=` changed are rescheduled;
 - timers without a unit file are deleted only if they are `disabled` and `stopped`; otherwise they are kept.
 
-#### OnCalendar and timespan parsing
+#### 4.3.6 OnCalendar and timespan parsing
 
 **Library:** `gitlab.com/allddd/go-systemd-time` v1.1.0 (BSD-2-Clause)
 
@@ -505,7 +505,7 @@ Key behaviors:
 
 `transport/pipe` is the concrete `Transport` implementation on Windows named pipes (see `### 2.1 Transport`). It adds a delivery envelope, authenticates incoming connections by OS identity, and hands the application a trusted `Peer`; outgoing targets are built with `Target`.
 
-#### Named pipe
+#### 4.5.1 Named pipe
 
 | Party | Role | Pipe |
 |---|---|---|
@@ -515,7 +515,7 @@ Key behaviors:
 
 The daemon keeps `vsystemd-in` open for its whole lifetime. Each runner holds a persistent connection and reconnects on a break. The control client connects only for the duration of a command.
 
-#### Peer naming
+#### 4.5.2 Peer naming
 
 | PeerType | peerName | Role |
 |---|---|---|
@@ -523,7 +523,7 @@ The daemon keeps `vsystemd-in` open for its whole lifetime. Each runner holds a 
 | runner | `foo.service` | client |
 | control | `systemctl_<pid>` | client |
 
-#### Envelope
+#### 4.5.3 Envelope
 
 One message on the wire is newline-delimited JSON:
 
@@ -543,7 +543,7 @@ The `from` field carries the sender name (untrusted). The transport compares it 
 
 A single message is size-limited (`transport.Config.MaxMessageSize`, 4 MiB by default): a line over the limit breaks the connection. Empty and unrecognized lines are skipped.
 
-#### Authentication of incoming connections
+#### 4.5.4 Authentication of incoming connections
 
 The authenticator is internal (not part of the public interface) and is used by the daemon when accepting a connection (`clientAuthenticator`):
 
@@ -553,11 +553,11 @@ The authenticator is internal (not part of the public interface) and is used by 
 
 Common checks: `GetNamedPipeClientProcessId` → `OpenProcess`; the process creation time must precede the connection (PID-reuse protection); token → elevation. Because of the elevation check the control client (`systemctl`) must run elevated.
 
-#### Server trust
+#### 4.5.5 Server trust
 
 Clients (runner/control) do not verify the server: the daemon is the only owner of the pipe (`FILE_FLAG_FIRST_PIPE_INSTANCE` + ACL + early service start), so trust is positional. Squatting the name only causes message loss/DoS (not escalation): a legitimate daemon will not start while the name is taken, and `systemctl` control operations go directly to SCM.
 
-#### Logs
+#### 4.5.6 Logs
 
 Pipe-transport logs are tagged `[clientPid->serverPid]`, e.g. `pipe: [1110->13241] sent`. `systemctl` enables diagnostic logs with `--log [none|stdout|stderr]` (default `none`).
 
@@ -646,7 +646,7 @@ Unit names are validated by `ParseID`: the name is the file name without the ext
 
 Global `--log [none|stdout|stderr]` (default `none`) enables diagnostic logging.
 
-#### Status output
+#### 4.8.1 Status output
 
 The output is systemd-style. For `.service`: `● unit - description`, `Loaded`, `Active` (with `since ...; ... ago`), `Main PID`, and `Exit code`/`Restart`/`Error` when present. For `.timer`: `Loaded`, `Active` (with `since ...; ... ago` when the timer is active), `Trigger` (the next run time and the remaining time) and `Triggers` (the activated service).
 
@@ -676,7 +676,7 @@ Rules:
 - **`failed`** occurs only when both conditions hold: SCM reports `SERVICE_STOPPED` and the runner reported `state=failed` with a non-zero `exit_code`. While the runner is restarting the process under `Restart=`, the status is `activating (auto-restart)`, not `failed`; `failed` is reached only when the start limit (`StartLimitBurst`) is exhausted or `Restart=no`.
 - **If the daemon is not running or the runner's pipe is unavailable**, `systemd_state` is not available and the status is determined from SCM alone; `failed` is not shown, only `inactive (dead)`. This is a known difference from systemd (see ARCHITECTURE.md, known difference #2).
 
-#### `status_response` fields
+#### 4.9.1 `status_response` fields
 
 | Field | Source | Description |
 |---|---|---|
@@ -696,7 +696,7 @@ Rules:
 
 Logging is handled by `internal/logwriter`; `Storage` is not involved, except for path validation.
 
-#### Service logs
+#### 4.10.1 Service logs
 
 By default a service's stdout and stderr go to `C:\ProgramData\vsystemd\logs\<service>\<timestamp>.log`:
 
@@ -712,7 +712,7 @@ Unit directives:
 
 A custom path (`file:`/`append:`) must be **absolute** and a plain file path: no `..`/`.` components, no trailing dots or spaces in components, no alternate data stream (`:`), no device paths (`\\.\`, `\\?\`), and no reserved device names (`CON`, `NUL`, `COM1`, ...); the **parent directory must exist** and be a directory (writable for `file:`/`append:`), and the path must not point at a directory; otherwise it is a startup error (directories are not created automatically). The same canonical path for stdout and stderr uses one writer; `file:` and `append:` on the same path use append for both.
 
-#### vsystemd's own logs
+#### 4.10.2 vsystemd's own logs
 
 - daemon → `C:\ProgramData\vsystemd\logs\vsystemd\daemon_<timestamp>.log`
 - runner → `C:\ProgramData\vsystemd\logs\vsystemd\<service>_<timestamp>.log`
