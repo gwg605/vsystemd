@@ -74,6 +74,83 @@ func (c *Component) handleStatusRequest(source transport.Peer, msg transport.Mes
 The transport matches responses by `request_id` within a connection: `Req()` sends a message with a unique `id` and waits for a response whose `request_id` equals that `id` on the same connection; several requests may be in flight at once, and a timeout returns an error and is logged.
 
 ### SCM manager
+
+`scm.Manager` abstracts the Windows Service Control Manager: creating, updating, deleting, starting, and stopping managed services, and querying their status. The Windows implementation lives in `internal/scm`; tests use a fake.
+
+```go
+type StartType int
+
+// StartTypeNoChange leaves the service start type unchanged on update.
+const StartTypeNoChange StartType = 0
+
+const (
+    StartTypeAutomatic StartType = iota + 1
+    StartTypeManual
+    StartTypeDisabled
+    StartTypeBoot
+    StartTypeSystem
+)
+
+type State uint32
+
+const (
+    StateStopped State = iota + 1
+    StateStartPending
+    StateStopPending
+    StateRunning
+)
+
+// ProcessHandle is an opaque OS handle to a process (a Windows HANDLE).
+type ProcessHandle uintptr
+
+// Account is an account a service runs under.
+type Account string
+
+type ServiceConfig struct {
+    Name         string
+    BinaryPath   string
+    StartType    StartType
+    Dependencies []string
+    User         Account
+    password     string
+    DisplayName  string
+    Description  string
+}
+
+type ServiceStatus struct {
+    Name     string
+    State    State
+    PID      uint32
+    ExitCode uint32
+}
+
+type Manager interface {
+    CreateService(cfg ServiceConfig) error
+    UpdateService(cfg ServiceConfig) error
+    // SetStartType changes only the start type of an existing managed service.
+    SetStartType(name string, startType StartType) error
+    DeleteService(name string) error
+    StartService(name string) error
+    StopService(name string) error
+    QueryStatus(name string) (ServiceStatus, error)
+    QueryStatuses() ([]ServiceStatus, error)
+    // ListServices returns the configuration of every managed service. The
+    // password is never populated because SCM does not expose it.
+    ListServices() ([]ServiceConfig, error)
+    // GetService returns the configuration of a single managed service.
+    GetService(name string) (ServiceConfig, error)
+    // GetServiceByHandle returns the configuration of the managed service the
+    // process handle belongs to, or ErrNotService if it is not a service.
+    GetServiceByHandle(handle ProcessHandle) (ServiceConfig, error)
+}
+```
+
+`svcconfig.FromUnit(unit, binaryPath, startType)` translates a unit file into a `ServiceConfig`; `scm.NewAccount(user, name)` resolves the win32 account, defaulting to the per-service virtual account `NT SERVICE\<name>`. The password is set via `SetPassword` and is never returned by read operations (the field is unexported).
+
+`ErrNotFound` reports a missing service, `ErrNotService` a process that is not a service, and `ErrNotManaged` a service not created by vsystemd.
+
+On Windows, `ListServices()` returns only managed services tagged `LoadOrderGroup = "vsystemd"`; services owned by others are never touched.
+
 ### Storage
 ### Timer manager
 
@@ -328,41 +405,11 @@ type Storage interface {
     ReadTimers() ([]byte, error)
     WriteTimers(data []byte) error
 }
-
-type Manager interface {
-    CreateService(cfg ServiceConfig) error
-    UpdateService(cfg ServiceConfig) error
-    DeleteService(name string) error
-    StartService(name string) error
-    StopService(name string) error
-    QueryStatus(name string) (ServiceStatus, error)
-    ListServices() ([]ServiceStatus, error)
-}
-
-type Account string
-
-type ServiceConfig struct {
-    Name         string
-    BinaryPath   string
-    StartType    StartType
-    Dependencies []string
-    User         Account
-    password     string
-    Description  string
-}
 ```
-
-`NewServiceConfig(unit, binaryPath, startType)` транслирует unit-файл в
-`ServiceConfig`; `NewAccount(user, name)` резолвит win32-аккаунт. Пароль
-устанавливается методом `SetPassword` и никогда не возвращается при чтении
-(поле неэкспортируемое).
 
 `Storage` абстрагирует только persistence-операции: unit-файлы и байты базы
 таймеров (структуру JSON определяет `timermgr`). Логи ведутся отдельным
 компонентом `logwriter`.
-
-На Windows `ListServices()` возвращает только managed-сервисы, помеченные
-`LoadOrderGroup = "vsystemd"`; чужие SCM-сервисы не затрагиваются.
 
 ### Go module
 
