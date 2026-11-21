@@ -27,6 +27,9 @@ The control client is the separate `systemctl.exe`, run by the user for each com
 ### Timer manager
 
 ## Protocol
+
+The protocol is the message layer the daemon, runners, and the control client use to talk to each other over the shared named pipe. It defines the message envelope (`id`, `request_id`, `type`, `payload`), the catalog of message types grouped by direction, and the delivery guarantees. The wire types live in `internal/protocol`, while the transport layer (`internal/transport`, `internal/transport/pipe`) carries the messages and matches responses. Runners use it to report service state to the daemon; the control client uses it for daemon-specific operations (reload, status, unit listing, timer management) that SCM cannot serve.
+
 ### Identification rules
 
 - Every message carries a unique `id` (UUID), including responses.
