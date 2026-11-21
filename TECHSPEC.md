@@ -34,6 +34,56 @@ The control client is the separate `systemctl.exe`, run by the user for each com
 - A response has its own unique `id` and a populated `request_id`.
 
 ### Message catalog
+
+Messages are grouped by direction.
+
+#### runner → daemon
+
+| Type | request_id | Fire-and-forget | Payload |
+|---|---|---|---|
+| `state_event` | null | yes | `unit`, `state`, `pid`, `exit_code`, `restart_count`, `timestamp`, `last_error` |
+
+**`state_event`** — sent by a runner on every state change of the managed process (start, clean stop, crash, restart) and periodically as a heartbeat. No acknowledgement from the daemon is expected. The wire types (`StateEvent`, the message type, and the `state` values) are defined in `internal/protocol`.
+
+#### systemctl → daemon
+
+| Type | Expected response | Payload |
+|---|---|---|
+| `daemon_reload` | `reload_result` | — |
+| `status_request` | `status_response` | `unit` |
+| `list_units` | `list_units_response` | — |
+| `timer_enable` | `timer_result` | `unit`, `enabled` (bool) |
+| `timer_start` | `timer_result` | `unit` |
+| `timer_stop` | `timer_result` | `unit` |
+
+**`daemon_reload`** — triggers a rescan of unit files and a configuration update.
+
+**`status_request`** — requests the aggregated state of a specific unit.
+
+**`list_units`** — requests the list of all known units with their states.
+
+**`timer_enable`** — sets `enabled=true/false` for a timer (persisted).
+
+**`timer_start`** — puts the timer in the schedule (does not change `enabled`).
+
+**`timer_stop`** — removes the timer from the schedule (does not change `enabled`); `next_run` and `active_since` are cleared, `last_run` is kept.
+
+#### daemon → systemctl
+
+| Type | request_id | Payload |
+|---|---|---|
+| `reload_result` | id of the `daemon_reload` request | `success` |
+| `status_response` | id of the `status_request` request | `unit`, `systemd_state`, `scm_state`, `pid`, `exit_code`, `restart_count`, `last_transition`, `last_error`, `log_tail`, `description`, `enabled`; for `.timer` additionally `running`, `next_run`, `last_run`, `active_since`, `activates` |
+| `list_units_response` | id of the `list_units` request | `units[]`: `unit`, `type`, `systemd_state`, `scm_state`, `description`, `enabled`, `running`, `next_run`, `last_run`, `activates` |
+| `timer_result` | id of the originating request | `unit`, `success`, `enabled`, `running`, `last_run`, `next_run` |
+| `error_response` | id of the originating request | `error` |
+
+**`error_response`** — a generic response to any request that fails to process. `request_id` holds the `id` of the request that caused the error.
+
+The `running`, `next_run`, `last_run`, `active_since`, and `activates` fields are populated only for `.timer` units; for `.service` they are `null`/empty. The `enabled` field for `.service` is derived from SCM `StartType` (`Automatic`/`Boot`/`System` → `true`, `Manual`/`Disabled` → `false`); for `.timer` it comes from the timer database.
+
+For `.timer`, `systemd_state` is `active (waiting)` when the timer is in the schedule, otherwise `inactive (dead)`. `active_since` holds the moment the timer was put in the schedule and is cleared on `stop`.
+
 ### Delivery guarantees
 
 ## Components
@@ -140,63 +190,6 @@ Runner держит постоянное соединение и по тайме
 ### Гарантии доставки
 
 Схема работает по принципу best-effort: подтверждение доставки отсутствует. Потерянное сообщение (pipe недоступен, таймаут) фиксируется в лог. Актуальное состояние всегда доступно через SCM или следующий heartbeat.
-
----
-
-## IPC: каталог сообщений
-
----
-
-### runner → daemon
-
-| Тип | request_id | Fire-and-forget | Payload |
-|---|---|---|---|
-| `state_event` | null | да | `unit`, `state`, `pid`, `exit_code`, `restart_count`, `timestamp`, `last_error` |
-
-**`state_event`** — отправляется runner'ом при каждой смене состояния управляемого процесса (запуск, успешная остановка, падение, рестарт) и периодически как heartbeat. Подтверждение от daemon'а не ожидается. Wire-типы (`StateEvent`, тип сообщения и значения `state`) определены в `internal/protocol`.
-
----
-
-### systemctl → daemon
-
-| Тип | Ожидаемый ответ | Payload |
-|---|---|---|
-| `daemon_reload` | `reload_result` | — |
-| `status_request` | `status_response` | `unit` |
-| `list_units` | `list_units_response` | — |
-| `timer_enable` | `timer_result` | `unit`, `enabled` (bool) |
-| `timer_start` | `timer_result` | `unit` |
-| `timer_stop` | `timer_result` | `unit` |
-
-**`daemon_reload`** — инициирует пересканирование unit-файлов и обновление конфигурации.
-
-**`status_request`** — запрос агрегированного состояния конкретного юнита.
-
-**`list_units`** — запрос списка всех известных юнитов с их состояниями.
-
-**`timer_enable`** — установить `enabled=true/false` для таймера (persist).
-
-**`timer_start`** — поставить таймер в расписание (не меняет `enabled`).
-
-**`timer_stop`** — убрать таймер из расписания (не меняет `enabled`); `next_run` и `active_since` сбрасываются, `last_run` сохраняется.
-
----
-
-### daemon → systemctl
-
-| Тип | request_id | Payload |
-|---|---|---|
-| `reload_result` | id запроса `daemon_reload` | `success` |
-| `status_response` | id запроса `status_request` | `unit`, `systemd_state`, `scm_state`, `pid`, `exit_code`, `restart_count`, `last_transition`, `last_error`, `log_tail`, `description`, `enabled`; для `.timer` дополнительно `running`, `next_run`, `last_run`, `active_since`, `activates` |
-| `list_units_response` | id запроса `list_units` | `units[]`: `unit`, `type`, `systemd_state`, `scm_state`, `description`, `enabled`, `running`, `next_run`, `last_run`, `activates` |
-| `timer_result` | id исходного запроса | `unit`, `success`, `enabled`, `running`, `last_run`, `next_run` |
-| `error_response` | id исходного запроса | `error` |
-
-**`error_response`** — универсальный ответ на любой запрос в случае ошибки обработки. `request_id` содержит `id` того запроса, который вызвал ошибку.
-
-Поля `running`, `next_run`, `last_run`, `active_since`, `activates` заполняются только для юнитов типа `.timer`; для `.service` — `null`/пусто. Поле `enabled` для `.service` вычисляется из SCM `StartType` (`Automatic`/`Boot`/`System` → `true`, `Manual`/`Disabled` → `false`), для `.timer` — из базы timer'ов.
-
-Для `.timer` поле `systemd_state` равно `active (waiting)`, если таймер стоит в расписании, иначе `inactive (dead)`. Поле `active_since` содержит момент добавления таймера в расписание и сбрасывается при `stop`.
 
 ---
 
