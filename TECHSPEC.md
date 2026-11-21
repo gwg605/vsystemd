@@ -447,6 +447,18 @@ Timezone support comes from embedded IANA tzdata (`import _ "time/tzdata"`), wit
 Inside the code and in persistence, time is stored and handled in UTC. `OnCalendar=` without a TZ suffix is interpreted in the machine's local timezone, with a suffix in the specified timezone. On input the time is converted to UTC; when displayed it is shown in the local timezone or with the explicitly specified timezone.
 
 ### scm
+
+`scm` is the Windows Service Control Manager integration behind `scm.Manager` (see `### SCM manager`). The Windows implementation is `internal/scm`; `internal/scm/fake` is used in tests.
+
+Key behaviors:
+
+- **Managed services** — vsystemd only touches services it created. Every managed service is tagged with `LoadOrderGroup = "vsystemd"`; `ListServices`, `QueryStatuses`, and every open-by-name check filter on this tag, and a service without it is reported as `ErrNotManaged`. Services owned by others are never modified.
+- **Registration** — each managed service is registered with the vsystemd binary and a per-service command line: `"<vsystemd.exe>" --mode=run --unit=<name>` (built by `svcconfig.FromUnit`). SCM therefore starts a runner as the service process.
+- **Accounts** — a service runs under the unit's `User=` or, by default, the per-service virtual account `NT SERVICE\<name>` (`scm.NewAccount`).
+- **Start type** — the daemon sets the Windows start type (`Automatic`/`Boot`/`System` are treated as enabled, `Manual`/`Disabled` as disabled); `StartTypeNoChange` leaves it unchanged on update.
+- **State** — SCM states map to `State` (`Stopped`, `StartPending`, `StopPending`, `Running`); other SCM states (pause/continue) fall through to the raw value.
+- **Runner authentication** — `GetServiceByHandle` resolves the managed service a process handle belongs to, or `ErrNotService`; the daemon uses it (together with the token account and image identity) to authenticate runner connections.
+
 ### transport / pipe
 ### storage
 ### unit
