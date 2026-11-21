@@ -588,6 +588,28 @@ Directives by section:
 Unit names are validated by `ParseID`: the name is the file name without the extension, up to 64 characters, restricted to `[A-Za-z0-9_-]`, with a known extension.
 
 ### systemctl
+
+`systemctl.exe` is the user-facing CLI (`cmd/systemctl`). It parses the command line, loads `config.json`, and dispatches to a `control.Controller`: operations that SCM can serve go directly to SCM, daemon-specific ones go through the daemon pipe. It must be run elevated.
+
+| Command | Target | Effect |
+|---|---|---|
+| `enable <unit>` | SCM / daemon | For a service, creates or updates the SCM service (with `-p/--password`, `--password-file`, `--password-stdin` for the account); for a timer, `enabled=true` |
+| `disable <unit>` | SCM / daemon | Disables the service or timer |
+| `start` / `stop` / `restart <unit>` | SCM / daemon | Starts, stops, or restarts the unit |
+| `status <unit>` | SCM / daemon | Prints the unit status |
+| `list-units` | daemon | Lists known units |
+| `list-timers [--all]` | daemon | Lists timers; `--all` includes stopped and disabled ones |
+| `daemon-reload` | daemon | Reloads unit files |
+| `--version` | — | Prints the version |
+
+Global `--log [none|stdout|stderr]` (default `none`) enables diagnostic logging.
+
+#### Status output
+
+The output is systemd-style. For `.service`: `● unit - description`, `Loaded`, `Active` (with `since ...; ... ago`), `Main PID`, and `Exit code`/`Restart`/`Error` when present. For `.timer`: `Loaded`, `Active` (with `since ...; ... ago` when the timer is active), `Trigger` (the next run time and the remaining time) and `Triggers` (the activated service).
+
+After the block there is a blank line and the last 10 log lines: from the current/last managed file `logs\<service>\`, or from an explicitly set `file:`/`append:` file. For a `.timer` the tail of the activated service is shown. Rotated files are not mixed in. With `null` for both streams the tail is empty.
+
 ### Unit status computation
 ### Logging
 ### Configuration
@@ -731,19 +753,6 @@ tests/                  — интеграционные тесты (fake SCM + 
 - при ротации создаётся новый файл с UTC timestamp; переименования не используются
 - закрытые managed-логи старше `max_age_days` удаляются
 - `file:`/`append:` файлы не ротируются и не удаляются
-
-### `systemctl status`
-
-Вывод оформлен в systemd-стиле. Для `.service`:
-`● unit - description`, `Loaded`, `Active` (со `since ...; ... ago`),
-`Main PID`, а также `Exit code`/`Restart`/`Error` при наличии значения.
-Для `.timer`: `Loaded`, `Active` (со `since ...; ... ago` при активном таймере),
-`Trigger` (время следующего запуска и остаток) и `Triggers` (активируемый сервис).
-
-После блока идёт пустая строка и последние 10 строк лога: из текущего/последнего
-managed-файла `logs\<service>\`, либо из явно заданного `file:`/`append:` файла.
-Для `.timer` показывается хвост лога активируемого сервиса. Ротированные файлы не
-подмешиваются. При `null` для обоих потоков tail пуст.
 
 ---
 
