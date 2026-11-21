@@ -17,6 +17,15 @@ All three come from two executables. `vsystemd.exe` is dual-mode and becomes eit
 The control client is the separate `systemctl.exe`, run by the user for each command. It must be elevated: control connections to the daemon are accepted only from an elevated token.
 
 ### Interaction and data flow
+
+Communication is a client–server model over a single named pipe. The server is the daemon; the clients are the runners and the control client. Clients initiate the connection to the daemon's pipe and use it in both directions: a request and its response travel over the same connection, so no reverse pipe is needed.
+
+The daemon never pushes: a runner sends its state on every change and on a heartbeat timer, and the control client receives the response to its request on the same connection.
+
+**Heartbeat and liveness** — a runner keeps a persistent connection and periodically sends its current state (`state_event`). If the daemon does not receive a heartbeat for longer than `RunnerDeadAfter`, the runner is marked `dead`.
+
+**Daemon startup** — the daemon does not poll runners. After a daemon restart the runners' connections break; each runner reconnects and sends its current state on the next heartbeat.
+
 ### Repository structure
 ### v1 scope
 
@@ -720,24 +729,6 @@ The path is fixed: `C:\ProgramData\vsystemd\config.json`. A missing file means d
 ---
 
 ## Appendix A. Legacy content (to be migrated)
-
----
-
-## IPC: схема коммуникации daemon ↔ runner ↔ systemctl
-
-### Принцип
-
-Коммуникация построена на модели клиент–сервер поверх одного named pipe. Сервер — daemon; клиенты — runner'ы и systemctl. Клиенты инициируют соединение к pipe демона и работают по нему в обе стороны: запрос и ответ идут по одному соединению, обратный pipe не нужен.
-
-Демон ничего не пушит: runner сам отправляет состояние при изменении и по heartbeat-таймеру; systemctl получает ответ на свой запрос в том же соединении.
-
-### Heartbeat и жизнеспособность
-
-Runner держит постоянное соединение и по таймеру отправляет текущее состояние (`state_event`). Если демон не получает heartbeat дольше `RunnerDeadAfter`, раннер помечается `dead`.
-
-### Поведение при старте daemon'а
-
-Демон не опрашивает runner'ов. После рестарта демона соединения runner'ов рвутся; runner переподключается и отправляет текущее состояние при следующем heartbeat.
 
 ---
 
