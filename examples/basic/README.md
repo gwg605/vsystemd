@@ -45,7 +45,7 @@ The unit files use absolute paths under `C:\vsystemd-example`.
 ## 3. Start the vsystemd daemon
 
 ```powershell
-.\bin\vsystemd.exe --mode=daemon
+vsystemd.exe --mode=daemon
 ```
 
 If the `vsystemd` Windows service does not exist yet, this command registers and
@@ -54,11 +54,11 @@ starts it.
 ## 4. Register the units in SCM
 
 ```powershell
-.\bin\systemctl.exe daemon-reload
+systemctl.exe daemon-reload
 
-.\bin\systemctl.exe enable service1.service
-.\bin\systemctl.exe enable service2.service
-.\bin\systemctl.exe enable service3.service
+systemctl.exe enable service1.service
+systemctl.exe enable service2.service
+systemctl.exe enable service3.service
 ```
 
 `enable` creates the SCM service (or updates it if it already exists) and sets its
@@ -71,15 +71,15 @@ because `service2` declares a dependency on `service1`.
 ## 5. Start the long-running services
 
 ```powershell
-.\bin\systemctl.exe start service1.service
-.\bin\systemctl.exe start service2.service
+systemctl.exe start service1.service
+systemctl.exe start service2.service
 ```
 
 ## 6. Enable and start the timer
 
 ```powershell
-.\bin\systemctl.exe enable service3.timer
-.\bin\systemctl.exe start service3.timer
+systemctl.exe enable service3.timer
+systemctl.exe start service3.timer
 ```
 
 `enable` persists `enabled=true` (the timer will be started automatically when the
@@ -88,16 +88,16 @@ daemon starts). `start` puts the timer in the schedule immediately.
 Inspect the timer:
 
 ```powershell
-.\bin\systemctl.exe status service3.timer
-.\bin\systemctl.exe list-timers
+systemctl.exe status service3.timer
+systemctl.exe list-timers
 ```
 
 ## 7. Verify
 
 ```powershell
-.\bin\systemctl.exe status service1.service
-.\bin\systemctl.exe status service2.service
-.\bin\systemctl.exe list-units
+systemctl.exe status service1.service
+systemctl.exe status service2.service
+systemctl.exe list-units
 
 Start-Sleep -Seconds 15
 
@@ -145,16 +145,16 @@ Refresh the units and register the monitor:
 ```powershell
 Copy-Item C:\vsystemd-example\system\monitor-demo.service C:\ProgramData\vsystemd\system\
 
-.\bin\systemctl.exe daemon-reload
-.\bin\systemctl.exe enable monitor-demo.service
-.\bin\systemctl.exe start monitor-demo.service
+systemctl.exe daemon-reload
+systemctl.exe enable monitor-demo.service
+systemctl.exe start monitor-demo.service
 ```
 
 Stop it and inspect the captured output:
 
 ```powershell
-Measure-Command { .\bin\systemctl.exe stop monitor-demo.service }
-.\bin\systemctl.exe status monitor-demo.service
+Measure-Command { systemctl.exe stop monitor-demo.service }
+systemctl.exe status monitor-demo.service
 ```
 
 Expected: `stop` is fast and the log contains a `CTRL_C_EVENT` entry. If the
@@ -168,14 +168,14 @@ See [monitor/README.md](monitor/README.md) for details.
 Stop the timer, then the services:
 
 ```powershell
-.\bin\systemctl.exe stop service3.timer
-.\bin\systemctl.exe disable service3.timer
+systemctl.exe stop service3.timer
+systemctl.exe disable service3.timer
 
-.\bin\systemctl.exe stop service1.service
-.\bin\systemctl.exe stop service2.service
+systemctl.exe stop service1.service
+systemctl.exe stop service2.service
 
 # If the optional monitor was enabled:
-.\bin\systemctl.exe stop monitor-demo.service
+systemctl.exe stop monitor-demo.service
 ```
 
 Delete the registered services:
@@ -227,6 +227,6 @@ sc.exe delete vsystemd
 - **No data files.** Check the service state and logs:
 
   ```powershell
-  .\bin\systemctl.exe status service1.service
+  systemctl.exe status service1.service
   Get-ChildItem C:\ProgramData\vsystemd\logs\service1
   ```
