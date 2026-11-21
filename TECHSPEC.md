@@ -1,5 +1,39 @@
 # vsystemd Technical Specification
 
+## Overview
+### Applications and instances
+### Interaction and data flow
+### Repository structure
+### v1 scope
+
+## Interfaces
+### Transport
+### SCM manager
+### Storage
+### Timer manager
+
+## Protocol
+### Identification rules
+### Message catalog
+### Delivery guarantees
+
+## Components
+### daemon
+### runner
+### timermgr
+### scm
+### transport / pipe
+### storage
+### unit
+### systemctl
+### Unit status computation
+### Logging
+### Configuration
+
+---
+
+## Appendix A. Legacy content (to be migrated)
+
 ---
 
 ## Парсинг OnCalendar= и timespan
