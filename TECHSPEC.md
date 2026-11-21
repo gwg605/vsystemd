@@ -1,7 +1,7 @@
 # vsystemd Technical Specification
 
-## Overview
-### Applications and instances
+## 1. Overview
+### 1.1 Applications and instances
 
 vsystemd has three runtime entities: the **daemon**, **runners**, and the **control** client.
 
@@ -16,7 +16,7 @@ All three come from two executables. `vsystemd.exe` is dual-mode and becomes eit
 
 The control client is the separate `systemctl.exe`, run by the user for each command. It must be elevated: control connections to the daemon are accepted only from an elevated token.
 
-### Interaction and data flow
+### 1.2 Interaction and data flow
 
 Communication is a client–server model over a single named pipe. The server is the daemon; the clients are the runners and the control client. Clients initiate the connection to the daemon's pipe and use it in both directions: a request and its response travel over the same connection, so no reverse pipe is needed.
 
@@ -26,7 +26,7 @@ The daemon never pushes: a runner sends its state on every change and on a heart
 
 **Daemon startup** — the daemon does not poll runners. After a daemon restart the runners' connections break; each runner reconnects and sends its current state on the next heartbeat.
 
-### Repository structure
+### 1.3 Repository structure
 
 ```
 cmd/
@@ -55,17 +55,17 @@ tests/                  — integration tests (fake SCM + fake Storage)
 
 Module: `github.com/gwg605/vsystemd`. Minimum Go version: 1.26+.
 
-### v1 scope
+### 1.4 v1 scope
 
 Out of scope for v1:
 
 - `OnBootSec=` / `OnStartupSec=` via Windows Task Scheduler
 - `Wants=`, `Before=`, `BindsTo=`, `PartOf=`, `Conflicts=`
 
-## Interfaces
-### Transport
+## 2. Interfaces
+### 2.1 Transport
 
-Transport is the abstract, peer-centric IPC interface (`internal/transport`). It deals in terms of `Peer` (type + name), `Message`, `Target`, `Send`, and `Req`, and knows nothing about pipes, envelopes, or naming; the named-pipe implementation lives in `internal/transport/pipe` (see the `transport / pipe` component).
+Transport is the abstract, peer-centric IPC interface (`internal/transport`). It deals in terms of `Peer` (type + name), `Message`, `Target`, `Send`, and `Req`, and knows nothing about pipes, envelopes, or naming; the named-pipe implementation lives in `internal/transport/pipe` (see the `### 4.5 transport / pipe` component).
 
 ```go
 type PeerType uint8 // PeerDaemon | PeerRunner | PeerControl
@@ -115,7 +115,7 @@ func (c *Component) handleStatusRequest(source transport.Peer, msg transport.Mes
 
 The transport matches responses by `request_id` within a connection: `Req()` sends a message with a unique `id` and waits for a response whose `request_id` equals that `id` on the same connection; several requests may be in flight at once, and a timeout returns an error and is logged.
 
-### SCM manager
+### 2.2 SCM manager
 
 `scm.Manager` abstracts the Windows Service Control Manager: creating, updating, deleting, starting, and stopping managed services, and querying their status. The Windows implementation lives in `internal/scm`; tests use a fake.
 
@@ -193,7 +193,7 @@ type Manager interface {
 
 On Windows, `ListServices()` returns only managed services tagged `LoadOrderGroup = "vsystemd"`; services owned by others are never touched.
 
-### Storage
+### 2.3 Storage
 
 `Storage` abstracts persistence: unit files and the raw bytes of the timer database (the JSON layout is owned by `timermgr`). Logs are handled separately by `logwriter`.
 
@@ -215,9 +215,9 @@ type Storage interface {
 }
 ```
 
-The production implementation is `internal/storage` (files under a fixed root, see `### Configuration`); tests use a fake.
+The production implementation is `internal/storage` (files under a fixed root, see `### 4.11 Configuration`); tests use a fake.
 
-### Timer manager
+### 2.4 Timer manager
 
 `timermgr.Manager` owns the timer database and the in-process `OnCalendar` scheduler. It is independent of SCM: when a timer fires it reports the event through a callback, and the caller decides what to start. The daemon drives its lifecycle (`New` → `Start` → `Stop`).
 
@@ -268,17 +268,17 @@ func (m *Manager) GetTimer(name string) (TimerConfig, error)
 
 `New` only loads the database and never invokes the event handler; `Start` schedules the enabled timers; `Stop` stops everything and shuts down. `ErrNotFound` reports an unknown timer and `ErrClosed` an operation after `Stop`.
 
-## Protocol
+## 3. Protocol
 
 The protocol is the message layer the daemon, runners, and the control client use to talk to each other over the shared named pipe. It defines the message envelope (`id`, `request_id`, `type`, `payload`), the catalog of message types grouped by direction, and the delivery guarantees. The wire types live in `internal/protocol`, while the transport layer (`internal/transport`, `internal/transport/pipe`) carries the messages and matches responses. Runners use it to report service state to the daemon; the control client uses it for daemon-specific operations (reload, status, unit listing, timer management) that SCM cannot serve.
 
-### Identification rules
+### 3.1 Identification rules
 
 - Every message carries a unique `id` (UUID), including responses.
 - `request_id` is the `id` of the message this one is a response to; `null` if the message is not a response.
 - A response has its own unique `id` and a populated `request_id`.
 
-### Message catalog
+### 3.2 Message catalog
 
 Messages are grouped by direction.
 
@@ -329,26 +329,26 @@ The `running`, `next_run`, `last_run`, `active_since`, and `activates` fields ar
 
 For `.timer`, `systemd_state` is `active (waiting)` when the timer is in the schedule, otherwise `inactive (dead)`. `active_since` holds the moment the timer was put in the schedule and is cleared on `stop`.
 
-### Delivery guarantees
+### 3.3 Delivery guarantees
 
 The scheme is best-effort: there is no delivery acknowledgement. A lost message (pipe unavailable, timeout) is recorded in the log. The current state is always available from SCM or the next heartbeat.
 
-## Components
-### daemon
+## 4. Components
+### 4.1 daemon
 
 The daemon is the single, always-running manager process. It owns the unit registry and the aggregated service state, serves the IPC endpoint, drives the timer manager, and performs `daemon-reload`.
 
 Responsibilities:
 
 - **Unit registry (`UnitsList`)** — the source of truth for unit configuration. It is built at startup and updated only by `daemon-reload`, never by reads. It merges unit files with the SCM services and the timer database; an entry that exists in SCM or the timer database but has no unit file is kept and reported as `not-found`.
-- **Service state** — combines the SCM state with the state reported by runners to compute the final systemd-style status (see `### Unit status computation`).
-- **IPC server** — handles the protocol messages from runners and the control client (see `## Protocol`).
+- **Service state** — combines the SCM state with the state reported by runners to compute the final systemd-style status (see `### 4.9 Unit status computation`).
+- **IPC server** — handles the protocol messages from runners and the control client (see `## 3. Protocol`).
 - **Timer manager** — owns the `timermgr.Manager` lifecycle (`Start`/`Stop`) and keeps the timer database in sync with the unit files.
 - **Log tail** — reads the last lines of a service's log file for status responses.
 
 `daemon-reload` rescans the unit directory and reconciles everything: it rebuilds the unit registry, updates or creates SCM services for changed units, removes disabled services that no longer have a unit file, syncs the timer database, and prunes runtime state for units that are gone.
 
-### runner
+### 4.2 runner
 
 A runner is the per-service process wrapper. It is registered in SCM as the service binary and is started/stopped by SCM; it launches and supervises the service's child process, applies the restart policy, and reports state to the daemon.
 
@@ -414,9 +414,9 @@ On `SERVICE_CONTROL_STOP`:
 
 `TimeoutStopSec=` is a unit-file directive supported in v1.
 
-### timermgr
+### 4.3 timermgr
 
-`timermgr` owns the timer database and runs the in-process `OnCalendar` scheduler. It is independent of SCM: when a timer fires it reports the event through a callback, and the daemon resolves the target service from the timer unit and starts it via SCM. See `### Timer manager` for the interface and `## Protocol` for the timer messages.
+`timermgr` owns the timer database and runs the in-process `OnCalendar` scheduler. It is independent of SCM: when a timer fires it reports the event through a callback, and the daemon resolves the target service from the timer unit and starts it via SCM. See `### 2.4 Timer manager` for the interface and `## 3. Protocol` for the timer messages.
 
 #### Behavior
 
@@ -488,9 +488,9 @@ Timezone support comes from embedded IANA tzdata (`import _ "time/tzdata"`), wit
 
 Inside the code and in persistence, time is stored and handled in UTC. `OnCalendar=` without a TZ suffix is interpreted in the machine's local timezone, with a suffix in the specified timezone. On input the time is converted to UTC; when displayed it is shown in the local timezone or with the explicitly specified timezone.
 
-### scm
+### 4.4 scm
 
-`scm` is the Windows Service Control Manager integration behind `scm.Manager` (see `### SCM manager`). The Windows implementation is `internal/scm`; `internal/scm/fake` is used in tests.
+`scm` is the Windows Service Control Manager integration behind `scm.Manager` (see `### 2.2 SCM manager`). The Windows implementation is `internal/scm`; `internal/scm/fake` is used in tests.
 
 Key behaviors:
 
@@ -501,9 +501,9 @@ Key behaviors:
 - **State** — SCM states map to `State` (`Stopped`, `StartPending`, `StopPending`, `Running`); other SCM states (pause/continue) fall through to the raw value.
 - **Runner authentication** — `GetServiceByHandle` resolves the managed service a process handle belongs to, or `ErrNotService`; the daemon uses it (together with the token account and image identity) to authenticate runner connections.
 
-### transport / pipe
+### 4.5 transport / pipe
 
-`transport/pipe` is the concrete `Transport` implementation on Windows named pipes (see `### Transport`). It adds a delivery envelope, authenticates incoming connections by OS identity, and hands the application a trusted `Peer`; outgoing targets are built with `Target`.
+`transport/pipe` is the concrete `Transport` implementation on Windows named pipes (see `### 2.1 Transport`). It adds a delivery envelope, authenticates incoming connections by OS identity, and hands the application a trusted `Peer`; outgoing targets are built with `Target`.
 
 #### Named pipe
 
@@ -561,9 +561,9 @@ Clients (runner/control) do not verify the server: the daemon is the only owner 
 
 Pipe-transport logs are tagged `[clientPid->serverPid]`, e.g. `pipe: [1110->13241] sent`. `systemctl` enables diagnostic logs with `--log [none|stdout|stderr]` (default `none`).
 
-### storage
+### 4.6 storage
 
-The production `Storage` implementation is file-backed under a fixed root (`C:\ProgramData\vsystemd` by default; see `### Configuration`). The paths are derived by `storage.PathsFromRoot`:
+The production `Storage` implementation is file-backed under a fixed root (`C:\ProgramData\vsystemd` by default; see `### 4.11 Configuration`). The paths are derived by `storage.PathsFromRoot`:
 
 | Data | Path |
 |---|---|
@@ -577,7 +577,7 @@ The production `Storage` implementation is file-backed under a fixed root (`C:\P
 
 `storage.New` creates the required directories on startup. Tests use `internal/storage/fake`.
 
-### unit
+### 4.7 unit
 
 `internal/unit` parses unit files and models them. A unit file is an INI-like file with sections `[Unit]`, `[Service]`, `[Timer]`; the type is taken from the file extension (`.service` / `.timer`). `Parse` returns a `UnitFile`: unknown directives are collected in `Warnings` instead of failing, while a missing required section or an invalid value is a parse error.
 
@@ -629,7 +629,7 @@ Directives by section:
 
 Unit names are validated by `ParseID`: the name is the file name without the extension, up to 64 characters, restricted to `[A-Za-z0-9_-]`, with a known extension.
 
-### systemctl
+### 4.8 systemctl
 
 `systemctl.exe` is the user-facing CLI (`cmd/systemctl`). It parses the command line, loads `config.json`, and dispatches to a `control.Controller`: operations that SCM can serve go directly to SCM, daemon-specific ones go through the daemon pipe. It must be run elevated.
 
@@ -652,7 +652,7 @@ The output is systemd-style. For `.service`: `● unit - description`, `Loaded`,
 
 After the block there is a blank line and the last 10 log lines: from the current/last managed file `logs\<service>\`, or from an explicitly set `file:`/`append:` file. For a `.timer` the tail of the activated service is shown. Rotated files are not mixed in. With `null` for both streams the tail is empty.
 
-### Unit status computation
+### 4.9 Unit status computation
 
 The daemon computes a unit's status from two sources: **SCM** (the authoritative source for the running/stopped fact) and the **daemon's internal state** (richer systemd semantics reported by the runner via `state_event`). On conflict, SCM always wins.
 
@@ -692,7 +692,7 @@ Rules:
 | `enabled` | SCM `StartType` / timers.json | for `.service` from SCM; for `.timer` from `timers.json` |
 | `active_since` | timer manager / timers.json | for `.timer` the moment it was put in the schedule; absent when inactive |
 
-### Logging
+### 4.10 Logging
 
 Logging is handled by `internal/logwriter`; `Storage` is not involved, except for path validation.
 
@@ -722,7 +722,7 @@ A custom path (`file:`/`append:`) must be **absolute** and a plain file path: no
 - closed managed logs older than `max_age_days` are deleted;
 - `file:`/`append:` files are neither rotated nor deleted.
 
-### Configuration
+### 4.11 Configuration
 
 The path is fixed: `C:\ProgramData\vsystemd\config.json`. A missing file means defaults; the path cannot be overridden. Each binary (`vsystemd`, `systemctl`) reads the config on its own at startup; every value has a default and the file overrides only what it sets.
 
@@ -753,8 +753,8 @@ The path is fixed: `C:\ProgramData\vsystemd\config.json`. A missing file means d
 }
 ```
 
-- `system_dir`, `logs_dir`, `timers_state_file` feed `storage.Paths` (see `### storage`).
-- `logs` drives log rotation (see `### Logging`).
-- `ipc` sets the transport connect and request timeouts (see `### transport / pipe`).
-- `defaults` provides per-service defaults for `RestartSec=`, `TimeoutStopSec=`, `StartLimitBurst=`, and `StartLimitIntervalSec=` when a unit does not set them (see `### runner`).
-- `environment` builds the clean environment for service processes: `inherit` lists variables taken from the runner's environment (defaults to a fixed list of standard Windows variables), `vars` adds extra variables (see `### runner`).
+- `system_dir`, `logs_dir`, `timers_state_file` feed `storage.Paths` (see `### 4.6 storage`).
+- `logs` drives log rotation (see `### 4.10 Logging`).
+- `ipc` sets the transport connect and request timeouts (see `### 4.5 transport / pipe`).
+- `defaults` provides per-service defaults for `RestartSec=`, `TimeoutStopSec=`, `StartLimitBurst=`, and `StartLimitIntervalSec=` when a unit does not set them (see `### 4.2 runner`).
+- `environment` builds the clean environment for service processes: `inherit` lists variables taken from the runner's environment (defaults to a fixed list of standard Windows variables), `vars` adds extra variables (see `### 4.2 runner`).
