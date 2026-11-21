@@ -28,6 +28,11 @@ The control client is the separate `systemctl.exe`, run by the user for each com
 
 ## Protocol
 ### Identification rules
+
+- Every message carries a unique `id` (UUID), including responses.
+- `request_id` is the `id` of the message this one is a response to; `null` if the message is not a response.
+- A response has its own unique `id` and a populated `request_id`.
+
 ### Message catalog
 ### Delivery guarantees
 
@@ -139,12 +144,6 @@ Runner держит постоянное соединение и по тайме
 ---
 
 ## IPC: каталог сообщений
-
-### Правила идентификации
-
-- Каждое сообщение имеет уникальный `id` (UUID), включая ответные.
-- `request_id` — `id` сообщения, на которое данное сообщение является ответом. `null` если сообщение не является ответом.
-- Ответное сообщение имеет собственный уникальный `id` и заполненный `request_id`.
 
 ---
 
