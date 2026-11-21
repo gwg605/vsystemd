@@ -1,506 +1,50 @@
 # vsystemd Technical Specification
 
----
+Module: `github.com/gwg605/vsystemd`. Minimum Go version: 1.26+.
 
-## Парсинг OnCalendar= и timespan
+## 1. Overview
+### 1.1 Applications and instances
 
-**Библиотека:** `gitlab.com/allddd/go-systemd-time` v1.1.0 (BSD-2-Clause)
+vsystemd has three runtime entities: the **daemon**, **runners**, and the **control** client.
 
-Используется для разбора:
+- **daemon** — the manager. A single, always-running process that owns the unit registry, computes service state, runs the timer manager, and serves the IPC endpoint. It is the source of truth for unit configuration and for daemon-specific operations.
+- **runner** — a per-service process wrapper. There is one runner per managed service; it launches and supervises the service's child process, applies `Restart=`/`RestartSec=` logic, and reports state back to the daemon.
+- **control** — the user-facing CLI (`systemctl.exe`). It is short-lived: it performs a single command and exits. Operations that SCM can serve go directly to SCM; daemon-specific operations (reload, unit listing, timer management) go through the daemon.
 
-- `OnCalendar=` — через `ParseCalendarEvent(s) → CalendarEvent` и `CalendarEvent.Next(t time.Time) → (time.Time, bool)`
-- `RestartSec=`, `OnBootSec=`, `OnStartupSec=` — через `ParseTimespan(s) → time.Duration`
+All three come from two executables. `vsystemd.exe` is dual-mode and becomes either the daemon or a runner depending on its arguments:
 
-Библиотека поддерживает полный синтаксис systemd calendar expressions: списки, диапазоны (`..`), шаги (`/`), тильда (`~` — дни с конца месяца), алиасы (`daily`, `weekly`, `monthly`, `hourly`, `minutely`, `quarterly`, `semiannually`, `annually`), суффикс часового пояса (IANA, UTC, offset). Чистый Go без cgo, работает на Windows.
+- the daemon starts as `vsystemd.exe --mode=daemon`; it is registered in the Windows SCM as a service and started by SCM (typically at boot);
+- a runner starts as `vsystemd.exe --mode=run --unit=<name>`, where `<name>` is the unit it serves; every managed service is registered in SCM with this command line as its service binary, so SCM starts and stops the runner together with the service.
 
-Поддержка часовых поясов обеспечивается через embedded IANA tzdata (`import _ "time/tzdata"`), без зависимости от наличия tzdata в ОС.
+The control client is the separate `systemctl.exe`, run by the user for each command. It must be elevated: control connections to the daemon are accepted only from an elevated token.
 
-Внутри кода и в persistence время хранится и обрабатывается в UTC.
-`OnCalendar=` без суффикса TZ интерпретируется в локальной TZ машины, с
-суффиксом — в указанной TZ. При вводе время переводится в UTC, при отображении
-показывается в локальной TZ либо с явно указанной TZ.
+### 1.2 Interaction and data flow
 
----
+Communication is a client–server model over a single named pipe. The server is the daemon; the clients are the runners and the control client. Clients initiate the connection to the daemon's pipe and use it in both directions: a request and its response travel over the same connection, so no reverse pipe is needed.
 
-## Timer manager
+The daemon never pushes: a runner sends its state on every change and on a heartbeat timer, and the control client receives the response to its request on the same connection.
 
-**Назначение:** внутренний компонент daemon'а (`internal/timermgr`), владеет базой timer'ов и отвечает за своевременный запуск сервисов по расписанию `OnCalendar=`.
+**Heartbeat and liveness** — a runner keeps a persistent connection and periodically sends its current state (`state_event`). If the daemon does not receive a heartbeat for longer than `RunnerDeadAfter`, the runner is marked `dead`.
 
-**Поведение:**
+**Daemon startup** — the daemon does not poll runners. After a daemon restart the runners' connections break; each runner reconnects and sends its current state on the next heartbeat.
 
-- Хранит набор timer'ов (`TimerConfig{Name, OnCalendar}`) и их статус (`TimerStatus{Enabled, Running, LastRun, NextRun, ActiveSince}`).
-- `Enabled` — административный флаг (в БД), `Running` — рантайм-статус (timer реально в расписании); они независимы.
-- Для каждого timer'а вычисляет следующий момент срабатывания через `CalendarEvent.Next(now)`.
-- Ждёт до этого момента, после чего сообщает о срабатывании через колбэк `func(name string, status TimerStatus)`.
-- Демон по имени timer'а находит timer unit, определяет целевой сервис (`Unit=`) и запускает его вызовом `StartService()` через Windows SCM. Менеджер не зависит от SCM.
-- После каждого срабатывания немедленно вычисляет следующий тик и снова ждёт (цикл).
-- Если `CalendarEvent.Next` возвращает `ok=false` (нет будущих тиков) — timer останавливается, в лог пишется предупреждение.
+### 1.3 v1 scope
 
-**Политика пропущенных тиков:** пропущенные тики не компенсируются. Если daemon был остановлен, расписание возобновляется с первого будущего тика относительно текущего времени на момент старта.
+Out of scope for v1:
 
-**Persistence:** после каждого изменения (срабатывание, `start`/`stop`, `enable`/`disable`, правка конфига) менеджер сериализует базу в свой JSON-формат и атомарно пишет через `storage.WriteTimers()`; при `New` читает `storage.ReadTimers()`. `Running` не персистится — при `Start()` в расписание ставятся все `enabled`-timer'ы.
-
-**API:** `SetTimer` (upsert конфига), `DeleteTimer` (только если `disabled` и `stopped`), `Enable`, `StartTimer`, `StopTimer`, `QueryStatus`, `QueryStatuses`, `ListTimers`, `GetTimer`, `Start` (запускает scheduler и ставит `enabled`-timer'ы), `Stop` (останавливает все и завершает работу).
-
-**Жизненный цикл:** `New` только загружает БД и не вызывает event handler; `Start` запускает scheduler; `Stop` останавливает все timer'ы и завершает работу (демон зовёт `Start`/`Stop`).
-
-**Reload:** при `daemon-reload` демон синхронизирует БД с юнитами:
-
-- Новые timer'ы — добавляются (`SetTimer`); автостарт `enabled`-timer'ов выполняется только в `Start()`.
-- Timer'ы с изменившимся `OnCalendar=` — перезапускаются.
-- Timer'ы без файла юнита — удаляются только если `disabled` и `stopped`; иначе сохраняются.
-
----
-
-## IPC: схема коммуникации daemon ↔ runner ↔ systemctl
-
-### Принцип
-
-Коммуникация построена на модели клиент–сервер поверх одного named pipe. Сервер — daemon; клиенты — runner'ы и systemctl. Клиенты инициируют соединение к pipe демона и работают по нему в обе стороны: запрос и ответ идут по одному соединению, обратный pipe не нужен.
-
-Демон ничего не пушит: runner сам отправляет состояние при изменении и по heartbeat-таймеру; systemctl получает ответ на свой запрос в том же соединении.
-
-### Named pipes
-
-| Участник | Роль | Pipe |
-|---|---|---|
-| daemon | слушает | `\\.\pipe\vsystemd-in` |
-| runner | подключается | `\\.\pipe\vsystemd-in` |
-| systemctl | подключается | `\\.\pipe\vsystemd-in` |
-
-Демон держит `vsystemd-in` открытым всё время работы. Каждый runner держит постоянное соединение с демоном и переподключается при разрыве. systemctl подключается на время выполнения команды.
-
-### Аутентификация
-
-Аутентификацию выполняет демон при приёме соединения. Клиент — либо managed-служба (own-process, аккаунт токена совпадает с `ServiceStartName`, образ — с `BinaryPathName`), либо elevated-клиент без службы (control); иное отклоняется. Время создания процесса должно предшествовать соединению (защита от PID reuse).
-
-Клиент удостоверяет сервер по позиции: демон — единственный владелец pipe (`FILE_FLAG_FIRST_PIPE_INSTANCE` + ACL + ранний старт службы). Отдельной верификации сервера клиентом нет.
-
-### Heartbeat и жизнеспособность
-
-Runner держит постоянное соединение и по таймеру отправляет текущее состояние (`state_event`). Если демон не получает heartbeat дольше `RunnerDeadAfter`, раннер помечается `dead`.
-
-### Поведение при старте daemon'а
-
-Демон не опрашивает runner'ов. После рестарта демона соединения runner'ов рвутся; runner переподключается и отправляет текущее состояние при следующем heartbeat.
-
-### Гарантии доставки
-
-Схема работает по принципу best-effort: подтверждение доставки отсутствует. Потерянное сообщение (pipe недоступен, таймаут) фиксируется в лог. Актуальное состояние всегда доступно через SCM или следующий heartbeat.
-
----
-
-## IPC: каталог сообщений
-
-### Правила идентификации
-
-- Каждое сообщение имеет уникальный `id` (UUID), включая ответные.
-- `request_id` — `id` сообщения, на которое данное сообщение является ответом. `null` если сообщение не является ответом.
-- Ответное сообщение имеет собственный уникальный `id` и заполненный `request_id`.
-
----
-
-### runner → daemon
-
-| Тип | request_id | Fire-and-forget | Payload |
-|---|---|---|---|
-| `state_event` | null | да | `unit`, `state`, `pid`, `exit_code`, `restart_count`, `timestamp`, `last_error` |
-
-**`state_event`** — отправляется runner'ом при каждой смене состояния управляемого процесса (запуск, успешная остановка, падение, рестарт) и периодически как heartbeat. Подтверждение от daemon'а не ожидается. Wire-типы (`StateEvent`, тип сообщения и значения `state`) определены в `internal/protocol`.
-
----
-
-### systemctl → daemon
-
-| Тип | Ожидаемый ответ | Payload |
-|---|---|---|
-| `daemon_reload` | `reload_result` | — |
-| `status_request` | `status_response` | `unit` |
-| `list_units` | `list_units_response` | — |
-| `timer_enable` | `timer_result` | `unit`, `enabled` (bool) |
-| `timer_start` | `timer_result` | `unit` |
-| `timer_stop` | `timer_result` | `unit` |
-
-**`daemon_reload`** — инициирует пересканирование unit-файлов и обновление конфигурации.
-
-**`status_request`** — запрос агрегированного состояния конкретного юнита.
-
-**`list_units`** — запрос списка всех известных юнитов с их состояниями.
-
-**`timer_enable`** — установить `enabled=true/false` для таймера (persist).
-
-**`timer_start`** — поставить таймер в расписание (не меняет `enabled`).
-
-**`timer_stop`** — убрать таймер из расписания (не меняет `enabled`); `next_run` и `active_since` сбрасываются, `last_run` сохраняется.
-
----
-
-### daemon → systemctl
-
-| Тип | request_id | Payload |
-|---|---|---|
-| `reload_result` | id запроса `daemon_reload` | `success` |
-| `status_response` | id запроса `status_request` | `unit`, `systemd_state`, `scm_state`, `pid`, `exit_code`, `restart_count`, `last_transition`, `last_error`, `log_tail`, `description`, `enabled`; для `.timer` дополнительно `running`, `next_run`, `last_run`, `active_since`, `activates` |
-| `list_units_response` | id запроса `list_units` | `units[]`: `unit`, `type`, `systemd_state`, `scm_state`, `description`, `enabled`, `running`, `next_run`, `last_run`, `activates` |
-| `timer_result` | id исходного запроса | `unit`, `success`, `enabled`, `running`, `last_run`, `next_run` |
-| `error_response` | id исходного запроса | `error` |
-
-**`error_response`** — универсальный ответ на любой запрос в случае ошибки обработки. `request_id` содержит `id` того запроса, который вызвал ошибку.
-
-Поля `running`, `next_run`, `last_run`, `active_since`, `activates` заполняются только для юнитов типа `.timer`; для `.service` — `null`/пусто. Поле `enabled` для `.service` вычисляется из SCM `StartType` (`Automatic`/`Boot`/`System` → `true`, `Manual`/`Disabled` → `false`), для `.timer` — из базы timer'ов.
-
-Для `.timer` поле `systemd_state` равно `active (waiting)`, если таймер стоит в расписании, иначе `inactive (dead)`. Поле `active_since` содержит момент добавления таймера в расписание и сбрасывается при `stop`.
-
----
-
-## Вычисление статуса юнита
-
-Статус юнита вычисляется daemon'ом из двух источников: **SCM** (авторитетный источник факта running/stopped) и **внутреннее состояние daemon'а** (обогащённая systemd-семантика, получаемая от runner'а через `state_event`). При конфликте SCM всегда приоритетнее.
-
-### Таблица вычисления статуса
-
-| SCM state | Daemon state | exit_code | Итоговый статус |
-|---|---|---|---|
-| `SERVICE_RUNNING` | `active` | — | `active (running)` |
-| `SERVICE_RUNNING` | `activating` | — | `activating (start)` |
-| `SERVICE_RUNNING` | `restarting` | — | `activating (auto-restart)` |
-| `SERVICE_RUNNING` | `deactivating` | — | `deactivating (stop)` |
-| `SERVICE_RUNNING` | нет данных | — | `active (running)` |
-| `SERVICE_STOPPED` | `inactive` | 0 | `inactive (dead)` |
-| `SERVICE_STOPPED` | `failed` | ≠ 0 | `failed` |
-| `SERVICE_STOPPED` | нет данных | — | `inactive (dead)` |
-| `SERVICE_START_PENDING` | любое | — | `activating (start)` |
-| `SERVICE_STOP_PENDING` | любое | — | `deactivating (stop)` |
-| нет в SCM | любое | — | `inactive (dead)` |
-
-### Правила
-
-**SCM приоритетнее daemon state** для факта running/stopped. Daemon state уточняет детали внутри этого факта (например, различает `active` и `restarting` при `SERVICE_RUNNING`).
-
-**`failed`** наступает только при одновременном выполнении двух условий:
-- SCM сообщает `SERVICE_STOPPED`
-- Runner сообщил daemon'у `state=failed` с ненулевым `exit_code`
-
-Пока runner перезапускает процесс в рамках `Restart=` — статус `activating (auto-restart)`, не `failed`. `failed` наступает только когда исчерпан лимит рестартов (`StartLimitBurst`) или `Restart=no`.
-
-**Если daemon не запущен или pipe runner'а недоступен** — поле `systemd_state` недоступно, статус определяется только по SCM. Состояние `failed` в этом случае не отображается — только `inactive (dead)`. Это зафиксированное расхождение с оригинальным systemd (known difference #2 в ARCHITECTURE.md).
-
-### Поля `status_response`
-
-| Поле | Источник | Описание |
-|---|---|---|
-| `systemd_state` | daemon internal | итоговый вычисленный статус (`active (running)`, `failed`, и т.д.) |
-| `scm_state` | SCM | числовой код состояния SCM (`SERVICE_RUNNING`, `SERVICE_STOPPED`, и т.д.) |
-| `pid` | runner / SCM | PID основного процесса; 0 если не запущен |
-| `exit_code` | runner | код завершения последнего запуска процесса |
-| `restart_count` | runner | количество автоматических рестартов с момента последнего старта |
-| `last_transition` | daemon | timestamp последней смены состояния |
-| `last_error` | runner | строка с ошибкой запуска, сгенерированная runner'ом; только последняя; null если ошибок не было |
-| `log_tail` | лог-файл | последние 10 строк из текущего файла `logs\<service>\` или явного `file:`/`append:` файла |
-| `description` | unit-файл | значение `Description=` из секции `[Unit]` |
-| `enabled` | SCM `StartType` / timers.json | для `.service` — из SCM; для `.timer` — из `timers.json` |
-| `active_since` | timer manager / timers.json | для `.timer` — момент добавления в расписание; отсутствует у неактивного таймера |
-
----
-
-## Структура проекта
-
-### Бинари
-
-| Бинарь | Режим | Роль |
-|---|---|---|
-| `vsystemd.exe` | `--mode=daemon` | Windows Service, управляет состоянием, timer manager, IPC сервер |
-| `vsystemd.exe` | `--mode=run --unit=<name>` | Обёртка процесса, Restart= логика, pipe к daemon |
-| `systemctl.exe` | — | CLI, SCM напрямую или через daemon |
-
-### Пакеты
-
-```
-cmd/
-  vsystemd/             — точка входа, dispatch --mode=daemon / --mode=run
-  systemctl/            — CLI
-
-internal/
-  unit/                 — парсер unit-файлов, модели UnitFile, ServiceUnit, TimerUnit
-  scm/                  — интерфейс Manager + Windows реализация
-  transport/            — интерфейс Transport, Message, MsgHandler, Opt
-  transport/pipe/       — реализация на named pipes, pipe envelope, lazy connect
-  daemon/               — Daemon, ServiceState, логика daemon-reload
-  timermgr/             — база timer'ов и OnCalendar= scheduler
-  runner/               — Runner, управление дочерним процессом, Restart= логика
-  storage/              — интерфейс Storage + prod реализация + fake реализация
-
-tests/                  — интеграционные тесты (fake SCM + fake Storage)
-```
-
-### Ключевые интерфейсы
-
-```go
-type Storage interface {
-    // unit files
-    ListUnits() ([]string, error)
-    ReadUnit(name string) ([]byte, error)
-    // timers (raw bytes; layout owned by timermgr)
-    ReadTimers() ([]byte, error)
-    WriteTimers(data []byte) error
-}
-
-type Manager interface {
-    CreateService(cfg ServiceConfig) error
-    UpdateService(cfg ServiceConfig) error
-    DeleteService(name string) error
-    StartService(name string) error
-    StopService(name string) error
-    QueryStatus(name string) (ServiceStatus, error)
-    ListServices() ([]ServiceStatus, error)
-}
-
-type Account string
-
-type ServiceConfig struct {
-    Name         string
-    BinaryPath   string
-    StartType    StartType
-    Dependencies []string
-    User         Account
-    password     string
-    Description  string
-}
-```
-
-`NewServiceConfig(unit, binaryPath, startType)` транслирует unit-файл в
-`ServiceConfig`; `NewAccount(user, name)` резолвит win32-аккаунт. Пароль
-устанавливается методом `SetPassword` и никогда не возвращается при чтении
-(поле неэкспортируемое).
-
-`Storage` абстрагирует только persistence-операции: unit-файлы и байты базы
-таймеров (структуру JSON определяет `timermgr`). Логи ведутся отдельным
-компонентом `logwriter`.
-
-На Windows `ListServices()` возвращает только managed-сервисы, помеченные
-`LoadOrderGroup = "vsystemd"`; чужие SCM-сервисы не затрагиваются.
-
-### Go module
-
-- Module: `github.com/gwg605/vsystemd`
-- Минимальная версия Go: 1.26+
-
-### За рамками v1
-
-- `OnBootSec=` / `OnStartupSec=` через Windows Task Scheduler
+- `OnBootSec=` / `OnStartupSec=` via Windows Task Scheduler
 - `Wants=`, `Before=`, `BindsTo=`, `PartOf=`, `Conflicts=`
 
----
+## 2. Interfaces
+### 2.1 Transport
 
-## Runner
-
-### Компоненты
-
-| Компонент | Ответственность |
-|---|---|
-| `controlHandler` | Регистрация в SCM, приём control-кодов (STOP/SHUTDOWN/INTERROGATE), цикл состояний и обновление `SetServiceStatus` |
-| `operation` | Запуск внешнего процесса (`processOperation`) или последовательности (`sequenceOperation`), ожидание завершения, `Cancel(Interrupt\|Kill)` |
-| `RestartController` | `Restart=` / `RestartSec=` / `StartLimitBurst=` логика, счётчик `restart_count` |
-| `LogStreamer` | Перехват stdout/stderr дочернего процесса → `logwriter.Writer` |
-| `StateReporter` | Отправка `state_event` в daemon и heartbeat-таймер |
-
-### Жизненный цикл
-
-```
-SCM start → Runner start
-  → ExecStartPre
-  → ExecStart (child process)
-  → ExecStartPost
-  → [работает, мониторит child]
-  → child exit → drain (дожидаемся завершения всех операций)
-  → [Restart= активен и лимит не исчерпан] → RestartSec → повтор
-  → [Restart=no или лимит исчерпан] → Runner exit
-SCM stop → SERVICE_CONTROL_STOP → drain (ExecStop / Ctrl+C, по таймауту Kill) → Runner exit
-```
-
-### ExecStartPre / ExecStartPost
-
-Поведение как в systemd:
-
-- `ExecStartPre` ненулевой exit code → Runner переходит в `failed`, `ExecStart` не запускается
-- `ExecStartPost` ненулевой exit code → сервис переходит в `failed`, дочерний процесс останавливается
-- Префикс `-` (`-/path/to/cmd`) → ошибка игнорируется, выполнение продолжается
-
-### EnvironmentFile=
-
-Путь должен быть **абсолютным** и не содержать компонент `..`; иначе — ошибка
-запуска (префикс `-` это не отменяет). Реакция на отсутствие файла — как в systemd:
-
-- `EnvironmentFile=/path` — файл обязателен; отсутствие → `failed`
-- `EnvironmentFile=-/path` — файл опциональный; отсутствие игнорируется
-
-### Формирование окружения сервисов
-
-Сервисные процессы **не наследуют** окружение раннера. Окружение собирается
-из `config.json` (секция `environment`) и директив юнита, в порядке возрастания
-приоритета:
-
-1. `environment.inherit` — список имён (через запятую), значения берутся из
-   окружения раннера; при отсутствии поля используется фиксированный дефолтный
-   список стандартных переменных Windows; `"inherit": ""` — не наследовать ничего;
-2. `environment.vars` — дополнительные переменные; в значениях `%NAME%`
-   подставляется значение из окружения раннера (`%%` → литеральный `%`;
-   неопределённое имя → пусто; `%` без закрывающего `%` → как есть + warning);
-3. `EnvironmentFile=` (unit);
-4. `Environment=` (unit) — высший приоритет.
-
-`runUnit` резолвит `environment` в `runner.EnvironmentDefaults` и передаёт
-раннеру; сам раннер остаётся config-agnostic.
-
-### Restart= логика
-
-| Директива | Поведение |
-|---|---|
-| `Restart=no` | Не перезапускать |
-| `Restart=always` | Перезапускать всегда |
-| `Restart=on-failure` | Перезапускать только при ненулевом exit code |
-
-- `StartLimitBurst=` / `StartLimitIntervalSec=` — как в systemd: N попыток за интервал, после исчерпания → `failed`
-- Между попытками — пауза `RestartSec=`
-
-### Остановка процесса
-
-При получении `SERVICE_CONTROL_STOP`:
-
-1. Если задан `ExecStop=` — выполнить его
-2. Если не задан — отправить `Ctrl+C` (`GenerateConsoleCtrlEvent`)
-3. Ждать `TimeoutStopSec=` (default 45s)
-4. Если процесс не завершился — `TerminateProcess()`
-
-`TimeoutStopSec=` — директива unit-файла, поддерживается в v1.
-
----
-
-## Таймеры: управление и persistence
-
-### Два независимых состояния
-
-- `enabled` — сохраняется в БД; определяет автозапуск при `Start()` менеджера (старт daemon'а)
-- `running` — рантайм-статус; таймер реально стоит в расписании в рамках текущей сессии
-
-### Persistence
-
-Файл: `C:\ProgramData\vsystemd\timers.json`
-
-```json
-{
-  "foo.timer": {
-    "on_calendar": ["daily"],
-    "enabled": true,
-    "last_run": "2026-11-09T10:00:00Z",
-    "next_run": "2026-11-09T11:00:00Z",
-    "active_since": "2026-11-09T09:00:00Z"
-  }
-}
-```
-
-Структуру файла определяет пакет `timermgr`; `storage` хранит только байты.
-`last_run`, `next_run` и `active_since` хранятся и обрабатываются только в UTC (RFC3339 с `Z`).
-При отображении время либо выводится в UTC с явным `Z`, либо конвертируется в
-локальную TZ с указанием зоны.
-
-Файл записывается атомарно: во временный файл в том же каталоге с последующей
-заменой через `rename`, поэтому сбой в момент записи не оставляет повреждённый
-`timers.json`.
-
-### Семантика команд
-
-| Команда | Эффект |
-|---|---|
-| `systemctl enable foo.timer` | `enabled=true` в БД; не запускает таймер |
-| `systemctl disable foo.timer` | `enabled=false` в БД; не останавливает таймер |
-| `systemctl start foo.timer` | ставит в расписание (running); не меняет `enabled`; устанавливает `active_since` |
-| `systemctl stop foo.timer` | убирает из расписания; не меняет `enabled`; сбрасывает `next_run` и `active_since` |
-
-При `Start()` менеджера: все таймеры с `enabled=true` автоматически ставятся в расписание.
-
-### Routing
-
-Все команды для таймеров (`enable`, `disable`, `start`, `stop`) — через daemon pipe (не SCM). SCM о таймерах не знает.
-
-### IPC: новые сообщения systemctl → daemon
-
-| Тип | Ожидаемый ответ | Payload |
-|---|---|---|
-| `timer_enable` | `timer_result` | `unit`, `enabled` (bool) |
-| `timer_start` | `timer_result` | `unit` |
-| `timer_stop` | `timer_result` | `unit` |
-
-| Тип | request_id | Payload |
-|---|---|---|
-| `timer_result` | id исходного запроса | `unit`, `success`, `enabled`, `running`, `last_run`, `next_run` |
-
----
-
-## Логирование
-
-### Логи сервисов
-
-- по умолчанию stdout и stderr → `C:\ProgramData\vsystemd\logs\<service>\<timestamp>.log`
-- `<service>` — имя юнита без расширения (`foo.service` → `foo`)
-- `<timestamp>` — UTC время создания файла, формат `YYYY-MM-DD_HH-MM-SS.mmm`
-- `StandardOutput=file:<path>` / `StandardError=file:<path>` — truncate, без ротации
-- `StandardOutput=append:<path>` / `StandardError=append:<path>` — append, без ротации
-- `null` — поток отбрасывается
-- кастомный путь (`file:`/`append:`) должен быть **абсолютным** и быть обычным
-  файловым путём: без компонент `..`/`.`, без хвостовых точек/пробелов в
-  компонентах, без Alternate Data Stream (`:`), без device-путей (`\\.\`, `\\?\`)
-  и без reserved-имён устройств (`CON`, `NUL`, `COM1`, ...); **родительская папка
-  должна существовать** и быть каталогом (для `file:`/`append:` — доступным на
-  запись), сам путь не должен указывать на каталог; иначе — ошибка запуска
-  (каталоги автоматически не создаются)
-- любое другое значение (`journal`, мусор) — ошибка запуска
-- одинаковый канонический путь для stdout/stderr → один writer
-- `file:` + `append:` на один путь → append для обоих
-
-### Собственные логи vsystemd
-
-- daemon → `C:\ProgramData\vsystemd\logs\vsystemd\daemon_<timestamp>.log`
-- runner → `C:\ProgramData\vsystemd\logs\vsystemd\<service>_<timestamp>.log`
-- формат: plain text
-- файлы открыты на append и доступны на чтение
-- ротация по `logs.max_size_mb` и `logs.max_age_days`
-- при ротации создаётся новый файл с UTC timestamp; переименования не используются
-- закрытые managed-логи старше `max_age_days` удаляются
-- `file:`/`append:` файлы не ротируются и не удаляются
-
-### `systemctl status`
-
-Вывод оформлен в systemd-стиле. Для `.service`:
-`● unit - description`, `Loaded`, `Active` (со `since ...; ... ago`),
-`Main PID`, а также `Exit code`/`Restart`/`Error` при наличии значения.
-Для `.timer`: `Loaded`, `Active` (со `since ...; ... ago` при активном таймере),
-`Trigger` (время следующего запуска и остаток) и `Triggers` (активируемый сервис).
-
-После блока идёт пустая строка и последние 10 строк лога: из текущего/последнего
-managed-файла `logs\<service>\`, либо из явно заданного `file:`/`append:` файла.
-Для `.timer` показывается хвост лога активируемого сервиса. Ротированные файлы не
-подмешиваются. При `null` для обоих потоков tail пуст.
-
----
-
-## Transport (IPC абстракция)
-
-### Два уровня
-
-**Уровень Transport** (`internal/transport/`) — абстрактный peer-центричный интерфейс. Оперирует понятиями `Peer` (тип + имя), `Message`, `Target`, `Send`, `Req`. Не знает про pipes, конверты, именование.
-
-**Уровень Pipe** (`internal/transport/pipe/`) — реализация Transport на named pipes. Добавляет envelope с деталями доставки, аутентифицирует входящее соединение по ОС-идентичности и отдаёт доверенный `Peer`. Исходящий target строится методом `Target`.
-
-### Transport API
+Transport is the abstract, peer-centric IPC interface (`internal/transport`). It deals in terms of `Peer` (type + name), `Message`, `Target`, `Send`, and `Req`, and knows nothing about pipes, envelopes, or naming; the named-pipe implementation lives in `internal/transport/pipe` (see the `### 4.5 transport / pipe` component).
 
 ```go
-// internal/transport/
-
 type PeerType uint8 // PeerDaemon | PeerRunner | PeerControl
 
-// Peer — проверенная идентичность пира. Создаётся только транспортом;
-// приложение получает его в обработчике или через Target.
+// Peer is a verified peer identity. It is created only by the transport;
+// the application receives it in a handler or via Target.
 type Peer struct{ /* typ, name, elevated */ }
 
 func (p Peer) Type() PeerType
@@ -509,9 +53,9 @@ func (p Peer) Elevated() bool
 
 type Message struct {
     ID        string          // UUID
-    RequestID string          // UUID ответного запроса; "" если не ответ
-    Type      string          // тип сообщения
-    Payload   json.RawMessage // тело сообщения
+    RequestID string          // UUID of the request this is a response to; "" if not a response
+    Type      string          // message type
+    Payload   json.RawMessage // message body
 }
 
 type MsgHandler func(source Peer, msg Message) error
@@ -525,15 +69,15 @@ type Transport interface {
 
 func New(config Config, local Peer, handler MsgHandler) (Transport, error)
 
-// Opts — переопределяют значения из конфига
-WithTimeout(d time.Duration)        // таймаут ожидания ответа (для Req)
-WithConnectTimeout(d time.Duration) // таймаут подключения (для Send и Req)
+// Opts override config values
+WithTimeout(d time.Duration)        // response timeout (for Req)
+WithConnectTimeout(d time.Duration) // connect timeout (for Send and Req)
 
 // PeerOption
-WithName(name string) // имя целевого пира (напр. юнит для runner)
+WithName(name string) // target peer name (e.g. unit for a runner)
 ```
 
-Хендлер отвечает, используя `source` как target:
+A handler replies using `source` as the target:
 
 ```go
 func (c *Component) handleStatusRequest(source transport.Peer, msg transport.Message) error {
@@ -542,9 +86,419 @@ func (c *Component) handleStatusRequest(source transport.Peer, msg transport.Mes
 }
 ```
 
-### Pipe envelope (внутренний формат)
+The transport matches responses by `request_id` within a connection: `Req()` sends a message with a unique `id` and waits for a response whose `request_id` equals that `id` on the same connection; several requests may be in flight at once, and a timeout returns an error and is logged.
 
-Формат одного сообщения на уровне pipe реализации — newline-delimited JSON:
+### 2.2 SCM manager
+
+`scm.Manager` abstracts the Windows Service Control Manager: creating, updating, deleting, starting, and stopping managed services, and querying their status. The Windows implementation lives in `internal/scm`; tests use a fake.
+
+```go
+type StartType int
+
+// StartTypeNoChange leaves the service start type unchanged on update.
+const StartTypeNoChange StartType = 0
+
+const (
+    StartTypeAutomatic StartType = iota + 1
+    StartTypeManual
+    StartTypeDisabled
+    StartTypeBoot
+    StartTypeSystem
+)
+
+type State uint32
+
+const (
+    StateStopped State = iota + 1
+    StateStartPending
+    StateStopPending
+    StateRunning
+)
+
+// ProcessHandle is an opaque OS handle to a process (a Windows HANDLE).
+type ProcessHandle uintptr
+
+// Account is an account a service runs under.
+type Account string
+
+type ServiceConfig struct {
+    Name         string
+    BinaryPath   string
+    StartType    StartType
+    Dependencies []string
+    User         Account
+    password     string
+    DisplayName  string
+    Description  string
+}
+
+type ServiceStatus struct {
+    Name     string
+    State    State
+    PID      uint32
+    ExitCode uint32
+}
+
+type Manager interface {
+    CreateService(cfg ServiceConfig) error
+    UpdateService(cfg ServiceConfig) error
+    // SetStartType changes only the start type of an existing managed service.
+    SetStartType(name string, startType StartType) error
+    DeleteService(name string) error
+    StartService(name string) error
+    StopService(name string) error
+    QueryStatus(name string) (ServiceStatus, error)
+    QueryStatuses() ([]ServiceStatus, error)
+    // ListServices returns the configuration of every managed service. The
+    // password is never populated because SCM does not expose it.
+    ListServices() ([]ServiceConfig, error)
+    // GetService returns the configuration of a single managed service.
+    GetService(name string) (ServiceConfig, error)
+    // GetServiceByHandle returns the configuration of the managed service the
+    // process handle belongs to, or ErrNotService if it is not a service.
+    GetServiceByHandle(handle ProcessHandle) (ServiceConfig, error)
+}
+```
+
+`svcconfig.FromUnit(unit, binaryPath, startType)` translates a unit file into a `ServiceConfig`; `scm.NewAccount(user, name)` resolves the win32 account, defaulting to the per-service virtual account `NT SERVICE\<name>`. The password is set via `SetPassword` and is never returned by read operations (the field is unexported).
+
+`ErrNotFound` reports a missing service, `ErrNotService` a process that is not a service, and `ErrNotManaged` a service not created by vsystemd.
+
+On Windows, `ListServices()` returns only managed services tagged `LoadOrderGroup = "vsystemd"`; services owned by others are never touched.
+
+### 2.3 Storage
+
+`Storage` abstracts persistence: unit files and the raw bytes of the timer database (the JSON layout is owned by `timermgr`). Logs are handled separately by `logwriter`.
+
+```go
+type Storage interface {
+    // unit files
+    ListUnits() ([]string, error)
+    ReadUnit(name string) ([]byte, error)
+    // timers (raw bytes; layout owned by timermgr)
+    ReadTimers() ([]byte, error)
+    WriteTimers(data []byte) error
+
+    // ValidatePath rejects a path that is not a plain absolute file path.
+    ValidatePath(path string) error
+    // OutputWritable reports whether an output file's parent directory exists and is writable.
+    OutputWritable(path string) error
+    // InputReadable reports whether an input file can be read.
+    InputReadable(path string) error
+}
+```
+
+The production implementation is `internal/storage` (files under a fixed root, see `### 4.11 Configuration`); tests use a fake.
+
+### 2.4 Timer manager
+
+`timermgr.Manager` owns the timer database and the in-process `OnCalendar` scheduler. It is independent of SCM: when a timer fires it reports the event through a callback, and the caller decides what to start. The daemon drives its lifecycle (`New` → `Start` → `Stop`).
+
+```go
+// TimerConfig is the persisted configuration of a timer.
+type TimerConfig struct {
+    Name       string
+    OnCalendar []string
+}
+
+// TimerStatus is the runtime view of a timer.
+type TimerStatus struct {
+    Name        string
+    Enabled     bool
+    Running     bool
+    LastRun     time.Time
+    NextRun     time.Time
+    ActiveSince time.Time
+}
+
+// EventFunc is called when a timer fires.
+type EventFunc func(name string, status TimerStatus)
+
+func New(store storage.Storage, onEvent EventFunc) (*Manager, error)
+
+// Start runs the scheduler, scheduling every enabled timer. It is idempotent.
+func (m *Manager) Start() error
+// Stop stops every scheduled timer and shuts the manager down. It is idempotent.
+func (m *Manager) Stop() error
+
+// SetTimer creates or updates a timer (upsert); it never changes the
+// enabled or running state.
+func (m *Manager) SetTimer(cfg TimerConfig) error
+// DeleteTimer removes a timer; it must be both disabled and stopped.
+func (m *Manager) DeleteTimer(name string) error
+// Enable sets the administrative enabled flag without starting or stopping.
+func (m *Manager) Enable(name string, enabled bool) error
+// StartTimer puts the timer in the schedule; a no-op when already running.
+func (m *Manager) StartTimer(name string) error
+// StopTimer removes the timer from the schedule.
+func (m *Manager) StopTimer(name string) error
+
+func (m *Manager) QueryStatus(name string) (TimerStatus, error)
+func (m *Manager) QueryStatuses() ([]TimerStatus, error)
+func (m *Manager) ListTimers() ([]TimerConfig, error)
+func (m *Manager) GetTimer(name string) (TimerConfig, error)
+```
+
+`New` only loads the database and never invokes the event handler; `Start` schedules the enabled timers; `Stop` stops everything and shuts down. `ErrNotFound` reports an unknown timer and `ErrClosed` an operation after `Stop`.
+
+## 3. Protocol
+
+The protocol is the message layer the daemon, runners, and the control client use to talk to each other over the shared named pipe. It defines the message envelope (`id`, `request_id`, `type`, `payload`), the catalog of message types grouped by direction, and the delivery guarantees. The wire types live in `internal/protocol`, while the transport layer (`internal/transport`, `internal/transport/pipe`) carries the messages and matches responses. Runners use it to report service state to the daemon; the control client uses it for daemon-specific operations (reload, status, unit listing, timer management) that SCM cannot serve.
+
+### 3.1 Identification rules
+
+- Every message carries a unique `id` (UUID), including responses.
+- `request_id` is the `id` of the message this one is a response to; `null` if the message is not a response.
+- A response has its own unique `id` and a populated `request_id`.
+
+### 3.2 Message catalog
+
+Messages are grouped by direction.
+
+#### 3.2.1 runner → daemon
+
+| Type | request_id | Fire-and-forget | Payload |
+|---|---|---|---|
+| `state_event` | null | yes | `unit`, `state`, `pid`, `exit_code`, `restart_count`, `timestamp`, `last_error` |
+
+**`state_event`** — sent by a runner on every state change of the managed process (start, clean stop, crash, restart) and periodically as a heartbeat. No acknowledgement from the daemon is expected. The wire types (`StateEvent`, the message type, and the `state` values) are defined in `internal/protocol`.
+
+#### 3.2.2 systemctl → daemon
+
+| Type | Expected response | Payload |
+|---|---|---|
+| `daemon_reload` | `reload_result` | — |
+| `status_request` | `status_response` | `unit` |
+| `list_units` | `list_units_response` | — |
+| `timer_enable` | `timer_result` | `unit`, `enabled` (bool) |
+| `timer_start` | `timer_result` | `unit` |
+| `timer_stop` | `timer_result` | `unit` |
+
+**`daemon_reload`** — triggers a rescan of unit files and a configuration update.
+
+**`status_request`** — requests the aggregated state of a specific unit.
+
+**`list_units`** — requests the list of all known units with their states.
+
+**`timer_enable`** — sets `enabled=true/false` for a timer (persisted).
+
+**`timer_start`** — puts the timer in the schedule (does not change `enabled`).
+
+**`timer_stop`** — removes the timer from the schedule (does not change `enabled`); `next_run` and `active_since` are cleared, `last_run` is kept.
+
+#### 3.2.3 daemon → systemctl
+
+| Type | request_id | Payload |
+|---|---|---|
+| `reload_result` | id of the `daemon_reload` request | `success` |
+| `status_response` | id of the `status_request` request | `unit`, `systemd_state`, `scm_state`, `pid`, `exit_code`, `restart_count`, `last_transition`, `last_error`, `log_tail`, `description`, `enabled`; for `.timer` additionally `running`, `next_run`, `last_run`, `active_since`, `activates` |
+| `list_units_response` | id of the `list_units` request | `units[]`: `unit`, `type`, `systemd_state`, `scm_state`, `description`, `enabled`, `running`, `next_run`, `last_run`, `activates` |
+| `timer_result` | id of the originating request | `unit`, `success`, `enabled`, `running`, `last_run`, `next_run` |
+| `error_response` | id of the originating request | `error` |
+
+**`error_response`** — a generic response to any request that fails to process. `request_id` holds the `id` of the request that caused the error.
+
+The `running`, `next_run`, `last_run`, `active_since`, and `activates` fields are populated only for `.timer` units; for `.service` they are `null`/empty. The `enabled` field for `.service` is derived from SCM `StartType` (`Automatic`/`Boot`/`System` → `true`, `Manual`/`Disabled` → `false`); for `.timer` it comes from the timer database.
+
+For `.timer`, `systemd_state` is `active (waiting)` when the timer is in the schedule, otherwise `inactive (dead)`. `active_since` holds the moment the timer was put in the schedule and is cleared on `stop`.
+
+### 3.3 Delivery guarantees
+
+The scheme is best-effort: there is no delivery acknowledgement. A lost message (pipe unavailable, timeout) is recorded in the log. The current state is always available from SCM or the next heartbeat.
+
+## 4. Components
+### 4.1 daemon
+
+The daemon is the single, always-running manager process. It owns the unit registry and the aggregated service state, serves the IPC endpoint, drives the timer manager, and performs `daemon-reload`.
+
+Responsibilities:
+
+- **Unit registry (`UnitsList`)** — the source of truth for unit configuration. It is built at startup and updated only by `daemon-reload`, never by reads. It merges unit files with the SCM services and the timer database; an entry that exists in SCM or the timer database but has no unit file is kept and reported as `not-found`.
+- **Service state** — combines the SCM state with the state reported by runners to compute the final systemd-style status (see `### 4.9 Unit status computation`).
+- **IPC server** — handles the protocol messages from runners and the control client (see `## 3. Protocol`).
+- **Timer manager** — owns the `timermgr.Manager` lifecycle (`Start`/`Stop`) and keeps the timer database in sync with the unit files.
+- **Log tail** — reads the last lines of a service's log file for status responses.
+
+`daemon-reload` rescans the unit directory and reconciles everything: it rebuilds the unit registry, updates or creates SCM services for changed units, removes disabled services that no longer have a unit file, syncs the timer database, and prunes runtime state for units that are gone.
+
+### 4.2 runner
+
+A runner is the per-service process wrapper. It is registered in SCM as the service binary and is started/stopped by SCM; it launches and supervises the service's child process, applies the restart policy, and reports state to the daemon.
+
+#### 4.2.1 Components
+
+| Component | Responsibility |
+|---|---|
+| `controlHandler` | Registers with SCM, receives control codes (STOP/SHUTDOWN/INTERROGATE), runs the state loop, and updates `SetServiceStatus` |
+| `operation` | Runs an external process (`processOperation`) or a sequence (`sequenceOperation`), waits for completion, `Cancel(Interrupt\|Kill)` |
+| `RestartController` | `Restart=` / `RestartSec=` / `StartLimitBurst=` logic and the `restart_count` counter |
+| `LogStreamer` | Captures the child's stdout/stderr into a `logwriter.Writer` |
+| `StateReporter` | Sends `state_event` to the daemon and drives the heartbeat timer |
+
+#### 4.2.2 Lifecycle
+
+On SCM start the runner runs `ExecStartPre`, then `ExecStart` (the child process), then `ExecStartPost`, and then monitors the child while it runs. When the child exits it drains (waits for all operations to finish); if `Restart=` is active and the start limit is not exhausted, it waits `RestartSec` and repeats, otherwise it exits. On SCM stop (`SERVICE_CONTROL_STOP`) it drains — running `ExecStop` or sending Ctrl+C, and killing on timeout — and exits.
+
+#### 4.2.3 ExecStartPre / ExecStartPost
+
+Behavior follows systemd:
+
+- a non-zero `ExecStartPre` exit code makes the runner `failed` and `ExecStart` is not started;
+- a non-zero `ExecStartPost` exit code makes the service `failed` and the child process is stopped;
+- the `-` prefix (`-/path/to/cmd`) ignores the error and continues.
+
+#### 4.2.4 EnvironmentFile=
+
+The path must be **absolute** and must not contain a `..` component; otherwise it is a startup error (the `-` prefix does not override this). Missing-file behavior follows systemd:
+
+- `EnvironmentFile=/path` — the file is required; missing → `failed`;
+- `EnvironmentFile=-/path` — the file is optional; missing is ignored.
+
+#### 4.2.5 Service environment
+
+Service processes do **not** inherit the runner's environment. The environment is assembled from `config.json` (the `environment` section) and the unit directives, in increasing priority:
+
+1. `environment.inherit` — a comma-separated list of names whose values are taken from the runner's environment; when the field is absent a fixed default list of standard Windows variables is used; `"inherit": ""` inherits nothing;
+2. `environment.vars` — extra variables; in values `%NAME%` is substituted from the runner's environment (`%%` → a literal `%`; an undefined name → empty; a `%` without a closing `%` → left as is plus a warning);
+3. `EnvironmentFile=` (unit);
+4. `Environment=` (unit) — highest priority.
+
+`runUnit` resolves `environment` into `runner.EnvironmentDefaults` and passes it to the runner; the runner itself stays config-agnostic.
+
+#### 4.2.6 Restart policy
+
+| Directive | Behavior |
+|---|---|
+| `Restart=no` | Never restart |
+| `Restart=always` | Always restart |
+| `Restart=on-failure` | Restart only on a non-zero exit code |
+
+- `StartLimitBurst=` / `StartLimitIntervalSec=` — as in systemd: N attempts within the interval, then `failed`;
+- between attempts there is a `RestartSec=` pause.
+
+#### 4.2.7 Stopping the process
+
+On `SERVICE_CONTROL_STOP`:
+
+1. if `ExecStop=` is set, run it;
+2. otherwise send `Ctrl+C` (`GenerateConsoleCtrlEvent`);
+3. wait `TimeoutStopSec=` (default 45s);
+4. if the process has not exited, `TerminateProcess()`.
+
+`TimeoutStopSec=` is a unit-file directive supported in v1.
+
+### 4.3 timermgr
+
+`timermgr` owns the timer database and runs the in-process `OnCalendar` scheduler. It is independent of SCM: when a timer fires it reports the event through a callback, and the daemon resolves the target service from the timer unit and starts it via SCM. See `### 2.4 Timer manager` for the interface and `## 3. Protocol` for the timer messages.
+
+#### 4.3.1 Behavior
+
+- Stores the set of timers (`TimerConfig{Name, OnCalendar}`) and their status (`TimerStatus{Enabled, Running, LastRun, NextRun, ActiveSince}`).
+- `Enabled` is an administrative flag (in the database), `Running` is a runtime status (the timer is actually in the schedule); they are independent.
+- For each timer it computes the next fire time via `CalendarEvent.Next(now)`.
+- It waits until that moment, then reports the fire through the callback `func(name string, status TimerStatus)`.
+- The daemon looks up the timer unit by name, resolves the target service (`Unit=`) and starts it via SCM `StartService()`.
+- After each fire it immediately computes the next tick and waits again (loop).
+- If `CalendarEvent.Next` returns `ok=false` (no future ticks), the timer stops and a warning is logged.
+
+**Missed ticks:** missed ticks are not made up. If the daemon was stopped, the schedule resumes from the first future tick relative to the current time at start.
+
+#### 4.3.2 Lifecycle
+
+`New` only loads the database and never invokes the event handler; `Start` schedules all enabled timers; `Stop` stops everything and shuts down. The daemon calls `Start`/`Stop`.
+
+#### 4.3.3 Persistence
+
+File: `C:\ProgramData\vsystemd\timers.json`
+
+```json
+{
+  "foo.timer": {
+    "on_calendar": ["daily"],
+    "enabled": true,
+    "last_run": "2026-11-09T10:00:00Z",
+    "next_run": "2026-11-09T11:00:00Z",
+    "active_since": "2026-11-09T09:00:00Z"
+  }
+}
+```
+
+The file layout is owned by `timermgr`; `storage` only keeps the bytes. After every change (fire, `start`/`stop`, `enable`/`disable`, config change) the manager serializes the database and writes it atomically via `storage.WriteTimers()` (temp file + `rename`, so a crash mid-write never leaves a corrupt `timers.json`); on `New` it reads `storage.ReadTimers()`. `Running` is not persisted — on `Start()` all `enabled` timers are put in the schedule.
+
+`last_run`, `next_run` and `active_since` are stored and handled only in UTC (RFC3339 with `Z`). When displayed, the time is either shown in UTC with an explicit `Z` or converted to the local timezone with the zone indicated.
+
+#### 4.3.4 Command semantics
+
+| Command | Effect |
+|---|---|
+| `systemctl enable foo.timer` | `enabled=true` in the database; does not start the timer |
+| `systemctl disable foo.timer` | `enabled=false` in the database; does not stop the timer |
+| `systemctl start foo.timer` | puts the timer in the schedule (running); does not change `enabled`; sets `active_since` |
+| `systemctl stop foo.timer` | removes the timer from the schedule; does not change `enabled`; clears `next_run` and `active_since` |
+
+On `Start()` all timers with `enabled=true` are automatically put in the schedule. All timer commands (`enable`, `disable`, `start`, `stop`) go through the daemon pipe, not SCM; SCM knows nothing about timers.
+
+#### 4.3.5 Reload
+
+On `daemon-reload` the daemon synchronizes the database with the units:
+
+- new timers are added (`SetTimer`); auto-start of `enabled` timers happens only in `Start()`;
+- timers whose `OnCalendar=` changed are rescheduled;
+- timers without a unit file are deleted only if they are `disabled` and `stopped`; otherwise they are kept.
+
+#### 4.3.6 OnCalendar and timespan parsing
+
+**Library:** `gitlab.com/allddd/go-systemd-time` v1.1.0 (BSD-2-Clause)
+
+Used to parse:
+
+- `OnCalendar=` — via `ParseCalendarEvent(s) → CalendarEvent` and `CalendarEvent.Next(t time.Time) → (time.Time, bool)`
+- `RestartSec=`, `OnBootSec=`, `OnStartupSec=` — via `ParseTimespan(s) → time.Duration`
+
+The library supports the full systemd calendar expression syntax: lists, ranges (`..`), steps (`/`), tilde (`~` — days from the end of the month), aliases (`daily`, `weekly`, `monthly`, `hourly`, `minutely`, `quarterly`, `semiannually`, `annually`), and a timezone suffix (IANA, UTC, offset). Pure Go without cgo, works on Windows.
+
+Timezone support comes from embedded IANA tzdata (`import _ "time/tzdata"`), with no dependency on the OS having tzdata.
+
+Inside the code and in persistence, time is stored and handled in UTC. `OnCalendar=` without a TZ suffix is interpreted in the machine's local timezone, with a suffix in the specified timezone. On input the time is converted to UTC; when displayed it is shown in the local timezone or with the explicitly specified timezone.
+
+### 4.4 scm
+
+`scm` is the Windows Service Control Manager integration behind `scm.Manager` (see `### 2.2 SCM manager`). The Windows implementation is `internal/scm`; `internal/scm/fake` is used in tests.
+
+Key behaviors:
+
+- **Managed services** — vsystemd only touches services it created. Every managed service is tagged with `LoadOrderGroup = "vsystemd"`; `ListServices`, `QueryStatuses`, and every open-by-name check filter on this tag, and a service without it is reported as `ErrNotManaged`. Services owned by others are never modified.
+- **Registration** — each managed service is registered with the vsystemd binary and a per-service command line: `"<vsystemd.exe>" --mode=run --unit=<name>` (built by `svcconfig.FromUnit`). SCM therefore starts a runner as the service process.
+- **Accounts** — a service runs under the unit's `User=` or, by default, the per-service virtual account `NT SERVICE\<name>` (`scm.NewAccount`).
+- **Start type** — the daemon sets the Windows start type (`Automatic`/`Boot`/`System` are treated as enabled, `Manual`/`Disabled` as disabled); `StartTypeNoChange` leaves it unchanged on update.
+- **State** — SCM states map to `State` (`Stopped`, `StartPending`, `StopPending`, `Running`); other SCM states (pause/continue) fall through to the raw value.
+- **Runner authentication** — `GetServiceByHandle` resolves the managed service a process handle belongs to, or `ErrNotService`; the daemon uses it (together with the token account and image identity) to authenticate runner connections.
+
+### 4.5 transport / pipe
+
+`transport/pipe` is the concrete `Transport` implementation on Windows named pipes (see `### 2.1 Transport`). It adds a delivery envelope, authenticates incoming connections by OS identity, and hands the application a trusted `Peer`; outgoing targets are built with `Target`.
+
+#### 4.5.1 Named pipe
+
+| Party | Role | Pipe |
+|---|---|---|
+| daemon | listens | `\\.\pipe\vsystemd-in` |
+| runner | connects | `\\.\pipe\vsystemd-in` |
+| systemctl | connects | `\\.\pipe\vsystemd-in` |
+
+The daemon keeps `vsystemd-in` open for its whole lifetime. Each runner holds a persistent connection and reconnects on a break. The control client connects only for the duration of a command.
+
+#### 4.5.2 Peer naming
+
+| PeerType | peerName | Role |
+|---|---|---|
+| daemon | `daemon` | server, listens on `\\.\pipe\vsystemd-in` |
+| runner | `foo.service` | client |
+| control | `systemctl_<pid>` | client |
+
+#### 4.5.3 Envelope
+
+One message on the wire is newline-delimited JSON:
 
 ```json
 {
@@ -558,55 +512,192 @@ func (c *Component) handleStatusRequest(source transport.Peer, msg transport.Mes
 }
 ```
 
-Поле `from` содержит имя отправителя (недоверенное). Транспорт сверяет его с именем проверенного `Peer` и дропает сообщение при несовпадении.
+The `from` field carries the sender name (untrusted). The transport compares it with the verified `Peer` name and drops the message on mismatch.
 
-Размер одного сообщения ограничен (`transport.Config.MaxMessageSize`, по умолчанию 4 MiB): строка сверх лимита рвёт соединение. Пустые и нераспознанные строки пропускаются.
+A single message is size-limited (`transport.Config.MaxMessageSize`, 4 MiB by default): a line over the limit breaks the connection. Empty and unrecognized lines are skipped.
 
-### Именование peers
+#### 4.5.4 Authentication of incoming connections
 
-| PeerType | peerName | Роль |
+The authenticator is internal (not part of the public interface) and is used by the daemon when accepting a connection (`clientAuthenticator`):
+
+- client is a managed service: own-process, `ServiceStartName` matches the token SID, and the running image `FILE_ID` matches the `FILE_ID` of the exe from `BinaryPathName` → `PeerRunner(<service>.service)` (the peer carries its `ServiceConfig`);
+- otherwise, if the token is elevated and the process is not a service → `PeerControl(systemctl_<pid>)`;
+- otherwise the connection is rejected.
+
+Common checks: `GetNamedPipeClientProcessId` → `OpenProcess`; the process creation time must precede the connection (PID-reuse protection); token → elevation. Because of the elevation check the control client (`systemctl`) must run elevated.
+
+#### 4.5.5 Server trust
+
+Clients (runner/control) do not verify the server: the daemon is the only owner of the pipe (`FILE_FLAG_FIRST_PIPE_INSTANCE` + ACL + early service start), so trust is positional. Squatting the name only causes message loss/DoS (not escalation): a legitimate daemon will not start while the name is taken, and `systemctl` control operations go directly to SCM.
+
+#### 4.5.6 Logs
+
+Pipe-transport logs are tagged `[clientPid->serverPid]`, e.g. `pipe: [1110->13241] sent`. `systemctl` enables diagnostic logs with `--log [none|stdout|stderr]` (default `none`).
+
+### 4.6 storage
+
+The production `Storage` implementation is file-backed under a fixed root (`C:\ProgramData\vsystemd` by default; see `### 4.11 Configuration`). The paths are derived by `storage.PathsFromRoot`:
+
+| Data | Path |
+|---|---|
+| unit files | `<root>\system\` |
+| logs | `<root>\logs\` |
+| timer database | `<root>\timers.json` |
+
+- `ListUnits` lists the `.service` and `.timer` files in the system directory; `ReadUnit` reads a unit file.
+- `ReadTimers` / `WriteTimers` read and replace the timer database as raw bytes; `WriteTimers` writes atomically (temp file + `rename`), so a crash mid-write never leaves a corrupt file. The JSON layout is owned by `timermgr`.
+- Path helpers validate custom paths referenced by units: `ValidatePath` rejects anything that is not a plain absolute file path (non-absolute, `..`/`.`, trailing dots or spaces, alternate data streams, device paths `\\.\`/`\\?\`, reserved device names); `OutputWritable` checks that an output file's parent directory exists and is writable, without creating the file; `InputReadable` checks that an input file (`EnvironmentFile=`) can be read.
+
+`storage.New` creates the required directories on startup. Tests use `internal/storage/fake`.
+
+### 4.7 unit
+
+`internal/unit` parses unit files and models them. A unit file is an INI-like file with sections `[Unit]`, `[Service]`, `[Timer]`; the type is taken from the file extension (`.service` / `.timer`). `Parse` returns a `UnitFile`: unknown directives are collected in `Warnings` instead of failing, while a missing required section or an invalid value is a parse error.
+
+```go
+type UnitFile struct {
+    Name        ID
+    Description string
+    After       []string
+    Requires    []string
+    Wants       []string
+    Service     *ServiceUnit
+    Timer       *TimerUnit
+    Warnings    []string
+}
+
+type ServiceUnit struct {
+    ExecStart             string
+    ExecStartPre          []string
+    ExecStartPost         []string
+    ExecStop              string
+    Restart               RestartPolicy
+    RestartSec            time.Duration
+    TimeoutStopSec        time.Duration
+    WorkingDirectory      string
+    Environment           map[string]string
+    EnvironmentFiles      []string
+    User                  string
+    StandardOutput        string
+    StandardError         string
+    StartLimitBurst       int
+    StartLimitIntervalSec time.Duration
+}
+
+type TimerUnit struct {
+    OnCalendar   []string
+    OnBootSec    time.Duration
+    OnStartupSec time.Duration
+    Unit         string
+}
+```
+
+Directives by section:
+
+- `[Unit]`: `Description`, `After`, `Requires`, `Wants` (other ordering directives are parsed but ignored with a warning).
+- `[Service]`: `ExecStart`, `ExecStartPre`, `ExecStartPost`, `ExecStop`, `Restart`, `RestartSec`, `TimeoutStopSec`, `WorkingDirectory`, `Environment`, `EnvironmentFile`, `User`, `StandardOutput`, `StandardError`, `StartLimitBurst`, `StartLimitIntervalSec`.
+- `[Timer]`: `OnCalendar`, `OnBootSec`, `OnStartupSec`, `Unit`.
+
+`UnitFile.Dependencies()` returns the service units referenced by `After=`/`Requires=`, de-duplicated in declaration order; the daemon maps them to SCM dependencies. `ServiceUnit.ResolveOutputs()` resolves `StandardOutput`/`StandardError` into output targets (`null`, `file:<abs>`, `append:<abs>`, or a managed log file).
+
+Unit names are validated by `ParseID`: the name is the file name without the extension, up to 64 characters, restricted to `[A-Za-z0-9_-]`, with a known extension.
+
+### 4.8 systemctl
+
+`systemctl.exe` is the user-facing CLI (`cmd/systemctl`). It parses the command line, loads `config.json`, and dispatches to a `control.Controller`: operations that SCM can serve go directly to SCM, daemon-specific ones go through the daemon pipe. It must be run elevated.
+
+| Command | Target | Effect |
 |---|---|---|
-| daemon | `daemon` | сервер, слушает `\\.\pipe\vsystemd-in` |
-| runner | `foo.service` | клиент |
-| control | `systemctl_<pid>` | клиент |
+| `enable <unit>` | SCM / daemon | For a service, creates or updates the SCM service (with `-p/--password`, `--password-file`, `--password-stdin` for the account); for a timer, `enabled=true` |
+| `disable <unit>` | SCM / daemon | Disables the service or timer |
+| `start` / `stop` / `restart <unit>` | SCM / daemon | Starts, stops, or restarts the unit |
+| `status <unit>` | SCM / daemon | Prints the unit status |
+| `list-units` | daemon | Lists known units |
+| `list-timers [--all]` | daemon | Lists timers; `--all` includes stopped and disabled ones |
+| `daemon-reload` | daemon | Reloads unit files |
+| `--version` | — | Prints the version |
 
-### Аутентификация входящих соединений
+Global `--log [none|stdout|stderr]` (default `none`) enables diagnostic logging.
 
-Аутентификатор внутренний (не часть публичного интерфейса) и используется демоном при приёме соединения (`clientAuthenticator`):
+#### 4.8.1 Status output
 
-- клиент — managed-служба: own-process, `ServiceStartName` совпадает с SID токена, а `FILE_ID` запущенного образа совпадает с `FILE_ID` exe из `BinaryPathName` → `PeerRunner(<service>.service)` (peer несёт `ServiceConfig`);
-- иначе, если токен elevated и процесс не служба → `PeerControl(systemctl_<pid>)`;
-- иначе соединение отклоняется.
+The output is systemd-style. For `.service`: `● unit - description`, `Loaded`, `Active` (with `since ...; ... ago`), `Main PID`, and `Exit code`/`Restart`/`Error` when present. For `.timer`: `Loaded`, `Active` (with `since ...; ... ago` when the timer is active), `Trigger` (the next run time and the remaining time) and `Triggers` (the activated service).
 
-Общие проверки: `GetNamedPipeClientProcessId` → `OpenProcess`; время создания процесса должно быть раньше соединения (защита от переиспользования PID); токен → elevation. Из-за проверки elevation control-клиент (`systemctl`) должен запускаться elevated.
+After the block there is a blank line and the last 10 log lines: from the current/last managed file `logs\<service>\`, or from an explicitly set `file:`/`append:` file. For a `.timer` the tail of the activated service is shown. Rotated files are not mixed in. With `null` for both streams the tail is empty.
 
-### Доверие серверу
+### 4.9 Unit status computation
 
-Клиенты (runner/control) не верифицируют сервер: демон — единственный владелец pipe (`FILE_FLAG_FIRST_PIPE_INSTANCE` + ACL + ранний старт службы), доверие строится по позиции. Сквоттинг имени приводит лишь к потере сообщений/DoS (не к эскалации): легитимный демон не стартует при занятом имени, а управляющие операции `systemctl` идут напрямую в SCM.
+The daemon computes a unit's status from two sources: **SCM** (the authoritative source for the running/stopped fact) and the **daemon's internal state** (richer systemd semantics reported by the runner via `state_event`). On conflict, SCM always wins.
 
-### Request/Response
+| SCM state | Daemon state | exit_code | Result |
+|---|---|---|---|
+| `SERVICE_RUNNING` | `active` | — | `active (running)` |
+| `SERVICE_RUNNING` | `activating` | — | `activating (start)` |
+| `SERVICE_RUNNING` | `restarting` | — | `activating (auto-restart)` |
+| `SERVICE_RUNNING` | `deactivating` | — | `deactivating (stop)` |
+| `SERVICE_RUNNING` | no data | — | `active (running)` |
+| `SERVICE_STOPPED` | `inactive` | 0 | `inactive (dead)` |
+| `SERVICE_STOPPED` | `failed` | ≠ 0 | `failed` |
+| `SERVICE_STOPPED` | no data | — | `inactive (dead)` |
+| `SERVICE_START_PENDING` | any | — | `activating (start)` |
+| `SERVICE_STOP_PENDING` | any | — | `deactivating (stop)` |
+| not in SCM | any | — | `inactive (dead)` |
 
-Transport реализует матчинг ответов по `request_id` в рамках соединения:
+Rules:
 
-- `Req()` отправляет сообщение с уникальным `id` и ждёт ответ с `request_id` равным этому `id` на том же соединении
-- поддерживает несколько одновременно ожидающих запросов
-- при истечении таймаута возвращает ошибку и пишет в лог
+- **SCM wins over daemon state** for the running/stopped fact. The daemon state refines the details within that fact (for example, it distinguishes `active` from `restarting` under `SERVICE_RUNNING`).
+- **`failed`** occurs only when both conditions hold: SCM reports `SERVICE_STOPPED` and the runner reported `state=failed` with a non-zero `exit_code`. While the runner is restarting the process under `Restart=`, the status is `activating (auto-restart)`, not `failed`; `failed` is reached only when the start limit (`StartLimitBurst`) is exhausted or `Restart=no`.
+- **If the daemon is not running or the runner's pipe is unavailable**, `systemd_state` is not available and the status is determined from SCM alone; `failed` is not shown, only `inactive (dead)`. This is a known difference from systemd (see ARCHITECTURE.md, known difference #2).
 
-### Логи
+#### 4.9.1 `status_response` fields
 
-Логи pipe-транспорта помечаются тегом `[clientPid->serverPid]`, например `pipe: [1110->13241] sent`. `systemctl` включает диагностические логи флагом `--log [none|stdout|stderr]` (по умолчанию `none`).
+| Field | Source | Description |
+|---|---|---|
+| `systemd_state` | daemon internal | the computed status (`active (running)`, `failed`, ...) |
+| `scm_state` | SCM | the numeric SCM state code (`SERVICE_RUNNING`, `SERVICE_STOPPED`, ...) |
+| `pid` | runner / SCM | main process PID; 0 when not running |
+| `exit_code` | runner | exit code of the last process run |
+| `restart_count` | runner | number of automatic restarts since the last start |
+| `last_transition` | daemon | timestamp of the last state change |
+| `last_error` | runner | last start error produced by the runner; null if there were none |
+| `log_tail` | log file | last 10 lines of the current `logs\<service>\` file or an explicit `file:`/`append:` file |
+| `description` | unit file | the `Description=` value from `[Unit]` |
+| `enabled` | SCM `StartType` / timers.json | for `.service` from SCM; for `.timer` from `timers.json` |
+| `active_since` | timer manager / timers.json | for `.timer` the moment it was put in the schedule; absent when inactive |
 
----
+### 4.10 Logging
 
-## Конфигурация
+Logging is handled by `internal/logwriter`; `Storage` is not involved, except for path validation.
 
-### Расположение
+#### 4.10.1 Service logs
 
-Путь фиксирован: `C:\ProgramData\vsystemd\config.json`. Отсутствие файла → дефолты; переопределения пути нет.
+By default a service's stdout and stderr go to `C:\ProgramData\vsystemd\logs\<service>\<timestamp>.log`:
 
-Каждый бинарь (`vsystemd`, `systemctl`) читает конфиг самостоятельно при старте. Все значения имеют дефолты, конфиг переопределяет только нужные.
+- `<service>` is the unit name without the extension (`foo.service` → `foo`);
+- `<timestamp>` is the file creation time in UTC, formatted `YYYY-MM-DD_HH-MM-SS.mmm`.
 
-### Формат
+Unit directives:
+
+- `StandardOutput=file:<path>` / `StandardError=file:<path>` — truncate, no rotation;
+- `StandardOutput=append:<path>` / `StandardError=append:<path>` — append, no rotation;
+- `null` — the stream is discarded;
+- any other value (`journal`, garbage) — startup error.
+
+A custom path (`file:`/`append:`) must be **absolute** and a plain file path: no `..`/`.` components, no trailing dots or spaces in components, no alternate data stream (`:`), no device paths (`\\.\`, `\\?\`), and no reserved device names (`CON`, `NUL`, `COM1`, ...); the **parent directory must exist** and be a directory (writable for `file:`/`append:`), and the path must not point at a directory; otherwise it is a startup error (directories are not created automatically). The same canonical path for stdout and stderr uses one writer; `file:` and `append:` on the same path use append for both.
+
+#### 4.10.2 vsystemd's own logs
+
+- daemon → `C:\ProgramData\vsystemd\logs\vsystemd\daemon_<timestamp>.log`
+- runner → `C:\ProgramData\vsystemd\logs\vsystemd\<service>_<timestamp>.log`
+- plain text; files are opened in append mode and remain readable;
+- rotation by `logs.max_size_mb` and `logs.max_age_days`;
+- on rotation a new file with a UTC timestamp is created; renames are not used;
+- closed managed logs older than `max_age_days` are deleted;
+- `file:`/`append:` files are neither rotated nor deleted.
+
+### 4.11 Configuration
+
+The path is fixed: `C:\ProgramData\vsystemd\config.json`. A missing file means defaults; the path cannot be overridden. Each binary (`vsystemd`, `systemctl`) reads the config on its own at startup; every value has a default and the file overrides only what it sets.
 
 ```json
 {
@@ -627,6 +718,16 @@ Transport реализует матчинг ответов по `request_id` в 
     "timeout_stop_sec_ms": 45000,
     "start_limit_burst": 5,
     "start_limit_interval_sec_ms": 10000
+  },
+  "environment": {
+    "inherit": "SystemRoot,SystemDrive,windir,PATH,...",
+    "vars": { "APP_ENV": "production" }
   }
 }
 ```
+
+- `system_dir`, `logs_dir`, `timers_state_file` feed `storage.Paths` (see `### 4.6 storage`).
+- `logs` drives log rotation (see `### 4.10 Logging`).
+- `ipc` sets the transport connect and request timeouts (see `### 4.5 transport / pipe`).
+- `defaults` provides per-service defaults for `RestartSec=`, `TimeoutStopSec=`, `StartLimitBurst=`, and `StartLimitIntervalSec=` when a unit does not set them (see `### 4.2 runner`).
+- `environment` builds the clean environment for service processes: `inherit` lists variables taken from the runner's environment (defaults to a fixed list of standard Windows variables), `vars` adds extra variables (see `### 4.2 runner`).
