@@ -22,6 +22,57 @@ The control client is the separate `systemctl.exe`, run by the user for each com
 
 ## Interfaces
 ### Transport
+
+Transport is the abstract, peer-centric IPC interface (`internal/transport`). It deals in terms of `Peer` (type + name), `Message`, `Target`, `Send`, and `Req`, and knows nothing about pipes, envelopes, or naming; the named-pipe implementation lives in `internal/transport/pipe` (see the `transport / pipe` component).
+
+```go
+type PeerType uint8 // PeerDaemon | PeerRunner | PeerControl
+
+// Peer is a verified peer identity. It is created only by the transport;
+// the application receives it in a handler or via Target.
+type Peer struct{ /* typ, name, elevated */ }
+
+func (p Peer) Type() PeerType
+func (p Peer) Name() string
+func (p Peer) Elevated() bool
+
+type Message struct {
+    ID        string          // UUID
+    RequestID string          // UUID of the request this is a response to; "" if not a response
+    Type      string          // message type
+    Payload   json.RawMessage // message body
+}
+
+type MsgHandler func(source Peer, msg Message) error
+
+type Transport interface {
+    Target(typ PeerType, opts ...PeerOption) Peer
+    Send(target Peer, msg Message, opts ...Opt) error
+    Req(target Peer, msg Message, opts ...Opt) (Message, error)
+    Close() error
+}
+
+func New(config Config, local Peer, handler MsgHandler) (Transport, error)
+
+// Opts override config values
+WithTimeout(d time.Duration)        // response timeout (for Req)
+WithConnectTimeout(d time.Duration) // connect timeout (for Send and Req)
+
+// PeerOption
+WithName(name string) // target peer name (e.g. unit for a runner)
+```
+
+A handler replies using `source` as the target:
+
+```go
+func (c *Component) handleStatusRequest(source transport.Peer, msg transport.Message) error {
+    resp := c.buildStatusResponse(msg)
+    return c.transport.Send(source, resp)
+}
+```
+
+The transport matches responses by `request_id` within a connection: `Req()` sends a message with a unique `id` and waits for a response whose `request_id` equals that `id` on the same connection; several requests may be in flight at once, and a timeout returns an error and is logged.
+
 ### SCM manager
 ### Storage
 ### Timer manager
@@ -519,62 +570,6 @@ managed-файла `logs\<service>\`, либо из явно заданного 
 
 ## Transport (IPC абстракция)
 
-### Два уровня
-
-**Уровень Transport** (`internal/transport/`) — абстрактный peer-центричный интерфейс. Оперирует понятиями `Peer` (тип + имя), `Message`, `Target`, `Send`, `Req`. Не знает про pipes, конверты, именование.
-
-**Уровень Pipe** (`internal/transport/pipe/`) — реализация Transport на named pipes. Добавляет envelope с деталями доставки, аутентифицирует входящее соединение по ОС-идентичности и отдаёт доверенный `Peer`. Исходящий target строится методом `Target`.
-
-### Transport API
-
-```go
-// internal/transport/
-
-type PeerType uint8 // PeerDaemon | PeerRunner | PeerControl
-
-// Peer — проверенная идентичность пира. Создаётся только транспортом;
-// приложение получает его в обработчике или через Target.
-type Peer struct{ /* typ, name, elevated */ }
-
-func (p Peer) Type() PeerType
-func (p Peer) Name() string
-func (p Peer) Elevated() bool
-
-type Message struct {
-    ID        string          // UUID
-    RequestID string          // UUID ответного запроса; "" если не ответ
-    Type      string          // тип сообщения
-    Payload   json.RawMessage // тело сообщения
-}
-
-type MsgHandler func(source Peer, msg Message) error
-
-type Transport interface {
-    Target(typ PeerType, opts ...PeerOption) Peer
-    Send(target Peer, msg Message, opts ...Opt) error
-    Req(target Peer, msg Message, opts ...Opt) (Message, error)
-    Close() error
-}
-
-func New(config Config, local Peer, handler MsgHandler) (Transport, error)
-
-// Opts — переопределяют значения из конфига
-WithTimeout(d time.Duration)        // таймаут ожидания ответа (для Req)
-WithConnectTimeout(d time.Duration) // таймаут подключения (для Send и Req)
-
-// PeerOption
-WithName(name string) // имя целевого пира (напр. юнит для runner)
-```
-
-Хендлер отвечает, используя `source` как target:
-
-```go
-func (c *Component) handleStatusRequest(source transport.Peer, msg transport.Message) error {
-    resp := c.buildStatusResponse(msg)
-    return c.transport.Send(source, resp)
-}
-```
-
 ### Pipe envelope (внутренний формат)
 
 Формат одного сообщения на уровне pipe реализации — newline-delimited JSON:
@@ -616,14 +611,6 @@ func (c *Component) handleStatusRequest(source transport.Peer, msg transport.Mes
 ### Доверие серверу
 
 Клиенты (runner/control) не верифицируют сервер: демон — единственный владелец pipe (`FILE_FLAG_FIRST_PIPE_INSTANCE` + ACL + ранний старт службы), доверие строится по позиции. Сквоттинг имени приводит лишь к потере сообщений/DoS (не к эскалации): легитимный демон не стартует при занятом имени, а управляющие операции `systemctl` идут напрямую в SCM.
-
-### Request/Response
-
-Transport реализует матчинг ответов по `request_id` в рамках соединения:
-
-- `Req()` отправляет сообщение с уникальным `id` и ждёт ответ с `request_id` равным этому `id` на том же соединении
-- поддерживает несколько одновременно ожидающих запросов
-- при истечении таймаута возвращает ошибку и пишет в лог
 
 ### Логи
 
