@@ -2,6 +2,11 @@
 
 ## Overview
 ### Applications and instances
+
+vsystemd ships two executables. `vsystemd.exe` is dual-mode: depending on its arguments it becomes one of two kinds of runtime instance. The **daemon** is a single Windows service (`--mode=daemon`) that runs for the whole lifetime of the installation; it is the manager and owns the unit registry, service state, the timer manager, and the IPC server. A **runner** is one instance per managed service (`--mode=run --unit=<name>`): it is registered in the Windows SCM as the executable for its service, so SCM starts and stops it; it launches and supervises the service's child process, applies `Restart=`/`RestartSec=` logic, and reports state to the daemon.
+
+`systemctl.exe` is the user-facing CLI. Operations that SCM can serve go directly to SCM; daemon-specific operations (reload, unit listing, timer management) go through the daemon.
+
 ### Interaction and data flow
 ### Repository structure
 ### v1 scope
@@ -238,14 +243,6 @@ Runner держит постоянное соединение и по тайме
 ---
 
 ## Структура проекта
-
-### Бинари
-
-| Бинарь | Режим | Роль |
-|---|---|---|
-| `vsystemd.exe` | `--mode=daemon` | Windows Service, управляет состоянием, timer manager, IPC сервер |
-| `vsystemd.exe` | `--mode=run --unit=<name>` | Обёртка процесса, Restart= логика, pipe к daemon |
-| `systemctl.exe` | — | CLI, SCM напрямую или через daemon |
 
 ### Пакеты
 
