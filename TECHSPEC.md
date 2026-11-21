@@ -1,5 +1,7 @@
 # vsystemd Technical Specification
 
+Module: `github.com/gwg605/vsystemd`. Minimum Go version: 1.26+.
+
 ## 1. Overview
 ### 1.1 Applications and instances
 
@@ -26,36 +28,7 @@ The daemon never pushes: a runner sends its state on every change and on a heart
 
 **Daemon startup** — the daemon does not poll runners. After a daemon restart the runners' connections break; each runner reconnects and sends its current state on the next heartbeat.
 
-### 1.3 Repository structure
-
-```
-cmd/
-  vsystemd/             — entry point, dispatches --mode=daemon / --mode=run
-  systemctl/            — CLI
-
-internal/
-  config/               — config.json loading and defaults
-  control/              — control operations (enable/disable/start/stop/status)
-  daemon/               — Daemon, ServiceState, daemon-reload logic
-  env/                  — service environment assembly
-  logging/              — slog setup
-  logwriter/            — timestamped log files with rotation
-  protocol/             — IPC message types
-  runner/               — Runner, child-process supervision, Restart= logic
-  scm/                  — Manager interface + Windows implementation (+ fake)
-  storage/              — Storage interface + prod implementation (+ fake)
-  svcconfig/            — unit → scm.ServiceConfig mapping
-  timermgr/             — timer database and OnCalendar scheduler
-  transport/            — Transport interface, Message, MsgHandler, Opt
-  transport/pipe/       — named-pipe implementation, envelope, lazy connect
-  unit/                 — unit-file parser and models
-
-tests/                  — integration tests (fake SCM + fake Storage)
-```
-
-Module: `github.com/gwg605/vsystemd`. Minimum Go version: 1.26+.
-
-### 1.4 v1 scope
+### 1.3 v1 scope
 
 Out of scope for v1:
 
