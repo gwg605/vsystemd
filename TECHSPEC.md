@@ -177,6 +177,55 @@ The production implementation is `internal/storage` (files under a fixed root, s
 
 ### Timer manager
 
+`timermgr.Manager` owns the timer database and the in-process `OnCalendar` scheduler. It is independent of SCM: when a timer fires it reports the event through a callback, and the caller decides what to start. The daemon drives its lifecycle (`New` → `Start` → `Stop`).
+
+```go
+// TimerConfig is the persisted configuration of a timer.
+type TimerConfig struct {
+    Name       string
+    OnCalendar []string
+}
+
+// TimerStatus is the runtime view of a timer.
+type TimerStatus struct {
+    Name        string
+    Enabled     bool
+    Running     bool
+    LastRun     time.Time
+    NextRun     time.Time
+    ActiveSince time.Time
+}
+
+// EventFunc is called when a timer fires.
+type EventFunc func(name string, status TimerStatus)
+
+func New(store storage.Storage, onEvent EventFunc) (*Manager, error)
+
+// Start runs the scheduler, scheduling every enabled timer. It is idempotent.
+func (m *Manager) Start() error
+// Stop stops every scheduled timer and shuts the manager down. It is idempotent.
+func (m *Manager) Stop() error
+
+// SetTimer creates or updates a timer (upsert); it never changes the
+// enabled or running state.
+func (m *Manager) SetTimer(cfg TimerConfig) error
+// DeleteTimer removes a timer; it must be both disabled and stopped.
+func (m *Manager) DeleteTimer(name string) error
+// Enable sets the administrative enabled flag without starting or stopping.
+func (m *Manager) Enable(name string, enabled bool) error
+// StartTimer puts the timer in the schedule; a no-op when already running.
+func (m *Manager) StartTimer(name string) error
+// StopTimer removes the timer from the schedule.
+func (m *Manager) StopTimer(name string) error
+
+func (m *Manager) QueryStatus(name string) (TimerStatus, error)
+func (m *Manager) QueryStatuses() ([]TimerStatus, error)
+func (m *Manager) ListTimers() ([]TimerConfig, error)
+func (m *Manager) GetTimer(name string) (TimerConfig, error)
+```
+
+`New` only loads the database and never invokes the event handler; `Start` schedules the enabled timers; `Stop` stops everything and shuts down. `ErrNotFound` reports an unknown timer and `ErrClosed` an operation after `Stop`.
+
 ## Protocol
 
 The protocol is the message layer the daemon, runners, and the control client use to talk to each other over the shared named pipe. It defines the message envelope (`id`, `request_id`, `type`, `payload`), the catalog of message types grouped by direction, and the delivery guarantees. The wire types live in `internal/protocol`, while the transport layer (`internal/transport`, `internal/transport/pipe`) carries the messages and matches responses. Runners use it to report service state to the daemon; the control client uses it for daemon-specific operations (reload, status, unit listing, timer management) that SCM cannot serve.
@@ -298,10 +347,6 @@ The scheme is best-effort: there is no delivery acknowledgement. A lost message 
 **Политика пропущенных тиков:** пропущенные тики не компенсируются. Если daemon был остановлен, расписание возобновляется с первого будущего тика относительно текущего времени на момент старта.
 
 **Persistence:** после каждого изменения (срабатывание, `start`/`stop`, `enable`/`disable`, правка конфига) менеджер сериализует базу в свой JSON-формат и атомарно пишет через `storage.WriteTimers()`; при `New` читает `storage.ReadTimers()`. `Running` не персистится — при `Start()` в расписание ставятся все `enabled`-timer'ы.
-
-**API:** `SetTimer` (upsert конфига), `DeleteTimer` (только если `disabled` и `stopped`), `Enable`, `StartTimer`, `StopTimer`, `QueryStatus`, `QueryStatuses`, `ListTimers`, `GetTimer`, `Start` (запускает scheduler и ставит `enabled`-timer'ы), `Stop` (останавливает все и завершает работу).
-
-**Жизненный цикл:** `New` только загружает БД и не вызывает event handler; `Start` запускает scheduler; `Stop` останавливает все timer'ы и завершает работу (демон зовёт `Start`/`Stop`).
 
 **Reload:** при `daemon-reload` демон синхронизирует БД с юнитами:
 
