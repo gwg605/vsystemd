@@ -611,6 +611,45 @@ The output is systemd-style. For `.service`: `● unit - description`, `Loaded`,
 After the block there is a blank line and the last 10 log lines: from the current/last managed file `logs\<service>\`, or from an explicitly set `file:`/`append:` file. For a `.timer` the tail of the activated service is shown. Rotated files are not mixed in. With `null` for both streams the tail is empty.
 
 ### Unit status computation
+
+The daemon computes a unit's status from two sources: **SCM** (the authoritative source for the running/stopped fact) and the **daemon's internal state** (richer systemd semantics reported by the runner via `state_event`). On conflict, SCM always wins.
+
+| SCM state | Daemon state | exit_code | Result |
+|---|---|---|---|
+| `SERVICE_RUNNING` | `active` | — | `active (running)` |
+| `SERVICE_RUNNING` | `activating` | — | `activating (start)` |
+| `SERVICE_RUNNING` | `restarting` | — | `activating (auto-restart)` |
+| `SERVICE_RUNNING` | `deactivating` | — | `deactivating (stop)` |
+| `SERVICE_RUNNING` | no data | — | `active (running)` |
+| `SERVICE_STOPPED` | `inactive` | 0 | `inactive (dead)` |
+| `SERVICE_STOPPED` | `failed` | ≠ 0 | `failed` |
+| `SERVICE_STOPPED` | no data | — | `inactive (dead)` |
+| `SERVICE_START_PENDING` | any | — | `activating (start)` |
+| `SERVICE_STOP_PENDING` | any | — | `deactivating (stop)` |
+| not in SCM | any | — | `inactive (dead)` |
+
+Rules:
+
+- **SCM wins over daemon state** for the running/stopped fact. The daemon state refines the details within that fact (for example, it distinguishes `active` from `restarting` under `SERVICE_RUNNING`).
+- **`failed`** occurs only when both conditions hold: SCM reports `SERVICE_STOPPED` and the runner reported `state=failed` with a non-zero `exit_code`. While the runner is restarting the process under `Restart=`, the status is `activating (auto-restart)`, not `failed`; `failed` is reached only when the start limit (`StartLimitBurst`) is exhausted or `Restart=no`.
+- **If the daemon is not running or the runner's pipe is unavailable**, `systemd_state` is not available and the status is determined from SCM alone; `failed` is not shown, only `inactive (dead)`. This is a known difference from systemd (see ARCHITECTURE.md, known difference #2).
+
+#### `status_response` fields
+
+| Field | Source | Description |
+|---|---|---|
+| `systemd_state` | daemon internal | the computed status (`active (running)`, `failed`, ...) |
+| `scm_state` | SCM | the numeric SCM state code (`SERVICE_RUNNING`, `SERVICE_STOPPED`, ...) |
+| `pid` | runner / SCM | main process PID; 0 when not running |
+| `exit_code` | runner | exit code of the last process run |
+| `restart_count` | runner | number of automatic restarts since the last start |
+| `last_transition` | daemon | timestamp of the last state change |
+| `last_error` | runner | last start error produced by the runner; null if there were none |
+| `log_tail` | log file | last 10 lines of the current `logs\<service>\` file or an explicit `file:`/`append:` file |
+| `description` | unit file | the `Description=` value from `[Unit]` |
+| `enabled` | SCM `StartType` / timers.json | for `.service` from SCM; for `.timer` from `timers.json` |
+| `active_since` | timer manager / timers.json | for `.timer` the moment it was put in the schedule; absent when inactive |
+
 ### Logging
 ### Configuration
 
@@ -635,56 +674,6 @@ Runner держит постоянное соединение и по тайме
 ### Поведение при старте daemon'а
 
 Демон не опрашивает runner'ов. После рестарта демона соединения runner'ов рвутся; runner переподключается и отправляет текущее состояние при следующем heartbeat.
-
----
-
-## Вычисление статуса юнита
-
-Статус юнита вычисляется daemon'ом из двух источников: **SCM** (авторитетный источник факта running/stopped) и **внутреннее состояние daemon'а** (обогащённая systemd-семантика, получаемая от runner'а через `state_event`). При конфликте SCM всегда приоритетнее.
-
-### Таблица вычисления статуса
-
-| SCM state | Daemon state | exit_code | Итоговый статус |
-|---|---|---|---|
-| `SERVICE_RUNNING` | `active` | — | `active (running)` |
-| `SERVICE_RUNNING` | `activating` | — | `activating (start)` |
-| `SERVICE_RUNNING` | `restarting` | — | `activating (auto-restart)` |
-| `SERVICE_RUNNING` | `deactivating` | — | `deactivating (stop)` |
-| `SERVICE_RUNNING` | нет данных | — | `active (running)` |
-| `SERVICE_STOPPED` | `inactive` | 0 | `inactive (dead)` |
-| `SERVICE_STOPPED` | `failed` | ≠ 0 | `failed` |
-| `SERVICE_STOPPED` | нет данных | — | `inactive (dead)` |
-| `SERVICE_START_PENDING` | любое | — | `activating (start)` |
-| `SERVICE_STOP_PENDING` | любое | — | `deactivating (stop)` |
-| нет в SCM | любое | — | `inactive (dead)` |
-
-### Правила
-
-**SCM приоритетнее daemon state** для факта running/stopped. Daemon state уточняет детали внутри этого факта (например, различает `active` и `restarting` при `SERVICE_RUNNING`).
-
-**`failed`** наступает только при одновременном выполнении двух условий:
-- SCM сообщает `SERVICE_STOPPED`
-- Runner сообщил daemon'у `state=failed` с ненулевым `exit_code`
-
-Пока runner перезапускает процесс в рамках `Restart=` — статус `activating (auto-restart)`, не `failed`. `failed` наступает только когда исчерпан лимит рестартов (`StartLimitBurst`) или `Restart=no`.
-
-**Если daemon не запущен или pipe runner'а недоступен** — поле `systemd_state` недоступно, статус определяется только по SCM. Состояние `failed` в этом случае не отображается — только `inactive (dead)`. Это зафиксированное расхождение с оригинальным systemd (known difference #2 в ARCHITECTURE.md).
-
-### Поля `status_response`
-
-| Поле | Источник | Описание |
-|---|---|---|
-| `systemd_state` | daemon internal | итоговый вычисленный статус (`active (running)`, `failed`, и т.д.) |
-| `scm_state` | SCM | числовой код состояния SCM (`SERVICE_RUNNING`, `SERVICE_STOPPED`, и т.д.) |
-| `pid` | runner / SCM | PID основного процесса; 0 если не запущен |
-| `exit_code` | runner | код завершения последнего запуска процесса |
-| `restart_count` | runner | количество автоматических рестартов с момента последнего старта |
-| `last_transition` | daemon | timestamp последней смены состояния |
-| `last_error` | runner | строка с ошибкой запуска, сгенерированная runner'ом; только последняя; null если ошибок не было |
-| `log_tail` | лог-файл | последние 10 строк из текущего файла `logs\<service>\` или явного `file:`/`append:` файла |
-| `description` | unit-файл | значение `Description=` из секции `[Unit]` |
-| `enabled` | SCM `StartType` / timers.json | для `.service` — из SCM; для `.timer` — из `timers.json` |
-| `active_since` | timer manager / timers.json | для `.timer` — момент добавления в расписание; отсутствует у неактивного таймера |
 
 ---
 
