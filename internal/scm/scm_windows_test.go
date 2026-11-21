@@ -20,9 +20,6 @@ func TestMapState(t *testing.T) {
 		{svc.StartPending, StateStartPending},
 		{svc.StopPending, StateStopPending},
 		{svc.Running, StateRunning},
-		{svc.ContinuePending, StateContinuePending},
-		{svc.PausePending, StatePausePending},
-		{svc.Paused, StatePaused},
 	}
 	for _, tt := range tests {
 		if got := mapState(tt.state); got != tt.want {

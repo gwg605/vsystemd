@@ -596,12 +596,6 @@ func mapState(state svc.State) State {
 		return StateStopPending
 	case svc.Running:
 		return StateRunning
-	case svc.ContinuePending:
-		return StateContinuePending
-	case svc.PausePending:
-		return StatePausePending
-	case svc.Paused:
-		return StatePaused
 	default:
 		return State(state)
 	}
