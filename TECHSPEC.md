@@ -293,6 +293,19 @@ The scheme is best-effort: there is no delivery acknowledgement. A lost message 
 
 ## Components
 ### daemon
+
+The daemon is the single, always-running manager process. It owns the unit registry and the aggregated service state, serves the IPC endpoint, drives the timer manager, and performs `daemon-reload`.
+
+Responsibilities:
+
+- **Unit registry (`UnitsList`)** — the source of truth for unit configuration. It is built at startup and updated only by `daemon-reload`, never by reads. It merges unit files with the SCM services and the timer database; an entry that exists in SCM or the timer database but has no unit file is kept and reported as `not-found`.
+- **Service state** — combines the SCM state with the state reported by runners to compute the final systemd-style status (see `### Unit status computation`).
+- **IPC server** — handles the protocol messages from runners and the control client (see `## Protocol`).
+- **Timer manager** — owns the `timermgr.Manager` lifecycle (`Start`/`Stop`) and keeps the timer database in sync with the unit files.
+- **Log tail** — reads the last lines of a service's log file for status responses.
+
+`daemon-reload` rescans the unit directory and reconciles everything: it rebuilds the unit registry, updates or creates SCM services for changed units, removes disabled services that no longer have a unit file, syncs the timer database, and prunes runtime state for units that are gone.
+
 ### runner
 ### timermgr
 ### scm
