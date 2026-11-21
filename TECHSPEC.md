@@ -460,6 +460,65 @@ Key behaviors:
 - **Runner authentication** — `GetServiceByHandle` resolves the managed service a process handle belongs to, or `ErrNotService`; the daemon uses it (together with the token account and image identity) to authenticate runner connections.
 
 ### transport / pipe
+
+`transport/pipe` is the concrete `Transport` implementation on Windows named pipes (see `### Transport`). It adds a delivery envelope, authenticates incoming connections by OS identity, and hands the application a trusted `Peer`; outgoing targets are built with `Target`.
+
+#### Named pipe
+
+| Party | Role | Pipe |
+|---|---|---|
+| daemon | listens | `\\.\pipe\vsystemd-in` |
+| runner | connects | `\\.\pipe\vsystemd-in` |
+| systemctl | connects | `\\.\pipe\vsystemd-in` |
+
+The daemon keeps `vsystemd-in` open for its whole lifetime. Each runner holds a persistent connection and reconnects on a break. The control client connects only for the duration of a command.
+
+#### Peer naming
+
+| PeerType | peerName | Role |
+|---|---|---|
+| daemon | `daemon` | server, listens on `\\.\pipe\vsystemd-in` |
+| runner | `foo.service` | client |
+| control | `systemctl_<pid>` | client |
+
+#### Envelope
+
+One message on the wire is newline-delimited JSON:
+
+```json
+{
+  "from": "systemctl_1234",
+  "msg": {
+    "id": "uuid",
+    "request_id": null,
+    "type": "status_request",
+    "payload": { "unit": "foo.service" }
+  }
+}
+```
+
+The `from` field carries the sender name (untrusted). The transport compares it with the verified `Peer` name and drops the message on mismatch.
+
+A single message is size-limited (`transport.Config.MaxMessageSize`, 4 MiB by default): a line over the limit breaks the connection. Empty and unrecognized lines are skipped.
+
+#### Authentication of incoming connections
+
+The authenticator is internal (not part of the public interface) and is used by the daemon when accepting a connection (`clientAuthenticator`):
+
+- client is a managed service: own-process, `ServiceStartName` matches the token SID, and the running image `FILE_ID` matches the `FILE_ID` of the exe from `BinaryPathName` → `PeerRunner(<service>.service)` (the peer carries its `ServiceConfig`);
+- otherwise, if the token is elevated and the process is not a service → `PeerControl(systemctl_<pid>)`;
+- otherwise the connection is rejected.
+
+Common checks: `GetNamedPipeClientProcessId` → `OpenProcess`; the process creation time must precede the connection (PID-reuse protection); token → elevation. Because of the elevation check the control client (`systemctl`) must run elevated.
+
+#### Server trust
+
+Clients (runner/control) do not verify the server: the daemon is the only owner of the pipe (`FILE_FLAG_FIRST_PIPE_INSTANCE` + ACL + early service start), so trust is positional. Squatting the name only causes message loss/DoS (not escalation): a legitimate daemon will not start while the name is taken, and `systemctl` control operations go directly to SCM.
+
+#### Logs
+
+Pipe-transport logs are tagged `[clientPid->serverPid]`, e.g. `pipe: [1110->13241] sent`. `systemctl` enables diagnostic logs with `--log [none|stdout|stderr]` (default `none`).
+
 ### storage
 ### unit
 ### systemctl
@@ -480,22 +539,6 @@ Key behaviors:
 Коммуникация построена на модели клиент–сервер поверх одного named pipe. Сервер — daemon; клиенты — runner'ы и systemctl. Клиенты инициируют соединение к pipe демона и работают по нему в обе стороны: запрос и ответ идут по одному соединению, обратный pipe не нужен.
 
 Демон ничего не пушит: runner сам отправляет состояние при изменении и по heartbeat-таймеру; systemctl получает ответ на свой запрос в том же соединении.
-
-### Named pipes
-
-| Участник | Роль | Pipe |
-|---|---|---|
-| daemon | слушает | `\\.\pipe\vsystemd-in` |
-| runner | подключается | `\\.\pipe\vsystemd-in` |
-| systemctl | подключается | `\\.\pipe\vsystemd-in` |
-
-Демон держит `vsystemd-in` открытым всё время работы. Каждый runner держит постоянное соединение с демоном и переподключается при разрыве. systemctl подключается на время выполнения команды.
-
-### Аутентификация
-
-Аутентификацию выполняет демон при приёме соединения. Клиент — либо managed-служба (own-process, аккаунт токена совпадает с `ServiceStartName`, образ — с `BinaryPathName`), либо elevated-клиент без службы (control); иное отклоняется. Время создания процесса должно предшествовать соединению (защита от PID reuse).
-
-Клиент удостоверяет сервер по позиции: демон — единственный владелец pipe (`FILE_FLAG_FIRST_PIPE_INSTANCE` + ACL + ранний старт службы). Отдельной верификации сервера клиентом нет.
 
 ### Heartbeat и жизнеспособность
 
@@ -635,56 +678,6 @@ tests/                  — интеграционные тесты (fake SCM + 
 managed-файла `logs\<service>\`, либо из явно заданного `file:`/`append:` файла.
 Для `.timer` показывается хвост лога активируемого сервиса. Ротированные файлы не
 подмешиваются. При `null` для обоих потоков tail пуст.
-
----
-
-## Transport (IPC абстракция)
-
-### Pipe envelope (внутренний формат)
-
-Формат одного сообщения на уровне pipe реализации — newline-delimited JSON:
-
-```json
-{
-  "from": "systemctl_1234",
-  "msg": {
-    "id": "uuid",
-    "request_id": null,
-    "type": "status_request",
-    "payload": { "unit": "foo.service" }
-  }
-}
-```
-
-Поле `from` содержит имя отправителя (недоверенное). Транспорт сверяет его с именем проверенного `Peer` и дропает сообщение при несовпадении.
-
-Размер одного сообщения ограничен (`transport.Config.MaxMessageSize`, по умолчанию 4 MiB): строка сверх лимита рвёт соединение. Пустые и нераспознанные строки пропускаются.
-
-### Именование peers
-
-| PeerType | peerName | Роль |
-|---|---|---|
-| daemon | `daemon` | сервер, слушает `\\.\pipe\vsystemd-in` |
-| runner | `foo.service` | клиент |
-| control | `systemctl_<pid>` | клиент |
-
-### Аутентификация входящих соединений
-
-Аутентификатор внутренний (не часть публичного интерфейса) и используется демоном при приёме соединения (`clientAuthenticator`):
-
-- клиент — managed-служба: own-process, `ServiceStartName` совпадает с SID токена, а `FILE_ID` запущенного образа совпадает с `FILE_ID` exe из `BinaryPathName` → `PeerRunner(<service>.service)` (peer несёт `ServiceConfig`);
-- иначе, если токен elevated и процесс не служба → `PeerControl(systemctl_<pid>)`;
-- иначе соединение отклоняется.
-
-Общие проверки: `GetNamedPipeClientProcessId` → `OpenProcess`; время создания процесса должно быть раньше соединения (защита от переиспользования PID); токен → elevation. Из-за проверки elevation control-клиент (`systemctl`) должен запускаться elevated.
-
-### Доверие серверу
-
-Клиенты (runner/control) не верифицируют сервер: демон — единственный владелец pipe (`FILE_FLAG_FIRST_PIPE_INSTANCE` + ACL + ранний старт службы), доверие строится по позиции. Сквоттинг имени приводит лишь к потере сообщений/DoS (не к эскалации): легитимный демон не стартует при занятом имени, а управляющие операции `systemctl` идут напрямую в SCM.
-
-### Логи
-
-Логи pipe-транспорта помечаются тегом `[clientPid->serverPid]`, например `pipe: [1110->13241] sent`. `systemctl` включает диагностические логи флагом `--log [none|stdout|stderr]` (по умолчанию `none`).
 
 ---
 
