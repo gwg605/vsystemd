@@ -27,7 +27,40 @@ The daemon never pushes: a runner sends its state on every change and on a heart
 **Daemon startup** — the daemon does not poll runners. After a daemon restart the runners' connections break; each runner reconnects and sends its current state on the next heartbeat.
 
 ### Repository structure
+
+```
+cmd/
+  vsystemd/             — entry point, dispatches --mode=daemon / --mode=run
+  systemctl/            — CLI
+
+internal/
+  config/               — config.json loading and defaults
+  control/              — control operations (enable/disable/start/stop/status)
+  daemon/               — Daemon, ServiceState, daemon-reload logic
+  env/                  — service environment assembly
+  logging/              — slog setup
+  logwriter/            — timestamped log files with rotation
+  protocol/             — IPC message types
+  runner/               — Runner, child-process supervision, Restart= logic
+  scm/                  — Manager interface + Windows implementation (+ fake)
+  storage/              — Storage interface + prod implementation (+ fake)
+  svcconfig/            — unit → scm.ServiceConfig mapping
+  timermgr/             — timer database and OnCalendar scheduler
+  transport/            — Transport interface, Message, MsgHandler, Opt
+  transport/pipe/       — named-pipe implementation, envelope, lazy connect
+  unit/                 — unit-file parser and models
+
+tests/                  — integration tests (fake SCM + fake Storage)
+```
+
+Module: `github.com/gwg605/vsystemd`. Minimum Go version: 1.26+.
+
 ### v1 scope
+
+Out of scope for v1:
+
+- `OnBootSec=` / `OnStartupSec=` via Windows Task Scheduler
+- `Wants=`, `Before=`, `BindsTo=`, `PartOf=`, `Conflicts=`
 
 ## Interfaces
 ### Transport
@@ -725,41 +758,3 @@ The path is fixed: `C:\ProgramData\vsystemd\config.json`. A missing file means d
 - `ipc` sets the transport connect and request timeouts (see `### transport / pipe`).
 - `defaults` provides per-service defaults for `RestartSec=`, `TimeoutStopSec=`, `StartLimitBurst=`, and `StartLimitIntervalSec=` when a unit does not set them (see `### runner`).
 - `environment` builds the clean environment for service processes: `inherit` lists variables taken from the runner's environment (defaults to a fixed list of standard Windows variables), `vars` adds extra variables (see `### runner`).
-
----
-
-## Appendix A. Legacy content (to be migrated)
-
----
-
-## Структура проекта
-
-### Пакеты
-
-```
-cmd/
-  vsystemd/             — точка входа, dispatch --mode=daemon / --mode=run
-  systemctl/            — CLI
-
-internal/
-  unit/                 — парсер unit-файлов, модели UnitFile, ServiceUnit, TimerUnit
-  scm/                  — интерфейс Manager + Windows реализация
-  transport/            — интерфейс Transport, Message, MsgHandler, Opt
-  transport/pipe/       — реализация на named pipes, pipe envelope, lazy connect
-  daemon/               — Daemon, ServiceState, логика daemon-reload
-  timermgr/             — база timer'ов и OnCalendar= scheduler
-  runner/               — Runner, управление дочерним процессом, Restart= логика
-  storage/              — интерфейс Storage + prod реализация + fake реализация
-
-tests/                  — интеграционные тесты (fake SCM + fake Storage)
-```
-
-### Go module
-
-- Module: `github.com/gwg605/vsystemd`
-- Минимальная версия Go: 1.26+
-
-### За рамками v1
-
-- `OnBootSec=` / `OnStartupSec=` через Windows Task Scheduler
-- `Wants=`, `Before=`, `BindsTo=`, `PartOf=`, `Conflicts=`
