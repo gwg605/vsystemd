@@ -373,6 +373,79 @@ On `SERVICE_CONTROL_STOP`:
 `TimeoutStopSec=` is a unit-file directive supported in v1.
 
 ### timermgr
+
+`timermgr` owns the timer database and runs the in-process `OnCalendar` scheduler. It is independent of SCM: when a timer fires it reports the event through a callback, and the daemon resolves the target service from the timer unit and starts it via SCM. See `### Timer manager` for the interface and `## Protocol` for the timer messages.
+
+#### Behavior
+
+- Stores the set of timers (`TimerConfig{Name, OnCalendar}`) and their status (`TimerStatus{Enabled, Running, LastRun, NextRun, ActiveSince}`).
+- `Enabled` is an administrative flag (in the database), `Running` is a runtime status (the timer is actually in the schedule); they are independent.
+- For each timer it computes the next fire time via `CalendarEvent.Next(now)`.
+- It waits until that moment, then reports the fire through the callback `func(name string, status TimerStatus)`.
+- The daemon looks up the timer unit by name, resolves the target service (`Unit=`) and starts it via SCM `StartService()`.
+- After each fire it immediately computes the next tick and waits again (loop).
+- If `CalendarEvent.Next` returns `ok=false` (no future ticks), the timer stops and a warning is logged.
+
+**Missed ticks:** missed ticks are not made up. If the daemon was stopped, the schedule resumes from the first future tick relative to the current time at start.
+
+#### Lifecycle
+
+`New` only loads the database and never invokes the event handler; `Start` schedules all enabled timers; `Stop` stops everything and shuts down. The daemon calls `Start`/`Stop`.
+
+#### Persistence
+
+File: `C:\ProgramData\vsystemd\timers.json`
+
+```json
+{
+  "foo.timer": {
+    "on_calendar": ["daily"],
+    "enabled": true,
+    "last_run": "2026-11-09T10:00:00Z",
+    "next_run": "2026-11-09T11:00:00Z",
+    "active_since": "2026-11-09T09:00:00Z"
+  }
+}
+```
+
+The file layout is owned by `timermgr`; `storage` only keeps the bytes. After every change (fire, `start`/`stop`, `enable`/`disable`, config change) the manager serializes the database and writes it atomically via `storage.WriteTimers()` (temp file + `rename`, so a crash mid-write never leaves a corrupt `timers.json`); on `New` it reads `storage.ReadTimers()`. `Running` is not persisted — on `Start()` all `enabled` timers are put in the schedule.
+
+`last_run`, `next_run` and `active_since` are stored and handled only in UTC (RFC3339 with `Z`). When displayed, the time is either shown in UTC with an explicit `Z` or converted to the local timezone with the zone indicated.
+
+#### Command semantics
+
+| Command | Effect |
+|---|---|
+| `systemctl enable foo.timer` | `enabled=true` in the database; does not start the timer |
+| `systemctl disable foo.timer` | `enabled=false` in the database; does not stop the timer |
+| `systemctl start foo.timer` | puts the timer in the schedule (running); does not change `enabled`; sets `active_since` |
+| `systemctl stop foo.timer` | removes the timer from the schedule; does not change `enabled`; clears `next_run` and `active_since` |
+
+On `Start()` all timers with `enabled=true` are automatically put in the schedule. All timer commands (`enable`, `disable`, `start`, `stop`) go through the daemon pipe, not SCM; SCM knows nothing about timers.
+
+#### Reload
+
+On `daemon-reload` the daemon synchronizes the database with the units:
+
+- new timers are added (`SetTimer`); auto-start of `enabled` timers happens only in `Start()`;
+- timers whose `OnCalendar=` changed are rescheduled;
+- timers without a unit file are deleted only if they are `disabled` and `stopped`; otherwise they are kept.
+
+#### OnCalendar and timespan parsing
+
+**Library:** `gitlab.com/allddd/go-systemd-time` v1.1.0 (BSD-2-Clause)
+
+Used to parse:
+
+- `OnCalendar=` — via `ParseCalendarEvent(s) → CalendarEvent` and `CalendarEvent.Next(t time.Time) → (time.Time, bool)`
+- `RestartSec=`, `OnBootSec=`, `OnStartupSec=` — via `ParseTimespan(s) → time.Duration`
+
+The library supports the full systemd calendar expression syntax: lists, ranges (`..`), steps (`/`), tilde (`~` — days from the end of the month), aliases (`daily`, `weekly`, `monthly`, `hourly`, `minutely`, `quarterly`, `semiannually`, `annually`), and a timezone suffix (IANA, UTC, offset). Pure Go without cgo, works on Windows.
+
+Timezone support comes from embedded IANA tzdata (`import _ "time/tzdata"`), with no dependency on the OS having tzdata.
+
+Inside the code and in persistence, time is stored and handled in UTC. `OnCalendar=` without a TZ suffix is interpreted in the machine's local timezone, with a suffix in the specified timezone. On input the time is converted to UTC; when displayed it is shown in the local timezone or with the explicitly specified timezone.
+
 ### scm
 ### transport / pipe
 ### storage
@@ -385,52 +458,6 @@ On `SERVICE_CONTROL_STOP`:
 ---
 
 ## Appendix A. Legacy content (to be migrated)
-
----
-
-## Парсинг OnCalendar= и timespan
-
-**Библиотека:** `gitlab.com/allddd/go-systemd-time` v1.1.0 (BSD-2-Clause)
-
-Используется для разбора:
-
-- `OnCalendar=` — через `ParseCalendarEvent(s) → CalendarEvent` и `CalendarEvent.Next(t time.Time) → (time.Time, bool)`
-- `RestartSec=`, `OnBootSec=`, `OnStartupSec=` — через `ParseTimespan(s) → time.Duration`
-
-Библиотека поддерживает полный синтаксис systemd calendar expressions: списки, диапазоны (`..`), шаги (`/`), тильда (`~` — дни с конца месяца), алиасы (`daily`, `weekly`, `monthly`, `hourly`, `minutely`, `quarterly`, `semiannually`, `annually`), суффикс часового пояса (IANA, UTC, offset). Чистый Go без cgo, работает на Windows.
-
-Поддержка часовых поясов обеспечивается через embedded IANA tzdata (`import _ "time/tzdata"`), без зависимости от наличия tzdata в ОС.
-
-Внутри кода и в persistence время хранится и обрабатывается в UTC.
-`OnCalendar=` без суффикса TZ интерпретируется в локальной TZ машины, с
-суффиксом — в указанной TZ. При вводе время переводится в UTC, при отображении
-показывается в локальной TZ либо с явно указанной TZ.
-
----
-
-## Timer manager
-
-**Назначение:** внутренний компонент daemon'а (`internal/timermgr`), владеет базой timer'ов и отвечает за своевременный запуск сервисов по расписанию `OnCalendar=`.
-
-**Поведение:**
-
-- Хранит набор timer'ов (`TimerConfig{Name, OnCalendar}`) и их статус (`TimerStatus{Enabled, Running, LastRun, NextRun, ActiveSince}`).
-- `Enabled` — административный флаг (в БД), `Running` — рантайм-статус (timer реально в расписании); они независимы.
-- Для каждого timer'а вычисляет следующий момент срабатывания через `CalendarEvent.Next(now)`.
-- Ждёт до этого момента, после чего сообщает о срабатывании через колбэк `func(name string, status TimerStatus)`.
-- Демон по имени timer'а находит timer unit, определяет целевой сервис (`Unit=`) и запускает его вызовом `StartService()` через Windows SCM. Менеджер не зависит от SCM.
-- После каждого срабатывания немедленно вычисляет следующий тик и снова ждёт (цикл).
-- Если `CalendarEvent.Next` возвращает `ok=false` (нет будущих тиков) — timer останавливается, в лог пишется предупреждение.
-
-**Политика пропущенных тиков:** пропущенные тики не компенсируются. Если daemon был остановлен, расписание возобновляется с первого будущего тика относительно текущего времени на момент старта.
-
-**Persistence:** после каждого изменения (срабатывание, `start`/`stop`, `enable`/`disable`, правка конфига) менеджер сериализует базу в свой JSON-формат и атомарно пишет через `storage.WriteTimers()`; при `New` читает `storage.ReadTimers()`. `Running` не персистится — при `Start()` в расписание ставятся все `enabled`-timer'ы.
-
-**Reload:** при `daemon-reload` демон синхронизирует БД с юнитами:
-
-- Новые timer'ы — добавляются (`SetTimer`); автостарт `enabled`-timer'ов выполняется только в `Start()`.
-- Timer'ы с изменившимся `OnCalendar=` — перезапускаются.
-- Timer'ы без файла юнита — удаляются только если `disabled` и `stopped`; иначе сохраняются.
 
 ---
 
@@ -549,67 +576,6 @@ tests/                  — интеграционные тесты (fake SCM + 
 
 - `OnBootSec=` / `OnStartupSec=` через Windows Task Scheduler
 - `Wants=`, `Before=`, `BindsTo=`, `PartOf=`, `Conflicts=`
-
----
-
-## Таймеры: управление и persistence
-
-### Два независимых состояния
-
-- `enabled` — сохраняется в БД; определяет автозапуск при `Start()` менеджера (старт daemon'а)
-- `running` — рантайм-статус; таймер реально стоит в расписании в рамках текущей сессии
-
-### Persistence
-
-Файл: `C:\ProgramData\vsystemd\timers.json`
-
-```json
-{
-  "foo.timer": {
-    "on_calendar": ["daily"],
-    "enabled": true,
-    "last_run": "2026-11-09T10:00:00Z",
-    "next_run": "2026-11-09T11:00:00Z",
-    "active_since": "2026-11-09T09:00:00Z"
-  }
-}
-```
-
-Структуру файла определяет пакет `timermgr`; `storage` хранит только байты.
-`last_run`, `next_run` и `active_since` хранятся и обрабатываются только в UTC (RFC3339 с `Z`).
-При отображении время либо выводится в UTC с явным `Z`, либо конвертируется в
-локальную TZ с указанием зоны.
-
-Файл записывается атомарно: во временный файл в том же каталоге с последующей
-заменой через `rename`, поэтому сбой в момент записи не оставляет повреждённый
-`timers.json`.
-
-### Семантика команд
-
-| Команда | Эффект |
-|---|---|
-| `systemctl enable foo.timer` | `enabled=true` в БД; не запускает таймер |
-| `systemctl disable foo.timer` | `enabled=false` в БД; не останавливает таймер |
-| `systemctl start foo.timer` | ставит в расписание (running); не меняет `enabled`; устанавливает `active_since` |
-| `systemctl stop foo.timer` | убирает из расписания; не меняет `enabled`; сбрасывает `next_run` и `active_since` |
-
-При `Start()` менеджера: все таймеры с `enabled=true` автоматически ставятся в расписание.
-
-### Routing
-
-Все команды для таймеров (`enable`, `disable`, `start`, `stop`) — через daemon pipe (не SCM). SCM о таймерах не знает.
-
-### IPC: новые сообщения systemctl → daemon
-
-| Тип | Ожидаемый ответ | Payload |
-|---|---|---|
-| `timer_enable` | `timer_result` | `unit`, `enabled` (bool) |
-| `timer_start` | `timer_result` | `unit` |
-| `timer_stop` | `timer_result` | `unit` |
-
-| Тип | request_id | Payload |
-|---|---|---|
-| `timer_result` | id исходного запроса | `unit`, `success`, `enabled`, `running`, `last_run`, `next_run` |
 
 ---
 
