@@ -536,6 +536,57 @@ The production `Storage` implementation is file-backed under a fixed root (`C:\P
 `storage.New` creates the required directories on startup. Tests use `internal/storage/fake`.
 
 ### unit
+
+`internal/unit` parses unit files and models them. A unit file is an INI-like file with sections `[Unit]`, `[Service]`, `[Timer]`; the type is taken from the file extension (`.service` / `.timer`). `Parse` returns a `UnitFile`: unknown directives are collected in `Warnings` instead of failing, while a missing required section or an invalid value is a parse error.
+
+```go
+type UnitFile struct {
+    Name        ID
+    Description string
+    After       []string
+    Requires    []string
+    Wants       []string
+    Service     *ServiceUnit
+    Timer       *TimerUnit
+    Warnings    []string
+}
+
+type ServiceUnit struct {
+    ExecStart             string
+    ExecStartPre          []string
+    ExecStartPost         []string
+    ExecStop              string
+    Restart               RestartPolicy
+    RestartSec            time.Duration
+    TimeoutStopSec        time.Duration
+    WorkingDirectory      string
+    Environment           map[string]string
+    EnvironmentFiles      []string
+    User                  string
+    StandardOutput        string
+    StandardError         string
+    StartLimitBurst       int
+    StartLimitIntervalSec time.Duration
+}
+
+type TimerUnit struct {
+    OnCalendar   []string
+    OnBootSec    time.Duration
+    OnStartupSec time.Duration
+    Unit         string
+}
+```
+
+Directives by section:
+
+- `[Unit]`: `Description`, `After`, `Requires`, `Wants` (other ordering directives are parsed but ignored with a warning).
+- `[Service]`: `ExecStart`, `ExecStartPre`, `ExecStartPost`, `ExecStop`, `Restart`, `RestartSec`, `TimeoutStopSec`, `WorkingDirectory`, `Environment`, `EnvironmentFile`, `User`, `StandardOutput`, `StandardError`, `StartLimitBurst`, `StartLimitIntervalSec`.
+- `[Timer]`: `OnCalendar`, `OnBootSec`, `OnStartupSec`, `Unit`.
+
+`UnitFile.Dependencies()` returns the service units referenced by `After=`/`Requires=`, de-duplicated in declaration order; the daemon maps them to SCM dependencies. `ServiceUnit.ResolveOutputs()` resolves `StandardOutput`/`StandardError` into output targets (`null`, `file:<abs>`, `append:<abs>`, or a managed log file).
+
+Unit names are validated by `ParseID`: the name is the file name without the extension, up to 64 characters, restricted to `[A-Za-z0-9_-]`, with a known extension.
+
 ### systemctl
 ### Unit status computation
 ### Logging
