@@ -307,6 +307,71 @@ Responsibilities:
 `daemon-reload` rescans the unit directory and reconciles everything: it rebuilds the unit registry, updates or creates SCM services for changed units, removes disabled services that no longer have a unit file, syncs the timer database, and prunes runtime state for units that are gone.
 
 ### runner
+
+A runner is the per-service process wrapper. It is registered in SCM as the service binary and is started/stopped by SCM; it launches and supervises the service's child process, applies the restart policy, and reports state to the daemon.
+
+#### Components
+
+| Component | Responsibility |
+|---|---|
+| `controlHandler` | Registers with SCM, receives control codes (STOP/SHUTDOWN/INTERROGATE), runs the state loop, and updates `SetServiceStatus` |
+| `operation` | Runs an external process (`processOperation`) or a sequence (`sequenceOperation`), waits for completion, `Cancel(Interrupt\|Kill)` |
+| `RestartController` | `Restart=` / `RestartSec=` / `StartLimitBurst=` logic and the `restart_count` counter |
+| `LogStreamer` | Captures the child's stdout/stderr into a `logwriter.Writer` |
+| `StateReporter` | Sends `state_event` to the daemon and drives the heartbeat timer |
+
+#### Lifecycle
+
+On SCM start the runner runs `ExecStartPre`, then `ExecStart` (the child process), then `ExecStartPost`, and then monitors the child while it runs. When the child exits it drains (waits for all operations to finish); if `Restart=` is active and the start limit is not exhausted, it waits `RestartSec` and repeats, otherwise it exits. On SCM stop (`SERVICE_CONTROL_STOP`) it drains — running `ExecStop` or sending Ctrl+C, and killing on timeout — and exits.
+
+#### ExecStartPre / ExecStartPost
+
+Behavior follows systemd:
+
+- a non-zero `ExecStartPre` exit code makes the runner `failed` and `ExecStart` is not started;
+- a non-zero `ExecStartPost` exit code makes the service `failed` and the child process is stopped;
+- the `-` prefix (`-/path/to/cmd`) ignores the error and continues.
+
+#### EnvironmentFile=
+
+The path must be **absolute** and must not contain a `..` component; otherwise it is a startup error (the `-` prefix does not override this). Missing-file behavior follows systemd:
+
+- `EnvironmentFile=/path` — the file is required; missing → `failed`;
+- `EnvironmentFile=-/path` — the file is optional; missing is ignored.
+
+#### Service environment
+
+Service processes do **not** inherit the runner's environment. The environment is assembled from `config.json` (the `environment` section) and the unit directives, in increasing priority:
+
+1. `environment.inherit` — a comma-separated list of names whose values are taken from the runner's environment; when the field is absent a fixed default list of standard Windows variables is used; `"inherit": ""` inherits nothing;
+2. `environment.vars` — extra variables; in values `%NAME%` is substituted from the runner's environment (`%%` → a literal `%`; an undefined name → empty; a `%` without a closing `%` → left as is plus a warning);
+3. `EnvironmentFile=` (unit);
+4. `Environment=` (unit) — highest priority.
+
+`runUnit` resolves `environment` into `runner.EnvironmentDefaults` and passes it to the runner; the runner itself stays config-agnostic.
+
+#### Restart policy
+
+| Directive | Behavior |
+|---|---|
+| `Restart=no` | Never restart |
+| `Restart=always` | Always restart |
+| `Restart=on-failure` | Restart only on a non-zero exit code |
+
+- `StartLimitBurst=` / `StartLimitIntervalSec=` — as in systemd: N attempts within the interval, then `failed`;
+- between attempts there is a `RestartSec=` pause.
+
+#### Stopping the process
+
+On `SERVICE_CONTROL_STOP`:
+
+1. if `ExecStop=` is set, run it;
+2. otherwise send `Ctrl+C` (`GenerateConsoleCtrlEvent`);
+3. wait `TimeoutStopSec=` (default 45s);
+4. if the process has not exited, `TerminateProcess()`.
+
+`TimeoutStopSec=` is a unit-file directive supported in v1.
+
 ### timermgr
 ### scm
 ### transport / pipe
@@ -484,90 +549,6 @@ tests/                  — интеграционные тесты (fake SCM + 
 
 - `OnBootSec=` / `OnStartupSec=` через Windows Task Scheduler
 - `Wants=`, `Before=`, `BindsTo=`, `PartOf=`, `Conflicts=`
-
----
-
-## Runner
-
-### Компоненты
-
-| Компонент | Ответственность |
-|---|---|
-| `controlHandler` | Регистрация в SCM, приём control-кодов (STOP/SHUTDOWN/INTERROGATE), цикл состояний и обновление `SetServiceStatus` |
-| `operation` | Запуск внешнего процесса (`processOperation`) или последовательности (`sequenceOperation`), ожидание завершения, `Cancel(Interrupt\|Kill)` |
-| `RestartController` | `Restart=` / `RestartSec=` / `StartLimitBurst=` логика, счётчик `restart_count` |
-| `LogStreamer` | Перехват stdout/stderr дочернего процесса → `logwriter.Writer` |
-| `StateReporter` | Отправка `state_event` в daemon и heartbeat-таймер |
-
-### Жизненный цикл
-
-```
-SCM start → Runner start
-  → ExecStartPre
-  → ExecStart (child process)
-  → ExecStartPost
-  → [работает, мониторит child]
-  → child exit → drain (дожидаемся завершения всех операций)
-  → [Restart= активен и лимит не исчерпан] → RestartSec → повтор
-  → [Restart=no или лимит исчерпан] → Runner exit
-SCM stop → SERVICE_CONTROL_STOP → drain (ExecStop / Ctrl+C, по таймауту Kill) → Runner exit
-```
-
-### ExecStartPre / ExecStartPost
-
-Поведение как в systemd:
-
-- `ExecStartPre` ненулевой exit code → Runner переходит в `failed`, `ExecStart` не запускается
-- `ExecStartPost` ненулевой exit code → сервис переходит в `failed`, дочерний процесс останавливается
-- Префикс `-` (`-/path/to/cmd`) → ошибка игнорируется, выполнение продолжается
-
-### EnvironmentFile=
-
-Путь должен быть **абсолютным** и не содержать компонент `..`; иначе — ошибка
-запуска (префикс `-` это не отменяет). Реакция на отсутствие файла — как в systemd:
-
-- `EnvironmentFile=/path` — файл обязателен; отсутствие → `failed`
-- `EnvironmentFile=-/path` — файл опциональный; отсутствие игнорируется
-
-### Формирование окружения сервисов
-
-Сервисные процессы **не наследуют** окружение раннера. Окружение собирается
-из `config.json` (секция `environment`) и директив юнита, в порядке возрастания
-приоритета:
-
-1. `environment.inherit` — список имён (через запятую), значения берутся из
-   окружения раннера; при отсутствии поля используется фиксированный дефолтный
-   список стандартных переменных Windows; `"inherit": ""` — не наследовать ничего;
-2. `environment.vars` — дополнительные переменные; в значениях `%NAME%`
-   подставляется значение из окружения раннера (`%%` → литеральный `%`;
-   неопределённое имя → пусто; `%` без закрывающего `%` → как есть + warning);
-3. `EnvironmentFile=` (unit);
-4. `Environment=` (unit) — высший приоритет.
-
-`runUnit` резолвит `environment` в `runner.EnvironmentDefaults` и передаёт
-раннеру; сам раннер остаётся config-agnostic.
-
-### Restart= логика
-
-| Директива | Поведение |
-|---|---|
-| `Restart=no` | Не перезапускать |
-| `Restart=always` | Перезапускать всегда |
-| `Restart=on-failure` | Перезапускать только при ненулевом exit code |
-
-- `StartLimitBurst=` / `StartLimitIntervalSec=` — как в systemd: N попыток за интервал, после исчерпания → `failed`
-- Между попытками — пауза `RestartSec=`
-
-### Остановка процесса
-
-При получении `SERVICE_CONTROL_STOP`:
-
-1. Если задан `ExecStop=` — выполнить его
-2. Если не задан — отправить `Ctrl+C` (`GenerateConsoleCtrlEvent`)
-3. Ждать `TimeoutStopSec=` (default 45s)
-4. Если процесс не завершился — `TerminateProcess()`
-
-`TimeoutStopSec=` — директива unit-файла, поддерживается в v1.
 
 ---
 
