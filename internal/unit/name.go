@@ -28,17 +28,6 @@ func (t Type) Extension() string {
 	}
 }
 
-func (t Type) String() string {
-	switch t {
-	case TypeService:
-		return "service"
-	case TypeTimer:
-		return "timer"
-	default:
-		return "unknown"
-	}
-}
-
 // ID identifies a unit by its name (without the extension) and its type.
 type ID struct {
 	Name string

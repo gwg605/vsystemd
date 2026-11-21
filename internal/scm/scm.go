@@ -24,9 +24,6 @@ const (
 	StateStartPending
 	StateStopPending
 	StateRunning
-	StateContinuePending
-	StatePausePending
-	StatePaused
 )
 
 // ProcessHandle is an opaque OS handle to a process (a Windows HANDLE).
