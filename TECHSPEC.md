@@ -86,6 +86,8 @@ For `.timer`, `systemd_state` is `active (waiting)` when the timer is in the sch
 
 ### Delivery guarantees
 
+The scheme is best-effort: there is no delivery acknowledgement. A lost message (pipe unavailable, timeout) is recorded in the log. The current state is always available from SCM or the next heartbeat.
+
 ## Components
 ### daemon
 ### runner
@@ -186,10 +188,6 @@ Runner держит постоянное соединение и по тайме
 ### Поведение при старте daemon'а
 
 Демон не опрашивает runner'ов. После рестарта демона соединения runner'ов рвутся; runner переподключается и отправляет текущее состояние при следующем heartbeat.
-
-### Гарантии доставки
-
-Схема работает по принципу best-effort: подтверждение доставки отсутствует. Потерянное сообщение (pipe недоступен, таймаут) фиксируется в лог. Актуальное состояние всегда доступно через SCM или следующий heartbeat.
 
 ---
 
