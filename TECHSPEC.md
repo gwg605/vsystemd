@@ -682,6 +682,41 @@ A custom path (`file:`/`append:`) must be **absolute** and a plain file path: no
 
 ### Configuration
 
+The path is fixed: `C:\ProgramData\vsystemd\config.json`. A missing file means defaults; the path cannot be overridden. Each binary (`vsystemd`, `systemctl`) reads the config on its own at startup; every value has a default and the file overrides only what it sets.
+
+```json
+{
+  "system_dir": "C:\\ProgramData\\vsystemd\\system",
+  "logs_dir": "C:\\ProgramData\\vsystemd\\logs",
+  "timers_state_file": "C:\\ProgramData\\vsystemd\\timers.json",
+  "log_level": "info",
+  "logs": {
+    "max_size_mb": 10,
+    "max_age_days": 7
+  },
+  "ipc": {
+    "connect_timeout_ms": 2000,
+    "request_timeout_ms": 10000
+  },
+  "defaults": {
+    "restart_sec_ms": 100,
+    "timeout_stop_sec_ms": 45000,
+    "start_limit_burst": 5,
+    "start_limit_interval_sec_ms": 10000
+  },
+  "environment": {
+    "inherit": "SystemRoot,SystemDrive,windir,PATH,...",
+    "vars": { "APP_ENV": "production" }
+  }
+}
+```
+
+- `system_dir`, `logs_dir`, `timers_state_file` feed `storage.Paths` (see `### storage`).
+- `logs` drives log rotation (see `### Logging`).
+- `ipc` sets the transport connect and request timeouts (see `### transport / pipe`).
+- `defaults` provides per-service defaults for `RestartSec=`, `TimeoutStopSec=`, `StartLimitBurst=`, and `StartLimitIntervalSec=` when a unit does not set them (see `### runner`).
+- `environment` builds the clean environment for service processes: `inherit` lists variables taken from the runner's environment (defaults to a fixed list of standard Windows variables), `vars` adds extra variables (see `### runner`).
+
 ---
 
 ## Appendix A. Legacy content (to be migrated)
@@ -737,38 +772,3 @@ tests/                  — интеграционные тесты (fake SCM + 
 
 - `OnBootSec=` / `OnStartupSec=` через Windows Task Scheduler
 - `Wants=`, `Before=`, `BindsTo=`, `PartOf=`, `Conflicts=`
-
----
-
-## Конфигурация
-
-### Расположение
-
-Путь фиксирован: `C:\ProgramData\vsystemd\config.json`. Отсутствие файла → дефолты; переопределения пути нет.
-
-Каждый бинарь (`vsystemd`, `systemctl`) читает конфиг самостоятельно при старте. Все значения имеют дефолты, конфиг переопределяет только нужные.
-
-### Формат
-
-```json
-{
-  "system_dir": "C:\\ProgramData\\vsystemd\\system",
-  "logs_dir": "C:\\ProgramData\\vsystemd\\logs",
-  "timers_state_file": "C:\\ProgramData\\vsystemd\\timers.json",
-  "log_level": "info",
-  "logs": {
-    "max_size_mb": 10,
-    "max_age_days": 7
-  },
-  "ipc": {
-    "connect_timeout_ms": 2000,
-    "request_timeout_ms": 10000
-  },
-  "defaults": {
-    "restart_sec_ms": 100,
-    "timeout_stop_sec_ms": 45000,
-    "start_limit_burst": 5,
-    "start_limit_interval_sec_ms": 10000
-  }
-}
-```
