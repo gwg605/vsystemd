@@ -1,19 +1,20 @@
 package runner
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
 	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
 )
 
-func TestResolveLogsDirectories(t *testing.T) {
+func TestResolveDirectories(t *testing.T) {
 	store := storagefake.New()
 	base := t.TempDir()
 
-	got, err := resolveLogsDirectories(store, base, []string{"app", "access"})
+	got, err := resolveDirectories(store, base, []string{"app", "access"}, "LogsDirectory")
 	if err != nil {
-		t.Fatalf("resolveLogsDirectories() error = %v", err)
+		t.Fatalf("resolveDirectories() error = %v", err)
 	}
 	want := []string{filepath.Join(base, "app"), filepath.Join(base, "access")}
 	if len(got) != len(want) {
@@ -26,14 +27,41 @@ func TestResolveLogsDirectories(t *testing.T) {
 	}
 }
 
-func TestResolveLogsDirectoriesInvalid(t *testing.T) {
+func TestResolveDirectoriesInvalid(t *testing.T) {
 	store := storagefake.New()
 	base := t.TempDir()
 
 	for _, name := range []string{"", ".", "..", `sub\dir`, "sub/dir", `C:\abs`} {
-		if _, err := resolveLogsDirectories(store, base, []string{name}); err == nil {
-			t.Errorf("resolveLogsDirectories(%q) error = nil", name)
+		if _, err := resolveDirectories(store, base, []string{name}, "RuntimeDirectory"); err == nil {
+			t.Errorf("resolveDirectories(%q) error = nil", name)
 		}
+	}
+}
+
+func TestResetAndRemoveDirectories(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "app")
+	dirs := []string{dir}
+
+	if err := resetDirectories(dirs); err != nil {
+		t.Fatalf("resetDirectories() error = %v", err)
+	}
+	stale := filepath.Join(dir, "stale")
+	if err := os.WriteFile(stale, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write stale file: %v", err)
+	}
+
+	if err := resetDirectories(dirs); err != nil {
+		t.Fatalf("resetDirectories() error = %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("stale file was not removed: %v", err)
+	}
+
+	if err := removeDirectories(dirs); err != nil {
+		t.Fatalf("removeDirectories() error = %v", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("directory was not removed: %v", err)
 	}
 }
 

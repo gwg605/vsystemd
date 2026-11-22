@@ -17,8 +17,9 @@ The project provides two binaries:
 - `Restart=no|always|on-failure`, `RestartSec`, `StartLimitBurst`,
   `StartLimitIntervalSec`;
 - `WorkingDirectory`, `Environment`, `EnvironmentFile`, `User`;
-- `LogsDirectory`/`LogsDirectoryMode` and systemd specifiers (`%L`, `%S`, `%C`,
-  `%E`, `%t`, `%h`, `%n`, `%N`, `%%`) plus `${VAR}` in `Exec*`;
+- `LogsDirectory`/`LogsDirectoryMode`, `RuntimeDirectory`/`RuntimeDirectoryMode`
+  and systemd specifiers (`%L`, `%S`, `%C`, `%E`, `%t`, `%h`, `%n`, `%N`, `%%`)
+  plus `${VAR}` in `Exec*`;
 - service stdout/stderr logs and a daemon/runner operation log;
 - Windows SCM integration with dependencies (`Requires=`, `After=`);
 - timers based on systemd `OnCalendar=` expressions, with persisted
@@ -271,9 +272,15 @@ C:\ProgramData\vsystemd\timers.json
 `LogsDirectory=name [name2 ...]` creates `<logs_dir>\<name>` (a single relative
 component, no `..`) at service start and exports `LOGS_DIRECTORY` to the service;
 several names are joined with `;` (e.g.
-`LogsDirectory=app access`). Unlike systemd's `RuntimeDirectory`, the
-directories are kept when the service stops. `LogsDirectoryMode=` is parsed and
-ignored (Windows uses ACLs, not Unix mode bits).
+`LogsDirectory=app access`). The directories are kept when the service stops.
+`LogsDirectoryMode=` is parsed and ignored (Windows uses ACLs, not Unix mode
+bits).
+
+`RuntimeDirectory=name [name2 ...]` works the same way but is rooted at
+`run_dir` and exported as `RUNTIME_DIRECTORY`. Unlike logs, these directories are
+recreated at service start (leftovers are wiped) and removed when the service
+finally stops or fails; an internal `Restart=` leaves them in place.
+`RuntimeDirectoryMode=` is parsed and ignored.
 
 systemd specifiers are expanded in `StandardOutput=`, `StandardError=`,
 `WorkingDirectory=` and in `Environment=` values: `%L` (logs), `%S` (state),
@@ -371,7 +378,10 @@ Remove-Item -Recurse -Force C:\ProgramData\vsystemd
 - `OnCalendar=` timers run only while the daemon is running;
 - missed timer ticks are not replayed after a daemon restart;
 - `LogsDirectory=` maps under `logs_dir`, its directories are not removed on
-  stop, and `LogsDirectoryMode=` is parsed but ignored.
+  stop, and `LogsDirectoryMode=` is parsed but ignored;
+- `RuntimeDirectory=` removes its directories only on final stop (not on an
+  internal `Restart=`), has no `RuntimeDirectoryPreserve=`, and
+  `RuntimeDirectoryMode=` is parsed but ignored.
 
 ## Documentation
 

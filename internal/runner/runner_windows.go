@@ -80,7 +80,7 @@ func NewRunner(name string, store storage.Factory, newTransport transport.Factor
 	parsed.Service.StandardError = resolved.StandardError
 	parsed.Service.Environment = resolved.Environment
 
-	logsDirs, err := resolveLogsDirectories(st, cfg.LogsDir, parsed.Service.LogsDirectory)
+	logsDirs, err := resolveDirectories(st, cfg.LogsDir, parsed.Service.LogsDirectory, "LogsDirectory")
 	if err != nil {
 		return nil, fmt.Errorf("resolve LogsDirectory for %s: %w", id, err)
 	}
@@ -88,6 +88,14 @@ func NewRunner(name string, store storage.Factory, newTransport transport.Factor
 		return nil, fmt.Errorf("create LogsDirectory for %s: %w", id, err)
 	}
 	logsDirectory := strings.Join(logsDirs, ";")
+
+	runtimeDirs, err := resolveDirectories(st, cfg.RunDir, parsed.Service.RuntimeDirectory, "RuntimeDirectory")
+	if err != nil {
+		return nil, fmt.Errorf("resolve RuntimeDirectory for %s: %w", id, err)
+	}
+	if err := resetDirectories(runtimeDirs); err != nil {
+		return nil, fmt.Errorf("create RuntimeDirectory for %s: %w", id, err)
+	}
 
 	if err := logwriter.Cleanup(logwriter.ServiceLogDir(cfg.LogsDir, id.Name), cfg.Logs.MaxAgeDays, startTime); err != nil {
 		slog.Debug("runner: cleanup service logs failed", "unit", id.String(), "error", err)
@@ -103,7 +111,7 @@ func NewRunner(name string, store storage.Factory, newTransport transport.Factor
 		Vars:    cfg.Environment.Vars,
 	}
 	restart := newRestartController(parsed.Service)
-	handler := newControlHandler(parsed.Service, restart, defaults, logs, logsDirectory)
+	handler := newControlHandler(parsed.Service, restart, defaults, logs, logsDirectory, runtimeDirs)
 
 	tr, err := newTransport(transport.NewPeer(transport.PeerRunner, id.String(), false), nil)
 	if err != nil {
@@ -186,6 +194,9 @@ func (r *Runner) Serve(requests <-chan svc.ChangeRequest, changes chan<- svc.Sta
 
 func (r *Runner) Close() error {
 	slog.Info("runner: closing", "unit", r.id.String())
+	if err := removeDirectories(r.handler.runtimeDirs); err != nil {
+		slog.Warn("runner: remove runtime directory failed", "unit", r.id.String(), "error", err)
+	}
 	transportErr := r.transport.Close()
 	logsErr := r.logs.Close()
 	if transportErr != nil {

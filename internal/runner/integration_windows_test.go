@@ -198,3 +198,33 @@ func TestRunnerLogsDirectory(t *testing.T) {
 		t.Errorf("LOGS_DIRECTORY = %q, want %q", data, dir)
 	}
 }
+
+func TestRunnerRuntimeDirectory(t *testing.T) {
+	runRoot := t.TempDir()
+	envFile := filepath.Join(t.TempDir(), "env.txt")
+
+	unitText := fmt.Sprintf("[Service]\nRuntimeDirectory=app\nExecStart=%s\n",
+		helperCommand("recordenv", envFile, "RUNTIME_DIRECTORY"))
+	runner, _ := newIntegratedRunnerConfig(t, "app.service", unitText, config.Config{LogsDir: t.TempDir(), RunDir: runRoot})
+
+	dir := filepath.Join(runRoot, "app")
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		t.Fatalf("RuntimeDirectory was not created: %v", err)
+	}
+
+	changes, _, done := runControlHandler(t, runner.handler)
+	waitForStatus(t, changes, svc.Stopped)
+	waitForDone(t, done)
+
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("RuntimeDirectory was not removed on stop: %v", err)
+	}
+
+	data, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatalf("read env file: %v", err)
+	}
+	if string(data) != dir {
+		t.Errorf("RUNTIME_DIRECTORY = %q, want %q", data, dir)
+	}
+}

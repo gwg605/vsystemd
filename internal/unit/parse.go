@@ -170,6 +170,10 @@ func (s *ServiceUnit) apply(key, value string, warn func(string)) error {
 		s.LogsDirectory = append(s.LogsDirectory, strings.Fields(value)...)
 	case "LogsDirectoryMode":
 		warn("LogsDirectoryMode= is ignored")
+	case "RuntimeDirectory":
+		s.RuntimeDirectory = append(s.RuntimeDirectory, strings.Fields(value)...)
+	case "RuntimeDirectoryMode":
+		warn("RuntimeDirectoryMode= is ignored")
 	case "StartLimitBurst":
 		n, err := strconv.Atoi(value)
 		if err != nil || n < 0 {
