@@ -85,7 +85,7 @@ func (u *UnitFile) apply(section, key, value string) error {
 	case "unit":
 		u.applyUnit(key, value)
 	case "service":
-		return u.Service.apply(key, value)
+		return u.Service.apply(key, value, u.warn)
 	case "timer":
 		return u.applyTimer(key, value)
 	}
@@ -117,7 +117,7 @@ func (u *UnitFile) warn(message string) {
 	u.Warnings = append(u.Warnings, message)
 }
 
-func (s *ServiceUnit) apply(key, value string) error {
+func (s *ServiceUnit) apply(key, value string, warn func(string)) error {
 	switch key {
 	case "ExecStart":
 		s.ExecStart = value
@@ -166,6 +166,10 @@ func (s *ServiceUnit) apply(key, value string) error {
 		s.StandardOutput = value
 	case "StandardError":
 		s.StandardError = value
+	case "LogsDirectory":
+		s.LogsDirectory = append(s.LogsDirectory, strings.Fields(value)...)
+	case "LogsDirectoryMode":
+		warn("LogsDirectoryMode= is ignored")
 	case "StartLimitBurst":
 		n, err := strconv.Atoi(value)
 		if err != nil || n < 0 {

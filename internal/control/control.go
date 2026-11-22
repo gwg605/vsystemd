@@ -11,6 +11,7 @@ import (
 	"github.com/gwg605/vsystemd/internal/svcconfig"
 	"github.com/gwg605/vsystemd/internal/transport"
 	"github.com/gwg605/vsystemd/internal/unit"
+	"github.com/gwg605/vsystemd/internal/unitpath"
 )
 
 // Controller executes systemctl commands against the SCM and the daemon.
@@ -18,10 +19,11 @@ type Controller struct {
 	manager   scm.Manager
 	transport transport.Factory
 	store     storage.Factory
+	roots     unitpath.Roots
 }
 
-func New(manager scm.Manager, transport transport.Factory, store storage.Factory) *Controller {
-	return &Controller{manager: manager, transport: transport, store: store}
+func New(manager scm.Manager, transport transport.Factory, store storage.Factory, roots unitpath.Roots) *Controller {
+	return &Controller{manager: manager, transport: transport, store: store, roots: roots}
 }
 
 // Enable creates or updates the SCM service for a unit and returns non-fatal
@@ -46,7 +48,7 @@ func (c *Controller) Enable(id unit.ID, executable string, password, passwordFil
 	}
 
 	warnings := append([]string{}, parsed.Warnings...)
-	warnings = append(warnings, unitPathWarnings(store, parsed)...)
+	warnings = append(warnings, unitPathWarnings(store, parsed, c.roots)...)
 
 	if err := c.verifyUnitFile(id, data); err != nil {
 		return warnings, err

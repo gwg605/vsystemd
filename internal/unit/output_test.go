@@ -3,11 +3,7 @@ package unit
 import "testing"
 
 func TestResolveOutputs(t *testing.T) {
-	service := &ServiceUnit{
-		StandardOutput: `file:C:\logs\out.log`,
-		StandardError:  `append:C:\logs\out.log`,
-	}
-	stdout, stderr, err := service.ResolveOutputs()
+	stdout, stderr, err := ResolveOutputs(`file:C:\logs\out.log`, `append:C:\logs\out.log`)
 	if err != nil {
 		t.Fatalf("ResolveOutputs() error = %v", err)
 	}
@@ -18,8 +14,7 @@ func TestResolveOutputs(t *testing.T) {
 		t.Errorf("paths = %q/%q", stdout.Path, stderr.Path)
 	}
 
-	service = &ServiceUnit{StandardOutput: "", StandardError: "null"}
-	stdout, stderr, err = service.ResolveOutputs()
+	stdout, stderr, err = ResolveOutputs("", "null")
 	if err != nil {
 		t.Fatalf("ResolveOutputs() error = %v", err)
 	}
@@ -30,8 +25,7 @@ func TestResolveOutputs(t *testing.T) {
 
 func TestResolveOutputsErrors(t *testing.T) {
 	for _, value := range []string{"journal", "file:"} {
-		service := &ServiceUnit{StandardOutput: value}
-		if _, _, err := service.ResolveOutputs(); err == nil {
+		if _, _, err := ResolveOutputs(value, ""); err == nil {
 			t.Errorf("ResolveOutputs(%q) error = nil, want error", value)
 		}
 	}

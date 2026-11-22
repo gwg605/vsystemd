@@ -77,6 +77,10 @@ type Logs struct {
 type Config struct {
 	SystemDir       string      `json:"system_dir"`
 	LogsDir         string      `json:"logs_dir"`
+	RunDir          string      `json:"run_dir"`
+	StateDir        string      `json:"state_dir"`
+	CacheDir        string      `json:"cache_dir"`
+	ConfigDir       string      `json:"config_dir"`
 	TimersStateFile string      `json:"timers_state_file"`
 	LogLevel        string      `json:"log_level"`
 	IPC             IPC         `json:"ipc"`
@@ -89,6 +93,10 @@ func Default() Config {
 	return Config{
 		SystemDir:       filepath.Join(defaultRoot, "system"),
 		LogsDir:         filepath.Join(defaultRoot, "logs"),
+		RunDir:          filepath.Join(defaultRoot, "run"),
+		StateDir:        filepath.Join(defaultRoot, "state"),
+		CacheDir:        filepath.Join(defaultRoot, "cache"),
+		ConfigDir:       defaultRoot,
 		TimersStateFile: filepath.Join(defaultRoot, "timers.json"),
 		LogLevel:        "info",
 		IPC: IPC{
@@ -173,6 +181,18 @@ func (c *Config) applyDefaults() {
 	}
 	if c.LogsDir == "" {
 		c.LogsDir = defaults.LogsDir
+	}
+	if c.RunDir == "" {
+		c.RunDir = defaults.RunDir
+	}
+	if c.StateDir == "" {
+		c.StateDir = defaults.StateDir
+	}
+	if c.CacheDir == "" {
+		c.CacheDir = defaults.CacheDir
+	}
+	if c.ConfigDir == "" {
+		c.ConfigDir = defaults.ConfigDir
 	}
 	if c.TimersStateFile == "" {
 		c.TimersStateFile = defaults.TimersStateFile

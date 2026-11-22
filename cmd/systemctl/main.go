@@ -18,6 +18,7 @@ import (
 	"github.com/gwg605/vsystemd/internal/transport"
 	"github.com/gwg605/vsystemd/internal/transport/pipe"
 	"github.com/gwg605/vsystemd/internal/unit"
+	"github.com/gwg605/vsystemd/internal/unitpath"
 )
 
 type unitCommand struct {
@@ -149,7 +150,14 @@ func newController(cfg config.Config) *control.Controller {
 	store := func() (storage.Storage, error) {
 		return storage.New(cfg.Paths())
 	}
-	return control.New(scm.New(), transport, store)
+	roots := unitpath.Roots{
+		LogsDir:    cfg.LogsDir,
+		StateDir:   cfg.StateDir,
+		CacheDir:   cfg.CacheDir,
+		ConfigDir:  cfg.ConfigDir,
+		RuntimeDir: cfg.RunDir,
+	}
+	return control.New(scm.New(), transport, store, roots)
 }
 
 func parseUnit(name string) (unit.ID, error) {

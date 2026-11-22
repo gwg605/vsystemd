@@ -17,7 +17,7 @@ type logStreamer struct {
 }
 
 func newLogStreamer(store storage.Storage, serviceName string, service *unit.ServiceUnit, logsDir string, rotation logwriter.Rotation, startTime time.Time) (*logStreamer, error) {
-	stdoutTarget, stderrTarget, err := service.ResolveOutputs()
+	stdoutTarget, stderrTarget, err := unit.ResolveOutputs(service.StandardOutput, service.StandardError)
 	if err != nil {
 		return nil, err
 	}

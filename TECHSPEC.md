@@ -580,6 +580,7 @@ type ServiceUnit struct {
     User                  string
     StandardOutput        string
     StandardError         string
+    LogsDirectory         []string
     StartLimitBurst       int
     StartLimitIntervalSec time.Duration
 }
@@ -595,10 +596,16 @@ type TimerUnit struct {
 Directives by section:
 
 - `[Unit]`: `Description`, `After`, `Requires`, `Wants` (other ordering directives are parsed but ignored with a warning).
-- `[Service]`: `ExecStart`, `ExecStartPre`, `ExecStartPost`, `ExecStop`, `Restart`, `RestartSec`, `TimeoutStopSec`, `WorkingDirectory`, `Environment`, `EnvironmentFile`, `User`, `StandardOutput`, `StandardError`, `StartLimitBurst`, `StartLimitIntervalSec`.
+- `[Service]`: `ExecStart`, `ExecStartPre`, `ExecStartPost`, `ExecStop`, `Restart`, `RestartSec`, `TimeoutStopSec`, `WorkingDirectory`, `Environment`, `EnvironmentFile`, `User`, `StandardOutput`, `StandardError`, `LogsDirectory`, `LogsDirectoryMode`, `StartLimitBurst`, `StartLimitIntervalSec`.
 - `[Timer]`: `OnCalendar`, `OnBootSec`, `OnStartupSec`, `Unit`.
 
-`UnitFile.Dependencies()` returns the service units referenced by `After=`/`Requires=`, de-duplicated in declaration order; the daemon maps them to SCM dependencies. `ServiceUnit.ResolveOutputs()` resolves `StandardOutput`/`StandardError` into output targets (`null`, `file:<abs>`, `append:<abs>`, or a managed log file).
+`UnitFile.Dependencies()` returns the service units referenced by `After=`/`Requires=`, de-duplicated in declaration order; the daemon maps them to SCM dependencies. `ResolveOutputs(stdout, stderr)` resolves raw `StandardOutput`/`StandardError` values into output targets (`null`, `file:<abs>`, `append:<abs>`, or a managed log file).
+
+#### 4.7.1 Logs directory and specifier resolution
+
+`LogsDirectory=` populates `ServiceUnit.LogsDirectory`; `LogsDirectoryMode=` is parsed but only warns. The runner creates the directories (`internal/runner`: `resolveLogsDirectories`, `ensureDirectories`) and sets `LOGS_DIRECTORY`, and expands `${NAME}` references in `Exec*=` command lines.
+
+Specifier expansion is implemented in `internal/specifiers` (`Expand` over `Values`) and `internal/unitpath` (`NewValues`, `ResolveService`), and is shared by the runner, the daemon `status` log tail and `systemctl enable`. `%h` resolves to the home of the process performing the expansion, so it may differ between the running service (service account) and `status`/`enable`. The specifier set and the Windows mapping of each specifier are in ARCHITECTURE.md.
 
 Unit names are validated by `ParseID`: the name is the file name without the extension, up to 64 characters, restricted to `[A-Za-z0-9_-]`, with a known extension.
 
@@ -703,6 +710,10 @@ The path is fixed: `C:\ProgramData\vsystemd\config.json`. A missing file means d
 {
   "system_dir": "C:\\ProgramData\\vsystemd\\system",
   "logs_dir": "C:\\ProgramData\\vsystemd\\logs",
+  "run_dir": "C:\\ProgramData\\vsystemd\\run",
+  "state_dir": "C:\\ProgramData\\vsystemd\\state",
+  "cache_dir": "C:\\ProgramData\\vsystemd\\cache",
+  "config_dir": "C:\\ProgramData\\vsystemd",
   "timers_state_file": "C:\\ProgramData\\vsystemd\\timers.json",
   "log_level": "info",
   "logs": {
@@ -727,6 +738,7 @@ The path is fixed: `C:\ProgramData\vsystemd\config.json`. A missing file means d
 ```
 
 - `system_dir`, `logs_dir`, `timers_state_file` feed `storage.Paths` (see `### 4.6 storage`).
+- `logs_dir` also roots `LogsDirectory=` subdirectories; `run_dir`, `state_dir`, `cache_dir`, `config_dir` are the roots referenced by the `%t`, `%S`, `%C`, `%E` specifiers (see `### 4.7.1`).
 - `logs` drives log rotation (see `### 4.10 Logging`).
 - `ipc` sets the transport connect and request timeouts (see `### 4.5 transport / pipe`).
 - `defaults` provides per-service defaults for `RestartSec=`, `TimeoutStopSec=`, `StartLimitBurst=`, and `StartLimitIntervalSec=` when a unit does not set them (see `### 4.2 runner`).

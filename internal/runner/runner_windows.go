@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/windows/svc"
@@ -17,6 +18,7 @@ import (
 	"github.com/gwg605/vsystemd/internal/storage"
 	"github.com/gwg605/vsystemd/internal/transport"
 	"github.com/gwg605/vsystemd/internal/unit"
+	"github.com/gwg605/vsystemd/internal/unitpath"
 )
 
 type Runner struct {
@@ -62,6 +64,31 @@ func NewRunner(name string, store storage.Factory, newTransport transport.Factor
 
 	applyServiceDefaults(parsed.Service, cfg)
 
+	roots := unitpath.Roots{
+		LogsDir:    cfg.LogsDir,
+		StateDir:   cfg.StateDir,
+		CacheDir:   cfg.CacheDir,
+		ConfigDir:  cfg.ConfigDir,
+		RuntimeDir: cfg.RunDir,
+	}
+	resolved, err := unitpath.ResolveService(parsed.Service, unitpath.NewValues(roots, id))
+	if err != nil {
+		return nil, fmt.Errorf("expand unit %s: %w", id, err)
+	}
+	parsed.Service.WorkingDirectory = resolved.WorkingDirectory
+	parsed.Service.StandardOutput = resolved.StandardOutput
+	parsed.Service.StandardError = resolved.StandardError
+	parsed.Service.Environment = resolved.Environment
+
+	logsDirs, err := resolveLogsDirectories(st, cfg.LogsDir, parsed.Service.LogsDirectory)
+	if err != nil {
+		return nil, fmt.Errorf("resolve LogsDirectory for %s: %w", id, err)
+	}
+	if err := ensureDirectories(logsDirs); err != nil {
+		return nil, fmt.Errorf("create LogsDirectory for %s: %w", id, err)
+	}
+	logsDirectory := strings.Join(logsDirs, ";")
+
 	if err := logwriter.Cleanup(logwriter.ServiceLogDir(cfg.LogsDir, id.Name), cfg.Logs.MaxAgeDays, startTime); err != nil {
 		slog.Debug("runner: cleanup service logs failed", "unit", id.String(), "error", err)
 	}
@@ -76,7 +103,7 @@ func NewRunner(name string, store storage.Factory, newTransport transport.Factor
 		Vars:    cfg.Environment.Vars,
 	}
 	restart := newRestartController(parsed.Service)
-	handler := newControlHandler(parsed.Service, restart, defaults, logs)
+	handler := newControlHandler(parsed.Service, restart, defaults, logs, logsDirectory)
 
 	tr, err := newTransport(transport.NewPeer(transport.PeerRunner, id.String(), false), nil)
 	if err != nil {

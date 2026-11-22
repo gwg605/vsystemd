@@ -12,6 +12,7 @@ import (
 	"github.com/gwg605/vsystemd/internal/transport"
 	transportfake "github.com/gwg605/vsystemd/internal/transport/fake"
 	"github.com/gwg605/vsystemd/internal/unit"
+	"github.com/gwg605/vsystemd/internal/unitpath"
 )
 
 func newVerifyTransport(t *testing.T) transport.Factory {
@@ -37,7 +38,7 @@ func newTestController(t *testing.T) (*Controller, *scmfake.Manager, *storagefak
 	t.Helper()
 	manager := scmfake.New()
 	store := storagefake.New()
-	ctrl := New(manager, newVerifyTransport(t), func() (storage.Storage, error) { return store, nil })
+	ctrl := New(manager, newVerifyTransport(t), func() (storage.Storage, error) { return store, nil }, unitpath.Roots{})
 	return ctrl, manager, store
 }
 

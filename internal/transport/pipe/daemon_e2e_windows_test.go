@@ -14,6 +14,7 @@ import (
 	scmfake "github.com/gwg605/vsystemd/internal/scm/fake"
 	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
 	"github.com/gwg605/vsystemd/internal/transport"
+	"github.com/gwg605/vsystemd/internal/unitpath"
 )
 
 func TestDaemonRealHandlerOverPipe(t *testing.T) {
@@ -28,7 +29,7 @@ func TestDaemonRealHandlerOverPipe(t *testing.T) {
 	controlName := fmt.Sprintf("systemctl_%d", os.Getpid())
 	controlPeer := transport.NewPeer(transport.PeerControl, controlName, true)
 
-	d, err := daemon.New(manager, store, `C:\vsystemd\vsystemd.exe`, t.TempDir(), logwriter.Rotation{},
+	d, err := daemon.New(manager, store, `C:\vsystemd\vsystemd.exe`, unitpath.Roots{LogsDir: t.TempDir()}, logwriter.Rotation{},
 		func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
 			return newTestTransport(transport.DefaultConfig(), local, handler, fixedAuth{controlPeer})
 		})

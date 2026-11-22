@@ -14,13 +14,19 @@ import (
 	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
 	"github.com/gwg605/vsystemd/internal/transport"
 	transportfake "github.com/gwg605/vsystemd/internal/transport/fake"
+	"github.com/gwg605/vsystemd/internal/unitpath"
 )
 
 func newTestDaemon(t *testing.T, manager scm.Manager, store storage.Storage) (*Daemon, *transportfake.Network) {
 	t.Helper()
+	return newTestDaemonRoots(t, manager, store, unitpath.Roots{LogsDir: t.TempDir()})
+}
+
+func newTestDaemonRoots(t *testing.T, manager scm.Manager, store storage.Storage, roots unitpath.Roots) (*Daemon, *transportfake.Network) {
+	t.Helper()
 
 	network := transportfake.NewNetwork()
-	daemon, err := New(manager, store, `C:\vsystemd\vsystemd.exe`, t.TempDir(), logwriter.Rotation{}, func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
+	daemon, err := New(manager, store, `C:\vsystemd\vsystemd.exe`, roots, logwriter.Rotation{}, func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
 		return network.New(transport.DefaultConfig(), local, handler), nil
 	})
 	if err != nil {
