@@ -212,8 +212,13 @@ func (s *handlerSession) startOperation(role opRole, op operation) error {
 	if op == nil {
 		return fmt.Errorf("no operation for role %d", role)
 	}
+	if err := op.start(); err != nil {
+		// A failed start reports no completion and never will; do not track it.
+		slog.Error("runner: operation failed to start", "role", role.String(), "error", err)
+		return err
+	}
 	s.ops[role] = op
-	return op.start()
+	return nil
 }
 
 func (s *handlerSession) onOperationCompleted(result opResult) {
