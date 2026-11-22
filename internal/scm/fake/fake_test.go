@@ -15,10 +15,10 @@ func TestServiceLifecycle(t *testing.T) {
 		User:       `NT SERVICE\app`,
 	}
 
-	if err := m.CreateService(cfg); err != nil {
+	if err := m.CreateService(cfg, nil); err != nil {
 		t.Fatalf("CreateService() error = %v", err)
 	}
-	if err := m.CreateService(cfg); err == nil {
+	if err := m.CreateService(cfg, nil); err == nil {
 		t.Error("CreateService() error = nil for duplicate service")
 	}
 
@@ -53,7 +53,7 @@ func TestServiceLifecycle(t *testing.T) {
 	}
 
 	cfg.StartType = scm.StartTypeDisabled
-	if err := m.UpdateService(cfg); err != nil {
+	if err := m.UpdateService(cfg, nil); err != nil {
 		t.Fatalf("UpdateService() error = %v", err)
 	}
 
@@ -97,7 +97,7 @@ func TestMissingService(t *testing.T) {
 	if err := m.StopService("missing"); err == nil {
 		t.Error("StopService() error = nil")
 	}
-	if err := m.UpdateService(scm.ServiceConfig{Name: "missing"}); err == nil {
+	if err := m.UpdateService(scm.ServiceConfig{Name: "missing"}, nil); err == nil {
 		t.Error("UpdateService() error = nil")
 	}
 	if err := m.DeleteService("missing"); err == nil {

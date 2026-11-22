@@ -15,7 +15,7 @@ func TestFromUnit(t *testing.T) {
 		Service:     &unit.ServiceUnit{},
 	}
 
-	cfg := FromUnit(file, `C:\vsystemd\vsystemd.exe`, scm.StartTypeAutomatic)
+	cfg := FromUnit(file, `C:\vsystemd\vsystemd.exe`, scm.StartTypeAutomatic, nil)
 
 	if cfg.Name != "app" {
 		t.Errorf("Name = %q", cfg.Name)

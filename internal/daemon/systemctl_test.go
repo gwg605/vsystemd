@@ -16,6 +16,7 @@ import (
 	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
 	"github.com/gwg605/vsystemd/internal/transport"
 	transportfake "github.com/gwg605/vsystemd/internal/transport/fake"
+	"github.com/gwg605/vsystemd/internal/unit"
 	"github.com/gwg605/vsystemd/internal/unitpath"
 )
 
@@ -49,7 +50,7 @@ func TestStatusResponse(t *testing.T) {
 	store.WriteUnit("app.service", []byte("[Unit]\nDescription=App\n[Service]\nExecStart=x\n"))
 
 	manager := scmfake.New()
-	if err := manager.CreateService(scm.ServiceConfig{Name: "app", StartType: scm.StartTypeAutomatic}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: "app", StartType: scm.StartTypeAutomatic}, nil); err != nil {
 		t.Fatalf("CreateService() error = %v", err)
 	}
 	if err := manager.StartService("app"); err != nil {
@@ -110,7 +111,7 @@ func TestStatusIgnoresSCMPID(t *testing.T) {
 	store.WriteUnit("app.service", []byte("[Service]\nExecStart=x\n"))
 
 	manager := scmfake.New()
-	if err := manager.CreateService(scm.ServiceConfig{Name: "app"}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: "app"}, nil); err != nil {
 		t.Fatalf("CreateService() error = %v", err)
 	}
 	if err := manager.StartService("app"); err != nil {
@@ -186,6 +187,47 @@ func TestStatusSpecifierLog(t *testing.T) {
 	}
 }
 
+func TestStatusNeedsRestart(t *testing.T) {
+	unitText := []byte("[Service]\nExecStart=x\n")
+	store := storagefake.New()
+	store.WriteUnit("app.service", unitText)
+
+	manager := scmfake.New()
+	if err := manager.CreateService(scm.ServiceConfig{Name: "app"}, nil); err != nil {
+		t.Fatalf("CreateService() error = %v", err)
+	}
+	if err := manager.StartService("app"); err != nil {
+		t.Fatalf("StartService() error = %v", err)
+	}
+
+	daemon, client := newControlClient(t, manager, store)
+
+	daemon.updateFromEvent(protocol.StateEvent{Unit: "app.service", State: protocol.StateActive, PID: 42, LoadedHash: "deadbeef"})
+	status := statusResponse(t, client)
+	if !status.NeedsRestart {
+		t.Error("NeedsRestart = false, want true")
+	}
+
+	daemon.updateFromEvent(protocol.StateEvent{Unit: "app.service", State: protocol.StateActive, PID: 42, LoadedHash: unit.Content(unitText).Hash()})
+	status = statusResponse(t, client)
+	if status.NeedsRestart {
+		t.Error("NeedsRestart = true, want false")
+	}
+}
+
+func statusResponse(t *testing.T, client transport.Transport) protocol.StatusResponse {
+	t.Helper()
+	response := controlRequest(t, client, protocol.TypeStatusRequest, protocol.StatusRequest{Unit: "app.service"})
+	if response.Type != protocol.TypeStatusResponse {
+		t.Fatalf("response type = %q", response.Type)
+	}
+	var status protocol.StatusResponse
+	if err := json.Unmarshal(response.Payload, &status); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	return status
+}
+
 func TestStatusUnknownUnit(t *testing.T) {
 	manager := scmfake.New()
 	store := storagefake.New()
@@ -215,13 +257,13 @@ func TestListUnits(t *testing.T) {
 	})
 
 	manager := scmfake.New()
-	if err := manager.CreateService(scm.ServiceConfig{Name: "app"}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: "app"}, nil); err != nil {
 		t.Fatalf("CreateService(app) error = %v", err)
 	}
 	if err := manager.StartService("app"); err != nil {
 		t.Fatalf("StartService(app) error = %v", err)
 	}
-	if err := manager.CreateService(scm.ServiceConfig{Name: "orphan"}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: "orphan"}, nil); err != nil {
 		t.Fatalf("CreateService(orphan) error = %v", err)
 	}
 
@@ -285,7 +327,7 @@ func TestDaemonReloadRequest(t *testing.T) {
 	store.WriteUnit("app.service", []byte("[Service]\nExecStart=x\n"))
 
 	manager := scmfake.New()
-	if err := manager.CreateService(scm.ServiceConfig{Name: "app", BinaryPath: "old"}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: "app", BinaryPath: "old"}, nil); err != nil {
 		t.Fatalf("CreateService() error = %v", err)
 	}
 
@@ -307,8 +349,8 @@ func TestDaemonReloadRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Config() error = %v", err)
 	}
-	if config.BinaryPath == "old" {
-		t.Error("service config was not updated")
+	if config.BinaryPath != "old" {
+		t.Errorf("reload changed service config = %q", config.BinaryPath)
 	}
 }
 
@@ -325,10 +367,10 @@ func TestListUnitsExcludesManagerService(t *testing.T) {
 	store.WriteUnit("app.service", []byte("[Service]\nExecStart=x\n"))
 
 	manager := scmfake.New()
-	if err := manager.CreateService(scm.ServiceConfig{Name: "app"}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: "app"}, nil); err != nil {
 		t.Fatalf("CreateService(app) error = %v", err)
 	}
-	if err := manager.CreateService(scm.ServiceConfig{Name: config.ManagerServiceName}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: config.ManagerServiceName}, nil); err != nil {
 		t.Fatalf("CreateService(manager) error = %v", err)
 	}
 

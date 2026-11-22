@@ -2,6 +2,7 @@ package control
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/gwg605/vsystemd/internal/protocol"
@@ -59,8 +60,15 @@ func TestEnableCreatesService(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Config() error = %v", err)
 	}
-	if cfg.BinaryPath != `"C:\vsystemd\vsystemd.exe" --mode=run --unit=app.service` {
+	if !strings.HasPrefix(cfg.BinaryPath, `"C:\vsystemd\vsystemd.exe" --mode=run --unit=app.service --snapshot=`) {
 		t.Errorf("BinaryPath = %q", cfg.BinaryPath)
+	}
+	content, err := manager.LoadUnitContent("app")
+	if err != nil {
+		t.Fatalf("LoadUnitContent() error = %v", err)
+	}
+	if !strings.HasSuffix(cfg.BinaryPath, content.Hash()) {
+		t.Errorf("BinaryPath = %q, content hash = %q", cfg.BinaryPath, content.Hash())
 	}
 	if cfg.StartType != scm.StartTypeAutomatic {
 		t.Errorf("StartType = %v", cfg.StartType)
@@ -73,7 +81,7 @@ func TestEnableCreatesService(t *testing.T) {
 func TestEnableUpdatesExistingService(t *testing.T) {
 	ctrl, manager, store := newTestController(t)
 	store.WriteUnit("app.service", []byte("[Service]\nExecStart=x\n"))
-	if err := manager.CreateService(scm.ServiceConfig{Name: "app", BinaryPath: "old"}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: "app", BinaryPath: "old"}, nil); err != nil {
 		t.Fatalf("CreateService() error = %v", err)
 	}
 
@@ -101,7 +109,7 @@ func TestEnableRejectsManager(t *testing.T) {
 
 func TestEnableWithoutUnitFile(t *testing.T) {
 	ctrl, manager, _ := newTestController(t)
-	if err := manager.CreateService(scm.ServiceConfig{Name: "app", StartType: scm.StartTypeDisabled}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: "app", StartType: scm.StartTypeDisabled}, nil); err != nil {
 		t.Fatalf("CreateService() error = %v", err)
 	}
 
@@ -113,7 +121,7 @@ func TestEnableWithoutUnitFile(t *testing.T) {
 
 func TestDisableSetsStartType(t *testing.T) {
 	ctrl, manager, _ := newTestController(t)
-	if err := manager.CreateService(scm.ServiceConfig{Name: "app", StartType: scm.StartTypeAutomatic}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: "app", StartType: scm.StartTypeAutomatic}, nil); err != nil {
 		t.Fatalf("CreateService() error = %v", err)
 	}
 
@@ -143,7 +151,7 @@ func TestDisableMissingServiceIsNoop(t *testing.T) {
 
 func TestStartStop(t *testing.T) {
 	ctrl, manager, _ := newTestController(t)
-	if err := manager.CreateService(scm.ServiceConfig{Name: "app"}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: "app"}, nil); err != nil {
 		t.Fatalf("CreateService() error = %v", err)
 	}
 	id := unit.ID{Name: "app", Type: unit.TypeService}

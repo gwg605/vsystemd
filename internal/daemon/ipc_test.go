@@ -39,7 +39,7 @@ func newTestDaemonRoots(t *testing.T, manager scm.Manager, store storage.Storage
 func TestHandleStateEvent(t *testing.T) {
 	store := storagefake.New()
 	manager := scmfake.New()
-	if err := manager.CreateService(scm.ServiceConfig{Name: "app"}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: "app"}, nil); err != nil {
 		t.Fatalf("CreateService() error = %v", err)
 	}
 	if err := manager.StartService("app"); err != nil {

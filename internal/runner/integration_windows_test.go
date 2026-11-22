@@ -18,7 +18,12 @@ import (
 	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
 	"github.com/gwg605/vsystemd/internal/transport"
 	transportfake "github.com/gwg605/vsystemd/internal/transport/fake"
+	"github.com/gwg605/vsystemd/internal/unit"
 )
+
+type staticContent struct{ content unit.Content }
+
+func (s staticContent) LoadUnitContent(string) (unit.Content, error) { return s.content, nil }
 
 func newIntegratedRunner(t *testing.T, name, unitText string) (*Runner, *stateCollector) {
 	t.Helper()
@@ -40,7 +45,8 @@ func newIntegratedRunnerConfig(t *testing.T, name, unitText string, cfg config.C
 	factory := func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
 		return network.New(transport.DefaultConfig(), local, handler), nil
 	}
-	runner, err := NewRunner(name, storeFactory, factory, cfg, time.Now().UTC())
+	content := unit.Content(unitText)
+	runner, err := NewRunner(name, content.Hash(), staticContent{content}, storeFactory, factory, cfg, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("NewRunner() error = %v", err)
 	}
@@ -226,5 +232,41 @@ func TestRunnerRuntimeDirectory(t *testing.T) {
 	}
 	if string(data) != dir {
 		t.Errorf("RUNTIME_DIRECTORY = %q, want %q", data, dir)
+	}
+}
+
+func TestRunnerSnapshotErrors(t *testing.T) {
+	unitText := "[Service]\nExecStart=x\n"
+	content := unit.Content(unitText)
+	store := storagefake.New()
+	store.WriteUnit("app.service", []byte(unitText))
+	storeFactory := func() (storage.Storage, error) { return store, nil }
+	network := transportfake.NewNetwork()
+	factory := func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
+		return network.New(transport.DefaultConfig(), local, handler), nil
+	}
+	cfg := config.Config{LogsDir: t.TempDir()}
+
+	if _, err := NewRunner("app.service", "", staticContent{content}, storeFactory, factory, cfg, time.Now().UTC()); err == nil {
+		t.Error("missing snapshot hash: error = nil")
+	}
+	if _, err := NewRunner("app.service", "deadbeef", staticContent{content}, storeFactory, factory, cfg, time.Now().UTC()); err == nil {
+		t.Error("snapshot hash mismatch: error = nil")
+	}
+}
+
+func TestRunnerReportsLoadedHash(t *testing.T) {
+	unitText := fmt.Sprintf("[Service]\nExecStart=%s\n",
+		helperCommand("record", filepath.Join(t.TempDir(), "done.txt"), "done"))
+	runner, collector := newIntegratedRunner(t, "app.service", unitText)
+	changes, _, done := runControlHandler(t, runner.handler)
+
+	waitForStatus(t, changes, svc.Stopped)
+	waitForDone(t, done)
+
+	states := collectStates(collector)
+	last := states[len(states)-1]
+	if want := unit.Content(unitText).Hash(); last.LoadedHash != want {
+		t.Errorf("LoadedHash = %q, want %q", last.LoadedHash, want)
 	}
 }

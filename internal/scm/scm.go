@@ -2,6 +2,8 @@ package scm
 
 import (
 	"errors"
+
+	"github.com/gwg605/vsystemd/internal/unit"
 )
 
 type StartType int
@@ -75,8 +77,8 @@ type ServiceStatus struct {
 }
 
 type Manager interface {
-	CreateService(cfg ServiceConfig) error
-	UpdateService(cfg ServiceConfig) error
+	CreateService(cfg ServiceConfig, content unit.Content) error
+	UpdateService(cfg ServiceConfig, content unit.Content) error
 	// SetStartType changes only the start type of an existing managed service.
 	SetStartType(name string, startType StartType) error
 	DeleteService(name string) error
@@ -92,4 +94,12 @@ type Manager interface {
 	// GetServiceByHandle returns the configuration of the managed service the
 	// process handle belongs to, or ErrNotService if it is not a service.
 	GetServiceByHandle(handle ProcessHandle) (ServiceConfig, error)
+	// LoadUnitContent returns the applied unit snapshot stored in the service's
+	// registry Parameters key, or an error if it is missing.
+	LoadUnitContent(name string) (unit.Content, error)
+}
+
+// ContentReader reads the applied unit snapshot of a service.
+type ContentReader interface {
+	LoadUnitContent(name string) (unit.Content, error)
 }

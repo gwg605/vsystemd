@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -51,7 +50,7 @@ type unitEntry struct {
 	loadState   LoadState
 	loadError   string
 	hasFile     bool
-	contentHash [sha256.Size]byte
+	contentHash string
 }
 
 // UnitsList is the daemon's source of truth for unit configuration. It is
@@ -180,7 +179,7 @@ func (l *UnitsList) mergeFiles(next map[string]unitEntry, present map[string]boo
 			slog.Warn("units: ignored unit directive", "unit", id, "warning", warning)
 		}
 		entry.parsed = parsed
-		entry.contentHash = sha256.Sum256(data)
+		entry.contentHash = data.Hash()
 		entry.loadState = LoadStateLoaded
 		entry.loadError = ""
 		next[id.String()] = entry

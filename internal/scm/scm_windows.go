@@ -9,14 +9,19 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
+
+	"github.com/gwg605/vsystemd/internal/unit"
 )
 
 const (
 	managedServiceGroup = "vsystemd"
 	// maxSIDSize is SECURITY_MAX_SID_SIZE.
 	maxSIDSize = 68
+	// snapshotValue is the registry value holding the applied unit content.
+	snapshotValue = "Unit"
 )
 
 type windowsManager struct{}
@@ -25,7 +30,7 @@ func New() Manager {
 	return windowsManager{}
 }
 
-func (windowsManager) CreateService(cfg ServiceConfig) error {
+func (windowsManager) CreateService(cfg ServiceConfig, content unit.Content) error {
 	executable, args, err := splitBinaryPath(cfg.BinaryPath)
 	if err != nil {
 		return fmt.Errorf("parse binary path for %s: %w", cfg.Name, err)
@@ -41,10 +46,17 @@ func (windowsManager) CreateService(cfg ServiceConfig) error {
 	if err != nil {
 		return fmt.Errorf("create service %s: %w", cfg.Name, err)
 	}
-	return service.Close()
+	closeErr := service.Close()
+	if closeErr != nil {
+		return fmt.Errorf("create service %s: %w", cfg.Name, closeErr)
+	}
+	if err := saveUnitContent(cfg.Name, content); err != nil {
+		return err
+	}
+	return nil
 }
 
-func (windowsManager) UpdateService(cfg ServiceConfig) error {
+func (windowsManager) UpdateService(cfg ServiceConfig, content unit.Content) error {
 	m, err := connect()
 	if err != nil {
 		return err
@@ -64,7 +76,42 @@ func (windowsManager) UpdateService(cfg ServiceConfig) error {
 	if err := service.UpdateConfig(config); err != nil {
 		return fmt.Errorf("update service %s: %w", cfg.Name, err)
 	}
+	if err := saveUnitContent(cfg.Name, content); err != nil {
+		return err
+	}
 	return nil
+}
+
+func snapshotKeyPath(name string) string {
+	return `SYSTEM\CurrentControlSet\Services\` + name + `\Parameters`
+}
+
+func saveUnitContent(name string, content unit.Content) error {
+	if len(content) == 0 {
+		return nil
+	}
+	key, _, err := registry.CreateKey(registry.LOCAL_MACHINE, snapshotKeyPath(name), registry.SET_VALUE)
+	if err != nil {
+		return fmt.Errorf("open parameters key for %s: %w", name, err)
+	}
+	defer key.Close()
+	if err := key.SetBinaryValue(snapshotValue, content); err != nil {
+		return fmt.Errorf("write unit content for %s: %w", name, err)
+	}
+	return nil
+}
+
+func (windowsManager) LoadUnitContent(name string) (unit.Content, error) {
+	key, err := registry.OpenKey(registry.LOCAL_MACHINE, snapshotKeyPath(name), registry.QUERY_VALUE)
+	if err != nil {
+		return nil, fmt.Errorf("open parameters key for %s: %w", name, err)
+	}
+	defer key.Close()
+	value, _, err := key.GetBinaryValue(snapshotValue)
+	if err != nil {
+		return nil, fmt.Errorf("read unit content for %s: %w", name, err)
+	}
+	return unit.Content(value), nil
 }
 
 func (windowsManager) SetStartType(name string, startType StartType) error {

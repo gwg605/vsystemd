@@ -23,6 +23,7 @@ import (
 	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
 	"github.com/gwg605/vsystemd/internal/transport"
 	transportfake "github.com/gwg605/vsystemd/internal/transport/fake"
+	"github.com/gwg605/vsystemd/internal/unit"
 	"github.com/gwg605/vsystemd/internal/unitpath"
 )
 
@@ -122,15 +123,23 @@ func (e *testEnv) newDaemon(t *testing.T) *daemon.Daemon {
 
 func (e *testEnv) newRunner(t *testing.T, name string) *runner.Runner {
 	t.Helper()
+	content, err := e.store.ReadUnit(name)
+	if err != nil {
+		t.Fatalf("read unit %s: %v", name, err)
+	}
 	store := func() (storage.Storage, error) { return e.store, nil }
 	cfg := config.Config{LogsDir: t.TempDir()}
-	r, err := runner.NewRunner(name, store, e.transportFactory, cfg, time.Now().UTC())
+	r, err := runner.NewRunner(name, content.Hash(), staticContent{content}, store, e.transportFactory, cfg, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("runner.NewRunner() error = %v", err)
 	}
 	t.Cleanup(func() { r.Close() })
 	return r
 }
+
+type staticContent struct{ content unit.Content }
+
+func (s staticContent) LoadUnitContent(string) (unit.Content, error) { return s.content, nil }
 
 func (e *testEnv) newClient(t *testing.T) *transportfake.Transport {
 	t.Helper()

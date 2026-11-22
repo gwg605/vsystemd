@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/gwg605/vsystemd/internal/config"
@@ -38,14 +37,14 @@ OnCalendar=daily
 		BinaryPath: "old",
 		StartType:  scm.StartTypeDisabled,
 		User:       "old",
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("CreateService(app) error = %v", err)
 	}
 	if err := manager.CreateService(scm.ServiceConfig{
 		Name:       "removed",
 		BinaryPath: "old",
 		StartType:  scm.StartTypeDisabled,
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("CreateService(removed) error = %v", err)
 	}
 
@@ -65,17 +64,17 @@ OnCalendar=daily
 	if err != nil {
 		t.Fatalf("Config(app) error = %v", err)
 	}
-	if config.BinaryPath != `"C:\vsystemd\vsystemd.exe" --mode=run --unit=app.service` {
-		t.Errorf("BinaryPath = %q", config.BinaryPath)
+	if config.BinaryPath != "old" {
+		t.Errorf("reload changed BinaryPath = %q", config.BinaryPath)
 	}
-	if config.Description != "App" {
-		t.Errorf("Description = %q", config.Description)
+	if config.Description != "" {
+		t.Errorf("reload changed Description = %q", config.Description)
 	}
-	if !reflect.DeepEqual(config.Dependencies, []string{"db"}) {
-		t.Errorf("Dependencies = %v", config.Dependencies)
+	if config.Dependencies != nil {
+		t.Errorf("reload changed Dependencies = %v", config.Dependencies)
 	}
-	if config.User != `NT SERVICE\app` {
-		t.Errorf("User = %q", config.User)
+	if config.User != "old" {
+		t.Errorf("reload changed User = %q", config.User)
 	}
 	if config.StartType != scm.StartTypeDisabled {
 		t.Errorf("StartType = %v", config.StartType)
@@ -94,10 +93,10 @@ func TestReloadKeepsManagerService(t *testing.T) {
 	store.WriteUnit("app.service", []byte("[Service]\nExecStart=x\n"))
 
 	manager := scmfake.New()
-	if err := manager.CreateService(scm.ServiceConfig{Name: "app"}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: "app"}, nil); err != nil {
 		t.Fatalf("CreateService(app) error = %v", err)
 	}
-	if err := manager.CreateService(scm.ServiceConfig{Name: config.ManagerServiceName}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: config.ManagerServiceName}, nil); err != nil {
 		t.Fatalf("CreateService(manager) error = %v", err)
 	}
 
@@ -113,7 +112,7 @@ func TestReloadKeepsManagerService(t *testing.T) {
 func TestReloadKeepsMissingUnitService(t *testing.T) {
 	store := storagefake.New()
 	manager := scmfake.New()
-	if err := manager.CreateService(scm.ServiceConfig{Name: "orphan", StartType: scm.StartTypeAutomatic}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: "orphan", StartType: scm.StartTypeAutomatic}, nil); err != nil {
 		t.Fatalf("CreateService(orphan) error = %v", err)
 	}
 
@@ -133,7 +132,7 @@ func TestReloadKeepsMissingUnitService(t *testing.T) {
 func TestReloadDeletesDisabledMissingUnit(t *testing.T) {
 	store := storagefake.New()
 	manager := scmfake.New()
-	if err := manager.CreateService(scm.ServiceConfig{Name: "orphan", StartType: scm.StartTypeDisabled}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: "orphan", StartType: scm.StartTypeDisabled}, nil); err != nil {
 		t.Fatalf("CreateService(orphan) error = %v", err)
 	}
 

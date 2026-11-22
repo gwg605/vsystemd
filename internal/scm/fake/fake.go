@@ -6,11 +6,13 @@ import (
 	"sync"
 
 	"github.com/gwg605/vsystemd/internal/scm"
+	"github.com/gwg605/vsystemd/internal/unit"
 )
 
 type service struct {
-	config scm.ServiceConfig
-	status scm.ServiceStatus
+	config  scm.ServiceConfig
+	status  scm.ServiceStatus
+	content unit.Content
 }
 
 type Manager struct {
@@ -30,20 +32,21 @@ func New() *Manager {
 	}
 }
 
-func (m *Manager) CreateService(cfg scm.ServiceConfig) error {
+func (m *Manager) CreateService(cfg scm.ServiceConfig, content unit.Content) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.services[cfg.Name]; ok {
 		return fmt.Errorf("create service %s: already exists", cfg.Name)
 	}
 	m.services[cfg.Name] = &service{
-		config: cfg,
-		status: scm.ServiceStatus{Name: cfg.Name, State: scm.StateStopped},
+		config:  cfg,
+		status:  scm.ServiceStatus{Name: cfg.Name, State: scm.StateStopped},
+		content: content,
 	}
 	return nil
 }
 
-func (m *Manager) UpdateService(cfg scm.ServiceConfig) error {
+func (m *Manager) UpdateService(cfg scm.ServiceConfig, content unit.Content) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	svc, ok := m.services[cfg.Name]
@@ -55,7 +58,23 @@ func (m *Manager) UpdateService(cfg scm.ServiceConfig) error {
 	if cfg.StartType == scm.StartTypeNoChange {
 		svc.config.StartType = startType
 	}
+	if len(content) > 0 {
+		svc.content = content
+	}
 	return nil
+}
+
+func (m *Manager) LoadUnitContent(name string) (unit.Content, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	svc, ok := m.services[name]
+	if !ok {
+		return nil, fmt.Errorf("load unit content %s: %w", name, scm.ErrNotFound)
+	}
+	if len(svc.content) == 0 {
+		return nil, fmt.Errorf("load unit content %s: no content", name)
+	}
+	return svc.content, nil
 }
 
 func (m *Manager) Config(name string) (scm.ServiceConfig, error) {

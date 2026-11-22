@@ -50,6 +50,9 @@ func serviceStatusLines(cfg config.Config, id unit.ID, status protocol.StatusRes
 	if status.LastError != "" {
 		lines = append(lines, fmt.Sprintf("%12s %s", "Error:", status.LastError))
 	}
+	if status.NeedsRestart {
+		lines = append(lines, fmt.Sprintf("%12s unit file changed on disk; run 'systemctl restart %s' to apply", "Warning:", status.Unit))
+	}
 	if len(status.LogTail) > 0 {
 		lines = append(lines, "")
 		lines = append(lines, status.LogTail...)

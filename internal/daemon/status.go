@@ -45,10 +45,11 @@ func (d *Daemon) status(id unit.ID) (protocol.StatusResponse, error) {
 	if scmErr == nil {
 		scmState = scmStatus.State
 	}
+	systemdState := state.Status(scmState)
 
 	return protocol.StatusResponse{
 		Unit:           name,
-		SystemdState:   string(state.Status(scmState)),
+		SystemdState:   string(systemdState),
 		SCMState:       scmState,
 		PID:            state.PID,
 		ExitCode:       state.ExitCode,
@@ -60,7 +61,28 @@ func (d *Daemon) status(id unit.ID) (protocol.StatusResponse, error) {
 		LoadState:      string(loadState),
 		LoadError:      loadError,
 		Enabled:        serviceEnabled(d.manager, id.Name),
+		NeedsRestart:   needsRestart(systemdState, state.LoadedHash, entry),
 	}, nil
+}
+
+// needsRestart reports whether the running service loaded a unit snapshot that
+// differs from the current unit file. It is meaningful only while the service
+// is starting, running, or stopping, and only when the runner has reported the
+// hash it loaded.
+func needsRestart(state SystemdState, loadedHash string, entry unitEntry) bool {
+	if loadedHash == "" {
+		return false
+	}
+	switch state {
+	case SystemdActivatingStart, SystemdActivatingAutoRestart, SystemdActiveRunning, SystemdDeactivatingStop:
+	default:
+		return false
+	}
+	listHash := ""
+	if entry.parsed != nil {
+		listHash = entry.contentHash
+	}
+	return loadedHash != listHash
 }
 
 func serviceEnabled(manager scm.Manager, name string) *bool {

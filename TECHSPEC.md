@@ -140,8 +140,8 @@ type ServiceStatus struct {
 }
 
 type Manager interface {
-    CreateService(cfg ServiceConfig) error
-    UpdateService(cfg ServiceConfig) error
+    CreateService(cfg ServiceConfig, content unit.Content) error
+    UpdateService(cfg ServiceConfig, content unit.Content) error
     // SetStartType changes only the start type of an existing managed service.
     SetStartType(name string, startType StartType) error
     DeleteService(name string) error
@@ -157,10 +157,14 @@ type Manager interface {
     // GetServiceByHandle returns the configuration of the managed service the
     // process handle belongs to, or ErrNotService if it is not a service.
     GetServiceByHandle(handle ProcessHandle) (ServiceConfig, error)
+    // LoadUnitContent reads the applied unit snapshot from the service registry.
+    LoadUnitContent(name string) (unit.Content, error)
 }
 ```
 
-`svcconfig.FromUnit(unit, binaryPath, startType)` translates a unit file into a `ServiceConfig`; `scm.NewAccount(user, name)` resolves the win32 account, defaulting to the per-service virtual account `NT SERVICE\<name>`. The password is set via `SetPassword` and is never returned by read operations (the field is unexported).
+`CreateService`/`UpdateService` persist `content` as the service's applied snapshot under `HKLM\SYSTEM\CurrentControlSet\Services\<name>\Parameters\Unit` (`REG_BINARY`); an empty content is ignored. `LoadUnitContent` reads that value on demand (it does not touch the SCM service handle), so `GetService`/`ListServices` never read the registry snapshot.
+
+`svcconfig.FromUnit(unit, binaryPath, startType, content)` translates a unit file into a `ServiceConfig` and, when content is non-empty, embeds its hash in the command line (`--snapshot=<sha256>`); `scm.NewAccount(user, name)` resolves the win32 account, defaulting to the per-service virtual account `NT SERVICE\<name>`. The password is set via `SetPassword` and is never returned by read operations (the field is unexported).
 
 `ErrNotFound` reports a missing service, `ErrNotService` a process that is not a service, and `ErrNotManaged` a service not created by vsystemd.
 
@@ -174,7 +178,7 @@ On Windows, `ListServices()` returns only managed services tagged `LoadOrderGrou
 type Storage interface {
     // unit files
     ListUnits() ([]string, error)
-    ReadUnit(name string) ([]byte, error)
+    ReadUnit(name string) (unit.Content, error)
     // timers (raw bytes; layout owned by timermgr)
     ReadTimers() ([]byte, error)
     WriteTimers(data []byte) error
@@ -259,9 +263,9 @@ Messages are grouped by direction.
 
 | Type | request_id | Fire-and-forget | Payload |
 |---|---|---|---|
-| `state_event` | null | yes | `unit`, `state`, `pid`, `exit_code`, `restart_count`, `timestamp`, `last_error` |
+| `state_event` | null | yes | `unit`, `state`, `pid`, `exit_code`, `restart_count`, `timestamp`, `last_error`, `loaded_hash` |
 
-**`state_event`** — sent by a runner on every state change of the managed process (start, clean stop, crash, restart) and periodically as a heartbeat. No acknowledgement from the daemon is expected. The wire types (`StateEvent`, the message type, and the `state` values) are defined in `internal/protocol`.
+**`state_event`** — sent by a runner on every state change of the managed process (start, clean stop, crash, restart) and periodically as a heartbeat. `loaded_hash` is the hash of the unit snapshot the runner loaded. No acknowledgement from the daemon is expected. The wire types (`StateEvent`, the message type, and the `state` values) are defined in `internal/protocol`.
 
 #### 3.2.2 systemctl → daemon
 
@@ -324,6 +328,8 @@ Responsibilities:
 ### 4.2 runner
 
 A runner is the per-service process wrapper. It is registered in SCM as the service binary and is started/stopped by SCM; it launches and supervises the service's child process, applies the restart policy, and reports state to the daemon.
+
+The runner loads its configuration from the unit **snapshot**, not from the unit file: it reads it via `scm.LoadUnitContent` and verifies its hash against the `--snapshot` argument. A missing snapshot or a hash mismatch is a startup error (the reason is logged), so the runner never runs a configuration other than the one `enable` applied.
 
 #### 4.2.1 Components
 
@@ -468,7 +474,7 @@ Inside the code and in persistence, time is stored and handled in UTC. `OnCalend
 Key behaviors:
 
 - **Managed services** — vsystemd only touches services it created. Every managed service is tagged with `LoadOrderGroup = "vsystemd"`; `ListServices`, `QueryStatuses`, and every open-by-name check filter on this tag, and a service without it is reported as `ErrNotManaged`. Services owned by others are never modified.
-- **Registration** — each managed service is registered with the vsystemd binary and a per-service command line: `"<vsystemd.exe>" --mode=run --unit=<name>` (built by `svcconfig.FromUnit`). SCM therefore starts a runner as the service process.
+- **Registration** — each managed service is registered with the vsystemd binary and a per-service command line: `"<vsystemd.exe>" --mode=run --unit=<name> --snapshot=<hash>` (built by `svcconfig.FromUnit`). The snapshot hash binds the SCM record to the unit content written on `enable`. SCM therefore starts a runner as the service process.
 - **Accounts** — a service runs under the unit's `User=` or, by default, the per-service virtual account `NT SERVICE\<name>` (`scm.NewAccount`).
 - **Start type** — the daemon sets the Windows start type (`Automatic`/`Boot`/`System` are treated as enabled, `Manual`/`Disabled` as disabled); `StartTypeNoChange` leaves it unchanged on update.
 - **State** — SCM states map to `State` (`Stopped`, `StartPending`, `StopPending`, `Running`); other SCM states (pause/continue) fall through to the raw value.
@@ -608,7 +614,7 @@ Directives by section:
 
 Specifier expansion is implemented in `internal/specifiers` (`Expand` over `Values`) and `internal/unitpath` (`NewValues`, `ResolveService`), and is shared by the runner, the daemon `status` log tail and `systemctl enable`. `%h` resolves to the home of the process performing the expansion, so it may differ between the running service (service account) and `status`/`enable`. The specifier set and the Windows mapping of each specifier are in ARCHITECTURE.md.
 
-Unit names are validated by `ParseID`: the name is the file name without the extension, up to 64 characters, restricted to `[A-Za-z0-9_-]`, with a known extension.
+Unit names are validated by `ParseID`: the name is the file name without the extension, up to 64 characters, restricted to `[A-Za-z0-9_-]`, with a known extension. `unit.Content` is the raw unit bytes; `Content.Hash()` returns their lowercase hex SHA-256.
 
 ### 4.8 systemctl
 
@@ -671,6 +677,7 @@ Rules:
 | `log_tail` | log file | last 10 lines of the current `logs\<service>\` file or an explicit `file:`/`append:` file |
 | `description` | unit file | the `Description=` value from `[Unit]` |
 | `enabled` | SCM `StartType` / timers.json | for `.service` from SCM; for `.timer` from `timers.json` |
+| `needs_restart` | daemon | true when the hash the runner loaded differs from the current unit file hash; only while starting/running/stopping and only once the runner reported `loaded_hash` |
 | `active_since` | timer manager / timers.json | for `.timer` the moment it was put in the schedule; absent when inactive |
 
 ### 4.10 Logging

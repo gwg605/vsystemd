@@ -29,11 +29,11 @@ func startDaemonService(executable string) error {
 	_, err := manager.QueryStatus(config.ManagerServiceName)
 	switch {
 	case err == nil:
-		if err := manager.UpdateService(cfg); err != nil {
+		if err := manager.UpdateService(cfg, nil); err != nil {
 			return fmt.Errorf("update service %s: %w", config.ManagerServiceName, err)
 		}
 	case errors.Is(err, scm.ErrNotFound):
-		if err := manager.CreateService(cfg); err != nil {
+		if err := manager.CreateService(cfg, nil); err != nil {
 			return fmt.Errorf("create service %s: %w", config.ManagerServiceName, err)
 		}
 	case errors.Is(err, scm.ErrNotManaged):

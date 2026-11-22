@@ -2,13 +2,15 @@ package storage
 
 import (
 	"path/filepath"
+
+	"github.com/gwg605/vsystemd/internal/unit"
 )
 
 const defaultRoot = `C:\ProgramData\vsystemd`
 
 type Storage interface {
 	ListUnits() ([]string, error)
-	ReadUnit(name string) ([]byte, error)
+	ReadUnit(name string) (unit.Content, error)
 	// ReadTimers returns the raw contents of the timers file, or nil when it
 	// does not exist. The layout of the data is owned by the caller.
 	ReadTimers() ([]byte, error)

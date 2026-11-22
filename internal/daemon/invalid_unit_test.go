@@ -38,10 +38,10 @@ func TestListUnitsInvalidService(t *testing.T) {
 	store.WriteUnit("broken.service", []byte(brokenUnit))
 
 	manager := scmfake.New()
-	if err := manager.CreateService(scm.ServiceConfig{Name: "app"}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: "app"}, nil); err != nil {
 		t.Fatalf("CreateService(app) error = %v", err)
 	}
-	if err := manager.CreateService(scm.ServiceConfig{Name: "broken"}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: "broken"}, nil); err != nil {
 		t.Fatalf("CreateService(broken) error = %v", err)
 	}
 
@@ -72,7 +72,7 @@ func TestListUnitsInvalidTimer(t *testing.T) {
 
 func TestListUnitsOrphanService(t *testing.T) {
 	manager := scmfake.New()
-	if err := manager.CreateService(scm.ServiceConfig{Name: "orphan"}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: "orphan"}, nil); err != nil {
 		t.Fatalf("CreateService(orphan) error = %v", err)
 	}
 
@@ -93,11 +93,11 @@ func TestReloadSkipsInvalidUnit(t *testing.T) {
 
 	manager := scmfake.New()
 	for _, name := range []string{"app", "broken"} {
-		if err := manager.CreateService(scm.ServiceConfig{Name: name, BinaryPath: "old"}); err != nil {
+		if err := manager.CreateService(scm.ServiceConfig{Name: name, BinaryPath: "old"}, nil); err != nil {
 			t.Fatalf("CreateService(%s) error = %v", name, err)
 		}
 	}
-	if err := manager.CreateService(scm.ServiceConfig{Name: "removed", BinaryPath: "old", StartType: scm.StartTypeDisabled}); err != nil {
+	if err := manager.CreateService(scm.ServiceConfig{Name: "removed", BinaryPath: "old", StartType: scm.StartTypeDisabled}, nil); err != nil {
 		t.Fatalf("CreateService(removed) error = %v", err)
 	}
 
@@ -110,8 +110,8 @@ func TestReloadSkipsInvalidUnit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Config(app) error = %v", err)
 	}
-	if app.BinaryPath == "old" {
-		t.Error("app was not updated")
+	if app.BinaryPath != "old" {
+		t.Errorf("reload changed app config = %q", app.BinaryPath)
 	}
 	if _, err := manager.QueryStatus("broken"); err != nil {
 		t.Errorf("broken was removed: %v", err)

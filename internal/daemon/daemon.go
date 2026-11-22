@@ -23,7 +23,6 @@ const daemonPeer = "daemon"
 type Daemon struct {
 	manager     scm.Manager
 	store       storage.Storage
-	binaryPath  string
 	roots       unitpath.Roots
 	logRotation logwriter.Rotation
 	transport   transport.Transport
@@ -46,7 +45,6 @@ func New(manager scm.Manager, store storage.Storage, binaryPath string, roots un
 	daemon := &Daemon{
 		manager:     manager,
 		store:       store,
-		binaryPath:  binaryPath,
 		roots:       roots,
 		logRotation: logRotation,
 		states:      make(map[string]ServiceState),

@@ -40,6 +40,9 @@ func run(args []string) error {
 	unitName := parser.String("u", "unit", &argparse.Options{
 		Help: "unit name for run mode",
 	})
+	snapshotHash := parser.String("", "snapshot", &argparse.Options{
+		Help: "unit snapshot hash for run mode",
+	})
 
 	if err := parser.Parse(args); err != nil {
 		return errors.New(parser.Usage(err))
@@ -52,7 +55,7 @@ func run(args []string) error {
 		if *unitName == "" {
 			return errors.New(parser.Usage("--unit is required for run mode"))
 		}
-		return runUnit(*unitName)
+		return runUnit(*unitName, *snapshotHash)
 	default:
 		return errors.New(parser.Usage("unknown mode"))
 	}
@@ -119,7 +122,7 @@ func runDaemon() error {
 	return err
 }
 
-func runUnit(name string) error {
+func runUnit(name, snapshotHash string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -142,7 +145,8 @@ func runUnit(name string) error {
 	store := func() (storage.Storage, error) {
 		return storage.New(cfg.Paths())
 	}
-	service, err := runner.NewRunner(name, store, transportFactory(cfg, scm.New()), cfg, startTime)
+	manager := scm.New()
+	service, err := runner.NewRunner(name, snapshotHash, manager, store, transportFactory(cfg, manager), cfg, startTime)
 	if err != nil {
 		slog.Error("vsystemd runner: init failed", "unit", name, "error", err)
 		return err
