@@ -10,6 +10,7 @@ import (
 	"github.com/gwg605/vsystemd/internal/protocol"
 	"github.com/gwg605/vsystemd/internal/scm"
 	"github.com/gwg605/vsystemd/internal/unit"
+	"github.com/gwg605/vsystemd/internal/unitpath"
 )
 
 func (d *Daemon) status(id unit.ID) (protocol.StatusResponse, error) {
@@ -78,7 +79,13 @@ func (d *Daemon) logTail(id unit.ID) []string {
 	}
 	name := id.String()
 
-	stdout, stderr, err := entry.parsed.Service.ResolveOutputs()
+	resolved, err := unitpath.ResolveService(entry.parsed.Service, unitpath.NewValues(d.roots, id))
+	if err != nil {
+		slog.Warn("daemon: invalid service paths", "unit", name, "error", err)
+		return nil
+	}
+
+	stdout, stderr, err := unit.ResolveOutputs(resolved.StandardOutput, resolved.StandardError)
 	if err != nil {
 		slog.Warn("daemon: invalid log output config", "unit", name, "error", err)
 		return nil
@@ -100,7 +107,7 @@ func (d *Daemon) logTail(id unit.ID) []string {
 		}
 		return lines
 	default:
-		path, err := logwriter.LatestFile(logwriter.ServiceLogDir(d.logsDir, id.Name))
+		path, err := logwriter.LatestFile(logwriter.ServiceLogDir(d.roots.LogsDir, id.Name))
 		if err != nil {
 			slog.Warn("daemon: find latest log failed", "unit", name, "error", err)
 			return nil

@@ -34,8 +34,38 @@ Supported unit types: `.service`, `.timer`
 - `Environment=`, `EnvironmentFile=`
 - `User=`
 - `StandardOutput=`, `StandardError=` (`null`, `file:<abs>`, `append:<abs>`; custom paths must be absolute, no `..`, parent directory must exist)
+- `LogsDirectory=`, `LogsDirectoryMode=` (see "Logs directory and specifiers")
 - `After=`, `Requires=` (mapped to SCM dependencies)
 - `StartLimitBurst=`, `StartLimitIntervalSec=`
+
+### Logs directory and specifiers
+
+`LogsDirectory=` takes a space-separated list of directory names; each name is a
+single relative component without `..`. The runner creates `<logs_dir>\<name>`
+at service start and exports `LOGS_DIRECTORY` to the service (multiple paths
+joined with `;`). Unlike `RuntimeDirectory=`, the directories are never removed
+on stop. `LogsDirectoryMode=` is parsed but ignored with a warning (Windows uses
+ACLs, not Unix mode bits).
+
+systemd-style specifiers are expanded in `StandardOutput=`, `StandardError=`,
+`WorkingDirectory=` and in `Environment=` values (not in `EnvironmentFile=`):
+
+| Specifier | Meaning | Windows value |
+|---|---|---|
+| `%L` | log directory root | `logs_dir` |
+| `%S` | state directory root | `state_dir` |
+| `%C` | cache directory root | `cache_dir` |
+| `%E` | configuration directory root | `config_dir` |
+| `%t` | runtime directory root | `run_dir` |
+| `%h` | manager home | the runner account's home |
+| `%n` | full unit name | `foo.service` |
+| `%N` | unit name without suffix | `foo` |
+| `%%` | literal `%` | `%` |
+
+An unknown specifier is a start error (as in systemd); a literal `%` must be
+written `%%`. In `Exec*=` command lines, `${NAME}` references are substituted
+from the service environment (an undefined name is empty; `$NAME` without braces
+is literal).
 
 ### [Timer] directives (v1)
 
@@ -318,3 +348,4 @@ No path/binary validation at enable time in v1.
 | 8 | `Before=`, `BindsTo=`, `PartOf=`, `Conflicts=` not supported in v1 | Low |
 | 9 | `OnCalendar=` timers do not fire if daemon is stopped | Low — daemon is a system service |
 | 10 | Missed `OnCalendar=` ticks are not caught up on daemon restart | Low |
+| 11 | `LogsDirectory=` maps under `logs_dir`, never removes directories, and `LogsDirectoryMode=` is ignored (ACLs) | Low |

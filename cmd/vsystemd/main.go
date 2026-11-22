@@ -21,6 +21,7 @@ import (
 	"github.com/gwg605/vsystemd/internal/storage"
 	"github.com/gwg605/vsystemd/internal/transport"
 	"github.com/gwg605/vsystemd/internal/transport/pipe"
+	"github.com/gwg605/vsystemd/internal/unitpath"
 )
 
 func main() {
@@ -96,7 +97,14 @@ func runDaemon() error {
 	}
 
 	manager := scm.New()
-	service, err := daemon.New(manager, store, executable, cfg.LogsDir, cfg.LogRotation(), transportFactory(cfg, manager))
+	roots := unitpath.Roots{
+		LogsDir:    cfg.LogsDir,
+		StateDir:   cfg.StateDir,
+		CacheDir:   cfg.CacheDir,
+		ConfigDir:  cfg.ConfigDir,
+		RuntimeDir: cfg.RunDir,
+	}
+	service, err := daemon.New(manager, store, executable, roots, cfg.LogRotation(), transportFactory(cfg, manager))
 	if err != nil {
 		return err
 	}

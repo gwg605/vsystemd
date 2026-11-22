@@ -12,6 +12,7 @@ import (
 	"github.com/gwg605/vsystemd/internal/transport"
 	transportfake "github.com/gwg605/vsystemd/internal/transport/fake"
 	"github.com/gwg605/vsystemd/internal/unit"
+	"github.com/gwg605/vsystemd/internal/unitpath"
 )
 
 func TestReload(t *testing.T) {
@@ -49,7 +50,7 @@ OnCalendar=daily
 	}
 
 	network := transportfake.NewNetwork()
-	daemon, err := New(manager, store, `C:\vsystemd\vsystemd.exe`, t.TempDir(), logwriter.Rotation{}, func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
+	daemon, err := New(manager, store, `C:\vsystemd\vsystemd.exe`, unitpath.Roots{LogsDir: t.TempDir()}, logwriter.Rotation{}, func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
 		return network.New(transport.DefaultConfig(), local, handler), nil
 	})
 	if err != nil {

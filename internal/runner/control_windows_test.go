@@ -46,7 +46,7 @@ func waitForFile(t *testing.T, path string) []byte {
 }
 
 func newTestHandler(service *unit.ServiceUnit) *controlHandler {
-	return newControlHandler(service, newRestartController(service), env.Defaults{}, nil)
+	return newControlHandler(service, newRestartController(service), env.Defaults{}, nil, "")
 }
 
 func TestControlHandlerStop(t *testing.T) {

@@ -31,6 +31,8 @@ EnvironmentFile=-C:\app\.env.local
 User=NT AUTHORITY\LocalService
 StandardOutput=file:C:\logs\out.log
 StandardError=file:C:\logs\err.log
+LogsDirectory=app-logs app-data
+LogsDirectoryMode=0750
 StartLimitBurst=3
 StartLimitIntervalSec=30s
 `)
@@ -55,7 +57,7 @@ StartLimitIntervalSec=30s
 	if !reflect.DeepEqual(file.Wants, []string{"redis.service"}) {
 		t.Errorf("Wants = %v", file.Wants)
 	}
-	if !reflect.DeepEqual(file.Warnings, []string{"Wants= is ignored"}) {
+	if !reflect.DeepEqual(file.Warnings, []string{"Wants= is ignored", "LogsDirectoryMode= is ignored"}) {
 		t.Errorf("Warnings = %v", file.Warnings)
 	}
 	if file.Timer != nil {
@@ -105,6 +107,9 @@ StartLimitIntervalSec=30s
 	}
 	if service.StandardError != `file:C:\logs\err.log` {
 		t.Errorf("StandardError = %q", service.StandardError)
+	}
+	if !reflect.DeepEqual(service.LogsDirectory, []string{"app-logs", "app-data"}) {
+		t.Errorf("LogsDirectory = %v", service.LogsDirectory)
 	}
 	if service.StartLimitBurst != 3 {
 		t.Errorf("StartLimitBurst = %d", service.StartLimitBurst)

@@ -17,6 +17,8 @@ The project provides two binaries:
 - `Restart=no|always|on-failure`, `RestartSec`, `StartLimitBurst`,
   `StartLimitIntervalSec`;
 - `WorkingDirectory`, `Environment`, `EnvironmentFile`, `User`;
+- `LogsDirectory`/`LogsDirectoryMode` and systemd specifiers (`%L`, `%S`, `%C`,
+  `%E`, `%t`, `%h`, `%n`, `%N`, `%%`) plus `${VAR}` in `Exec*`;
 - service stdout/stderr logs and a daemon/runner operation log;
 - Windows SCM integration with dependencies (`Requires=`, `After=`);
 - timers based on systemd `OnCalendar=` expressions, with persisted
@@ -45,11 +47,13 @@ internal/
   runner/            process management, restart logic, SCM handler, logs
   timermgr/          timer database and OnCalendar scheduler
   scm/               Windows SCM integration (+ fake/)
+  specifiers/        systemd-style specifier expansion (%L, %n, ...)
   storage/           unit files and raw timer persistence (+ fake/)
   transport/         transport interface, request matching (+ fake/)
   transport/pipe/    named pipe transport
   unit/              unit file parser and models
-tests/               end-to-end scenarios with fake SCM/storage/transport
+  unitpath/          shared resolver of unit paths against the specifier context
+  tests/             end-to-end scenarios with fake SCM/storage/transport
 VERSION              current version (embedded into the binaries)
 examples/basic/      service/timer example and diagnostic monitor
 scripts/             default path/ACL setup script
@@ -93,6 +97,9 @@ C:\ProgramData\vsystemd
 C:\ProgramData\vsystemd\system
 C:\ProgramData\vsystemd\logs
 C:\ProgramData\vsystemd\logs\vsystemd
+C:\ProgramData\vsystemd\run
+C:\ProgramData\vsystemd\state
+C:\ProgramData\vsystemd\cache
 ```
 
 and applies the ACLs required by `SYSTEM`, `Administrators`, and service
@@ -114,6 +121,10 @@ Example:
 {
   "system_dir": "C:\\ProgramData\\vsystemd\\system",
   "logs_dir": "C:\\ProgramData\\vsystemd\\logs",
+  "run_dir": "C:\\ProgramData\\vsystemd\\run",
+  "state_dir": "C:\\ProgramData\\vsystemd\\state",
+  "cache_dir": "C:\\ProgramData\\vsystemd\\cache",
+  "config_dir": "C:\\ProgramData\\vsystemd",
   "timers_state_file": "C:\\ProgramData\\vsystemd\\timers.json",
   "log_level": "info",
   "logs": {
@@ -257,6 +268,29 @@ C:\ProgramData\vsystemd\timers.json
 - managed logs are rotated when `max_size_mb` is exceeded or the file becomes
   older than `max_age_days`; a new timestamped file is started.
 
+`LogsDirectory=name [name2 ...]` creates `<logs_dir>\<name>` (a single relative
+component, no `..`) at service start and exports `LOGS_DIRECTORY` to the service;
+several names are joined with `;` (e.g.
+`LogsDirectory=app access`). Unlike systemd's `RuntimeDirectory`, the
+directories are kept when the service stops. `LogsDirectoryMode=` is parsed and
+ignored (Windows uses ACLs, not Unix mode bits).
+
+systemd specifiers are expanded in `StandardOutput=`, `StandardError=`,
+`WorkingDirectory=` and in `Environment=` values: `%L` (logs), `%S` (state),
+`%C` (cache), `%E` (config), `%t` (run), `%h` (home), `%n`/`%N` (unit name),
+`%%` (literal `%`). The corresponding roots are `logs_dir`, `state_dir`,
+`cache_dir`, `config_dir`, `run_dir` from `config.json`; the root directories are
+created by `scripts\setup-paths.cmd`. An unknown specifier fails the service, so
+a literal `%` must be written `%%`. In `Exec*=` command lines, `${NAME}` is
+substituted from the service environment (undefined → empty; `$NAME` without
+braces is literal), e.g.:
+
+```
+LogsDirectory=app
+StandardOutput=append:%L\app\out.log
+ExecStart=C:\app\server.exe --log-dir ${LOGS_DIRECTORY}
+```
+
 Log writers keep their files open but readable. `systemctl status` prints a
 systemd-style block (`Loaded`, `Active`, `Main PID`/`Trigger`/`Triggers`) followed
 by a blank line and the last lines from the current/latest managed file, or from
@@ -335,7 +369,9 @@ Remove-Item -Recurse -Force C:\ProgramData\vsystemd
   `Conflicts=` are not supported;
 - `OnBootSec=` / `OnStartupSec=` are not implemented;
 - `OnCalendar=` timers run only while the daemon is running;
-- missed timer ticks are not replayed after a daemon restart.
+- missed timer ticks are not replayed after a daemon restart;
+- `LogsDirectory=` maps under `logs_dir`, its directories are not removed on
+  stop, and `LogsDirectoryMode=` is parsed but ignored.
 
 ## Documentation
 

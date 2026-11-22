@@ -23,6 +23,7 @@ import (
 	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
 	"github.com/gwg605/vsystemd/internal/transport"
 	transportfake "github.com/gwg605/vsystemd/internal/transport/fake"
+	"github.com/gwg605/vsystemd/internal/unitpath"
 )
 
 var clientCounter atomic.Int64
@@ -111,7 +112,7 @@ func (e *testEnv) transportFactory(local transport.Peer, handler transport.MsgHa
 
 func (e *testEnv) newDaemon(t *testing.T) *daemon.Daemon {
 	t.Helper()
-	d, err := daemon.New(e.manager, e.store, `C:\vsystemd\vsystemd.exe`, t.TempDir(), logwriter.Rotation{}, e.transportFactory)
+	d, err := daemon.New(e.manager, e.store, `C:\vsystemd\vsystemd.exe`, unitpath.Roots{LogsDir: t.TempDir()}, logwriter.Rotation{}, e.transportFactory)
 	if err != nil {
 		t.Fatalf("daemon.New() error = %v", err)
 	}

@@ -16,6 +16,7 @@ import (
 	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
 	"github.com/gwg605/vsystemd/internal/transport"
 	transportfake "github.com/gwg605/vsystemd/internal/transport/fake"
+	"github.com/gwg605/vsystemd/internal/unitpath"
 )
 
 func newControlClient(t *testing.T, manager scm.Manager, store storage.Storage) (*Daemon, *transportfake.Transport) {
@@ -56,7 +57,7 @@ func TestStatusResponse(t *testing.T) {
 	}
 
 	daemon, client := newControlClient(t, manager, store)
-	logDir := logwriter.ServiceLogDir(daemon.logsDir, "app")
+	logDir := logwriter.ServiceLogDir(daemon.roots.LogsDir, "app")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		t.Fatalf("create log dir: %v", err)
 	}
@@ -154,6 +155,33 @@ func TestStatusExplicitLog(t *testing.T) {
 		t.Fatalf("unmarshal response: %v", err)
 	}
 	if len(status.LogTail) != 1 || status.LogTail[0] != "explicit-line" {
+		t.Errorf("LogTail = %v", status.LogTail)
+	}
+}
+
+func TestStatusSpecifierLog(t *testing.T) {
+	logsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(logsDir, "app.log"), []byte("spec-line\n"), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	store := storagefake.New()
+	store.WriteUnit("app.service", []byte("[Service]\nExecStart=x\nStandardOutput=append:%L\\app.log\n"))
+
+	_, network := newTestDaemonRoots(t, scmfake.New(), store, unitpath.Roots{LogsDir: logsDir})
+	client := network.New(transport.DefaultConfig(), transport.NewPeer(transport.PeerControl, "systemctl_1", true), nil)
+	t.Cleanup(func() { client.Close() })
+
+	response := controlRequest(t, client, protocol.TypeStatusRequest, protocol.StatusRequest{Unit: "app.service"})
+	if response.Type != protocol.TypeStatusResponse {
+		t.Fatalf("response type = %q", response.Type)
+	}
+
+	var status protocol.StatusResponse
+	if err := json.Unmarshal(response.Payload, &status); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(status.LogTail) != 1 || status.LogTail[0] != "spec-line" {
 		t.Errorf("LogTail = %v", status.LogTail)
 	}
 }

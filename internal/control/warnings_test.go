@@ -7,6 +7,7 @@ import (
 
 	storagefake "github.com/gwg605/vsystemd/internal/storage/fake"
 	"github.com/gwg605/vsystemd/internal/unit"
+	"github.com/gwg605/vsystemd/internal/unitpath"
 )
 
 func TestUnitPathWarnings(t *testing.T) {
@@ -34,7 +35,7 @@ func TestUnitPathWarnings(t *testing.T) {
 		{"missing env", &unit.ServiceUnit{EnvironmentFiles: []string{missingEnv}}, 1},
 	}
 	for _, test := range tests {
-		warnings := unitPathWarnings(storagefake.New(), &unit.UnitFile{Service: test.service})
+		warnings := unitPathWarnings(storagefake.New(), &unit.UnitFile{Service: test.service}, unitpath.Roots{})
 		if len(warnings) != test.want {
 			t.Errorf("%s: warnings = %v, want %d", test.name, warnings, test.want)
 		}

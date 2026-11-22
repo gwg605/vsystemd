@@ -76,21 +76,23 @@ type handlerSession struct {
 }
 
 type controlHandler struct {
-	service     *unit.ServiceUnit
-	restart     *restartController
-	reporter    *stateReporter
-	defaults    env.Defaults
-	logs        *logStreamer
-	stopTimeout time.Duration
+	service       *unit.ServiceUnit
+	restart       *restartController
+	reporter      *stateReporter
+	defaults      env.Defaults
+	logs          *logStreamer
+	logsDirectory string
+	stopTimeout   time.Duration
 }
 
-func newControlHandler(service *unit.ServiceUnit, restart *restartController, defaults env.Defaults, logs *logStreamer) *controlHandler {
+func newControlHandler(service *unit.ServiceUnit, restart *restartController, defaults env.Defaults, logs *logStreamer, logsDirectory string) *controlHandler {
 	return &controlHandler{
-		service:     service,
-		restart:     restart,
-		defaults:    defaults,
-		logs:        logs,
-		stopTimeout: resolveStopTimeout(service),
+		service:       service,
+		restart:       restart,
+		defaults:      defaults,
+		logs:          logs,
+		logsDirectory: logsDirectory,
+		stopTimeout:   resolveStopTimeout(service),
 	}
 }
 
@@ -478,14 +480,15 @@ func (h *controlHandler) newPostOperation(report func(opResult)) (operation, err
 }
 
 func (h *controlHandler) newSequence(role opRole, lines []string, report func(opResult)) (operation, error) {
-	commands, err := parseCommands(lines)
-	if err != nil {
-		return nil, err
-	}
 	env, err := h.environment()
 	if err != nil {
 		return nil, err
 	}
+	commands, err := parseCommands(lines)
+	if err != nil {
+		return nil, err
+	}
+	commands = expandCommands(commands, envListLookup(env))
 	stdout, stderr := h.writers()
 	return newSequenceOperation(role, commands, env, h.service.WorkingDirectory, stdout, stderr, report), nil
 }
@@ -510,8 +513,9 @@ func (h *controlHandler) newProcess(role opRole, line string, report func(opResu
 	if err != nil {
 		return nil, err
 	}
+	spec := expandCommand(*parsed, envListLookup(env))
 	stdout, stderr := h.writers()
-	cmd := exec.Command(parsed.path, parsed.args...)
+	cmd := exec.Command(spec.path, spec.args...)
 	cmd.Dir = h.service.WorkingDirectory
 	cmd.Env = env
 	cmd.Stdout = stdout
@@ -523,7 +527,14 @@ func (h *controlHandler) newProcess(role opRole, line string, report func(opResu
 }
 
 func (h *controlHandler) environment() ([]string, error) {
-	return env.Build(h.service.Environment, h.service.EnvironmentFiles, h.defaults)
+	env, err := env.Build(h.service.Environment, h.service.EnvironmentFiles, h.defaults)
+	if err != nil {
+		return nil, err
+	}
+	if h.logsDirectory != "" {
+		env = setEnv(env, "LOGS_DIRECTORY", h.logsDirectory)
+	}
+	return env, nil
 }
 
 func (h *controlHandler) writers() (io.Writer, io.Writer) {

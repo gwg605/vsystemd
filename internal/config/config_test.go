@@ -14,6 +14,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.SystemDir == "" || cfg.LogsDir == "" || cfg.TimersStateFile == "" {
 		t.Errorf("paths are empty: %+v", cfg)
 	}
+	if cfg.RunDir == "" || cfg.StateDir == "" || cfg.CacheDir == "" || cfg.ConfigDir == "" {
+		t.Errorf("root paths are empty: %+v", cfg)
+	}
 	if cfg.Logs.MaxSizeMB != 10 || cfg.Logs.MaxAgeDays != 7 {
 		t.Errorf("Logs = %+v", cfg.Logs)
 	}

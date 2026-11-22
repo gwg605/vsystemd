@@ -144,7 +144,10 @@ $specs = @(
     [pscustomobject]@{ Path = $Root; Rules = $rootRules },
     [pscustomobject]@{ Path = (Join-Path $Root 'system'); Rules = $rootRules },
     [pscustomobject]@{ Path = (Join-Path $Root 'logs'); Rules = $logsRules },
-    [pscustomobject]@{ Path = (Join-Path $Root 'logs\vsystemd'); Rules = $logsRules }
+    [pscustomobject]@{ Path = (Join-Path $Root 'logs\vsystemd'); Rules = $logsRules },
+    [pscustomobject]@{ Path = (Join-Path $Root 'run'); Rules = $logsRules },
+    [pscustomobject]@{ Path = (Join-Path $Root 'state'); Rules = $logsRules },
+    [pscustomobject]@{ Path = (Join-Path $Root 'cache'); Rules = $logsRules }
 )
 
 $failed = $false
@@ -205,6 +208,9 @@ if (-not $Check) {
     Reset-ChildAcls -Path $Root
     Reset-ChildAcls -Path (Join-Path $Root 'system') -Recurse
     Reset-ChildAcls -Path (Join-Path $Root 'logs') -Recurse
+    Reset-ChildAcls -Path (Join-Path $Root 'run') -Recurse
+    Reset-ChildAcls -Path (Join-Path $Root 'state') -Recurse
+    Reset-ChildAcls -Path (Join-Path $Root 'cache') -Recurse
 }
 
 if ($failed) {

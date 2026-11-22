@@ -19,18 +19,18 @@ type OutputTarget struct {
 	Path string
 }
 
-// ResolveOutputs parses StandardOutput/StandardError into output targets. The
-// returned paths are raw (not cleaned or verified).
-func (s *ServiceUnit) ResolveOutputs() (OutputTarget, OutputTarget, error) {
-	stdout, err := resolveOutput(s.StandardOutput)
+// ResolveOutputs parses raw StandardOutput/StandardError values into output
+// targets. The returned paths are raw (not cleaned or verified).
+func ResolveOutputs(stdout, stderr string) (OutputTarget, OutputTarget, error) {
+	out, err := resolveOutput(stdout)
 	if err != nil {
 		return OutputTarget{}, OutputTarget{}, fmt.Errorf("StandardOutput: %w", err)
 	}
-	stderr, err := resolveOutput(s.StandardError)
+	errOut, err := resolveOutput(stderr)
 	if err != nil {
 		return OutputTarget{}, OutputTarget{}, fmt.Errorf("StandardError: %w", err)
 	}
-	return stdout, stderr, nil
+	return out, errOut, nil
 }
 
 func resolveOutput(value string) (OutputTarget, error) {

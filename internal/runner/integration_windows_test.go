@@ -22,6 +22,11 @@ import (
 
 func newIntegratedRunner(t *testing.T, name, unitText string) (*Runner, *stateCollector) {
 	t.Helper()
+	return newIntegratedRunnerConfig(t, name, unitText, config.Config{LogsDir: t.TempDir()})
+}
+
+func newIntegratedRunnerConfig(t *testing.T, name, unitText string, cfg config.Config) (*Runner, *stateCollector) {
+	t.Helper()
 
 	network := transportfake.NewNetwork()
 	collector := newStateCollector()
@@ -35,7 +40,6 @@ func newIntegratedRunner(t *testing.T, name, unitText string) (*Runner, *stateCo
 	factory := func(local transport.Peer, handler transport.MsgHandler) (transport.Transport, error) {
 		return network.New(transport.DefaultConfig(), local, handler), nil
 	}
-	cfg := config.Config{LogsDir: t.TempDir()}
 	runner, err := NewRunner(name, storeFactory, factory, cfg, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("NewRunner() error = %v", err)
@@ -163,5 +167,34 @@ func TestRunnerStartLimitExhaustion(t *testing.T) {
 	}
 	if got := strings.Count(string(data), "\n"); got != 2 {
 		t.Errorf("attempts = %d, want 2", got)
+	}
+}
+
+func TestRunnerLogsDirectory(t *testing.T) {
+	logsRoot := t.TempDir()
+	envFile := filepath.Join(t.TempDir(), "env.txt")
+
+	unitText := fmt.Sprintf("[Service]\nLogsDirectory=app\nStandardOutput=append:%%L\\app\\out.log\nExecStart=%s\n",
+		helperCommand("recordenv", envFile, "LOGS_DIRECTORY"))
+	runner, _ := newIntegratedRunnerConfig(t, "app.service", unitText, config.Config{LogsDir: logsRoot})
+	changes, _, done := runControlHandler(t, runner.handler)
+
+	waitForStatus(t, changes, svc.Stopped)
+	waitForDone(t, done)
+
+	dir := filepath.Join(logsRoot, "app")
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		t.Fatalf("LogsDirectory was not created: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "out.log")); err != nil {
+		t.Errorf("StandardOutput file was not created: %v", err)
+	}
+
+	data, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatalf("read env file: %v", err)
+	}
+	if string(data) != dir {
+		t.Errorf("LOGS_DIRECTORY = %q, want %q", data, dir)
 	}
 }

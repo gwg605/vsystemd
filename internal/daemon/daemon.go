@@ -15,6 +15,7 @@ import (
 	"github.com/gwg605/vsystemd/internal/storage"
 	"github.com/gwg605/vsystemd/internal/timermgr"
 	"github.com/gwg605/vsystemd/internal/transport"
+	"github.com/gwg605/vsystemd/internal/unitpath"
 )
 
 const daemonPeer = "daemon"
@@ -23,7 +24,7 @@ type Daemon struct {
 	manager     scm.Manager
 	store       storage.Storage
 	binaryPath  string
-	logsDir     string
+	roots       unitpath.Roots
 	logRotation logwriter.Rotation
 	transport   transport.Transport
 	timers      *timermgr.Manager
@@ -37,7 +38,7 @@ type Daemon struct {
 	loopStarted bool
 }
 
-func New(manager scm.Manager, store storage.Storage, binaryPath, logsDir string, logRotation logwriter.Rotation, newTransport transport.Factory) (*Daemon, error) {
+func New(manager scm.Manager, store storage.Storage, binaryPath string, roots unitpath.Roots, logRotation logwriter.Rotation, newTransport transport.Factory) (*Daemon, error) {
 	if newTransport == nil {
 		return nil, errors.New("transport factory is required")
 	}
@@ -46,7 +47,7 @@ func New(manager scm.Manager, store storage.Storage, binaryPath, logsDir string,
 		manager:     manager,
 		store:       store,
 		binaryPath:  binaryPath,
-		logsDir:     logsDir,
+		roots:       roots,
 		logRotation: logRotation,
 		states:      make(map[string]ServiceState),
 		loopStop:    make(chan struct{}),
@@ -172,11 +173,11 @@ func (d *Daemon) cleanupLogs() {
 	}
 
 	now := time.Now().UTC()
-	if err := logwriter.Cleanup(filepath.Join(d.logsDir, "vsystemd"), d.logRotation.MaxAgeDays, now); err != nil {
+	if err := logwriter.Cleanup(filepath.Join(d.roots.LogsDir, "vsystemd"), d.logRotation.MaxAgeDays, now); err != nil {
 		slog.Debug("daemon: cleanup operation logs failed", "error", err)
 	}
 
-	entries, err := os.ReadDir(d.logsDir)
+	entries, err := os.ReadDir(d.roots.LogsDir)
 	if err != nil {
 		slog.Debug("daemon: list log directories failed", "error", err)
 		return
@@ -185,7 +186,7 @@ func (d *Daemon) cleanupLogs() {
 		if !entry.IsDir() || entry.Name() == "vsystemd" {
 			continue
 		}
-		dir := filepath.Join(d.logsDir, entry.Name())
+		dir := filepath.Join(d.roots.LogsDir, entry.Name())
 		if err := logwriter.Cleanup(dir, d.logRotation.MaxAgeDays, now); err != nil {
 			slog.Debug("daemon: cleanup service logs failed", "dir", dir, "error", err)
 		}
