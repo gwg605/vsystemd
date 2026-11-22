@@ -204,10 +204,11 @@ change SCM configuration — `enable` is the only writer. Applying an edit there
 takes `daemon-reload` + `enable` + `systemctl restart`.
 
 `disable` sets the service start type to disabled; it does not stop or remove the
-service. A service whose unit file was deleted is removed from SCM only if it is
-disabled; otherwise it is kept and flagged as invalid until the unit file is
-restored or the service is disabled. `daemon-reload` does not create SCM entries
-for new units — run `enable` for those.
+service. A service whose unit file was deleted is removed from SCM only once it is
+both disabled **and stopped**; a disabled service that is still running is kept
+until it is stopped (the daemon never stops it). Otherwise it is kept and flagged
+as invalid until the unit file is restored or the service is disabled.
+`daemon-reload` does not create SCM entries for new units — run `enable` for those.
 
 The daemon keeps its own in-memory copy of the units and only refreshes it on
 `daemon-reload`, so edits to unit files are not visible to `status`, `list-units`

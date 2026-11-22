@@ -132,12 +132,16 @@ All other timer directives (`OnUnitActiveSec=`, `OnUnitInactiveSec=`, `Persisten
   - no file, no SCM entry, not an enabled timer → dropped
 - It then reconciles the list against SCM (`systemctl enable` owns SCM config):
   - entry present but not loaded, SCM entry exists → kept
-  - file missing, SCM entry exists and `START_TYPE = DISABLED` → `StopService()` + `DeleteService()`
+  - file missing, SCM entry exists and `START_TYPE = DISABLED` and the service is
+    stopped → `DeleteService()` (a disabled service that is still running is kept
+    until it is stopped; the daemon never stops it)
   - file missing, SCM entry exists and enabled → kept with load state `not-found`
   - unit exists, SCM entry missing → no action (wait for `enable`)
   - a loaded unit whose SCM entry exists is **not** updated; run `enable` to apply changes
 - A failure to read the `system\` directory or list SCM services aborts the reload
-  with an error (the current list is kept); the daemon stays running
+  with an error (the current list is kept); the daemon stays running. A failure to
+  query or delete a single service is logged and skipped, so the remaining
+  services are still processed.
 - Daemon reloads OnCalendar schedules from the list
 
 ### `systemctl start/stop/restart`
