@@ -97,6 +97,10 @@ type Manager interface {
 	// LoadUnitContent returns the applied unit snapshot stored in the service's
 	// registry Parameters key, or an error if it is missing.
 	LoadUnitContent(name string) (unit.Content, error)
+	// AddAccountToGroup adds an account to a local group; it is idempotent.
+	AddAccountToGroup(account, group string) error
+	// RemoveAccountFromGroup removes an account from a local group.
+	RemoveAccountFromGroup(account, group string) error
 }
 
 // ContentReader reads the applied unit snapshot of a service.

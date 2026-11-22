@@ -42,7 +42,7 @@ Supported unit types: `.service`, `.timer`
 - `TimeoutStopSec=`
 - `WorkingDirectory=`
 - `Environment=`, `EnvironmentFile=`
-- `User=`
+- `User=`, `Group=`
 - `StandardOutput=`, `StandardError=` (`null`, `file:<abs>`, `append:<abs>`; custom paths must be absolute, no `..`, parent directory must exist)
 - `LogsDirectory=`, `LogsDirectoryMode=`, `RuntimeDirectory=`, `RuntimeDirectoryMode=` (see "Logs and runtime directories")
 - `After=`, `Requires=` (mapped to SCM dependencies)
@@ -53,15 +53,26 @@ Supported unit types: `.service`, `.timer`
 `LogsDirectory=` takes a space-separated list of directory names; each name is a
 single relative component without `..`. The runner creates `<logs_dir>\<name>`
 at service start and exports `LOGS_DIRECTORY` to the service (multiple paths
-joined with `;`). The directories are never removed. `LogsDirectoryMode=` is
-parsed but ignored with a warning (Windows uses ACLs, not Unix mode bits).
+joined with `;`). The directories are never removed.
 
 `RuntimeDirectory=` has the same list form but is rooted at `run_dir` and
 exported as `RUNTIME_DIRECTORY`. The directories are recreated (wiped and
 created) at service start and removed when the service finally stops or fails;
 an internal `Restart=` (auto-restart inside the runner) leaves them in place.
-`RuntimeDirectoryMode=` is parsed but ignored with a warning. There is no
-`RuntimeDirectoryPreserve=`.
+There is no `RuntimeDirectoryPreserve=`.
+
+`LogsDirectoryMode=`/`RuntimeDirectoryMode=` (octal, default `0755`) are applied
+as a DACL on the innermost directory, non-recursively: the `owner` triplet is
+granted to `User=`, the `group` triplet to `Group=` (or `User=` when `Group=` is
+unset), and the `others` triplet to `Everyone`; `SYSTEM` and `Administrators`
+always get full control. `r`=read, `w`=write+delete-child, `x`=traverse. The DACL
+is protected (inheritance disabled) and inherited by children. The directory
+owner/group metadata is not changed (ACL only).
+
+`Group=` also adds the service account to the (local) group on `enable`; the
+membership is not removed by `disable`, only before the service is deleted. It
+does **not** change the process primary group (SCM cannot set one). Domain groups
+are not supported.
 
 systemd-style specifiers are expanded in `StandardOutput=`, `StandardError=`,
 `WorkingDirectory=` and in `Environment=` values (not in `EnvironmentFile=`):
@@ -357,6 +368,7 @@ Single mechanism: ACL on all vsystemd-managed resources.
 | `C:\ProgramData\vsystemd\` and `system\` | SYSTEM: Full Control, Administrators: Full Control, `NT SERVICE\All Services`: ReadAndExecute |
 | `C:\ProgramData\vsystemd\logs\` | SYSTEM: Full Control, Administrators: Full Control, `NT SERVICE\All Services`: Modify |
 | `\\.\pipe\vsystemd-in` | SYSTEM, Administrators, `NT SERVICE\All Services`: Full Control; owner |
+| `<logs_dir>\<name>`, `<run_dir>\<name>` | DACL from `LogsDirectoryMode=`/`RuntimeDirectoryMode=` (default `0755`): `User=` rwx on the owner triplet, `Group=` (or `User=`) on the group triplet, `Everyone` on others, plus SYSTEM/Administrators Full Control |
 
 No path/binary validation at enable time in v1.
 
@@ -376,7 +388,8 @@ No path/binary validation at enable time in v1.
 | 8 | `Before=`, `BindsTo=`, `PartOf=`, `Conflicts=` not supported in v1 | Low |
 | 9 | `OnCalendar=` timers do not fire if daemon is stopped | Low — daemon is a system service |
 | 10 | Missed `OnCalendar=` ticks are not caught up on daemon restart | Low |
-| 11 | `LogsDirectory=` maps under `logs_dir`, never removes directories, and `LogsDirectoryMode=` is ignored (ACLs) | Low |
-| 12 | `RuntimeDirectory=` removes directories only on final stop, not on internal auto-restart; no `RuntimeDirectoryPreserve=`; `RuntimeDirectoryMode=` is ignored (ACLs) | Low |
+| 11 | `LogsDirectory=` maps under `logs_dir` and never removes directories; `LogsDirectoryMode=`/`RuntimeDirectoryMode=` map to an ACL (no Unix mode bits), and directory owner/group metadata is not changed | Low |
+| 12 | `RuntimeDirectory=` removes directories only on final stop, not on internal auto-restart; no `RuntimeDirectoryPreserve=` | Low |
 | 13 | A running service uses the unit snapshot written by `enable`; file edits require `daemon-reload` + `enable` + restart | Low |
 | 14 | SCM service configuration is written only by `enable`, not by `daemon-reload` | Low |
+| 15 | `Group=` affects the directory ACL and local group membership, not the process primary group; domain groups are unsupported | Low |

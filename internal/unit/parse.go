@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -19,8 +20,10 @@ func Parse(id ID, data []byte) (*UnitFile, error) {
 	file := &UnitFile{Name: id}
 	if id.Type == TypeService {
 		file.Service = &ServiceUnit{
-			Restart:     RestartNo,
-			Environment: make(map[string]string),
+			Restart:              RestartNo,
+			Environment:          make(map[string]string),
+			LogsDirectoryMode:    defaultDirectoryMode,
+			RuntimeDirectoryMode: defaultDirectoryMode,
 		}
 	} else {
 		file.Timer = &TimerUnit{}
@@ -85,7 +88,7 @@ func (u *UnitFile) apply(section, key, value string) error {
 	case "unit":
 		u.applyUnit(key, value)
 	case "service":
-		return u.Service.apply(key, value, u.warn)
+		return u.Service.apply(key, value)
 	case "timer":
 		return u.applyTimer(key, value)
 	}
@@ -117,7 +120,7 @@ func (u *UnitFile) warn(message string) {
 	u.Warnings = append(u.Warnings, message)
 }
 
-func (s *ServiceUnit) apply(key, value string, warn func(string)) error {
+func (s *ServiceUnit) apply(key, value string) error {
 	switch key {
 	case "ExecStart":
 		s.ExecStart = value
@@ -162,6 +165,8 @@ func (s *ServiceUnit) apply(key, value string, warn func(string)) error {
 		s.EnvironmentFiles = append(s.EnvironmentFiles, strings.Fields(value)...)
 	case "User":
 		s.User = value
+	case "Group":
+		s.Group = value
 	case "StandardOutput":
 		s.StandardOutput = value
 	case "StandardError":
@@ -169,11 +174,19 @@ func (s *ServiceUnit) apply(key, value string, warn func(string)) error {
 	case "LogsDirectory":
 		s.LogsDirectory = append(s.LogsDirectory, strings.Fields(value)...)
 	case "LogsDirectoryMode":
-		warn("LogsDirectoryMode= is ignored")
+		mode, err := parseMode(value)
+		if err != nil {
+			return fmt.Errorf("invalid LogsDirectoryMode: %w", err)
+		}
+		s.LogsDirectoryMode = mode
 	case "RuntimeDirectory":
 		s.RuntimeDirectory = append(s.RuntimeDirectory, strings.Fields(value)...)
 	case "RuntimeDirectoryMode":
-		warn("RuntimeDirectoryMode= is ignored")
+		mode, err := parseMode(value)
+		if err != nil {
+			return fmt.Errorf("invalid RuntimeDirectoryMode: %w", err)
+		}
+		s.RuntimeDirectoryMode = mode
 	case "StartLimitBurst":
 		n, err := strconv.Atoi(value)
 		if err != nil || n < 0 {
@@ -215,6 +228,17 @@ func (u *UnitFile) applyTimer(key, value string) error {
 		u.warn(fmt.Sprintf("unsupported timer directive %s", key))
 	}
 	return nil
+}
+
+func parseMode(value string) (os.FileMode, error) {
+	n, err := strconv.ParseUint(value, 8, 32)
+	if err != nil {
+		return 0, fmt.Errorf("invalid octal mode %q", value)
+	}
+	if n > 0o7777 {
+		return 0, fmt.Errorf("mode %q out of range", value)
+	}
+	return os.FileMode(n & 0o777), nil
 }
 
 func parseTimespan(value string) (time.Duration, error) {

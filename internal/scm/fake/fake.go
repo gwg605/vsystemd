@@ -20,6 +20,8 @@ type Manager struct {
 	services        map[string]*service
 	processServices map[scm.ProcessHandle]string
 	nextPID         uint32
+	groups          map[string]map[string]bool
+	membershipCalls []string
 }
 
 var _ scm.Manager = (*Manager)(nil)
@@ -29,7 +31,43 @@ func New() *Manager {
 		services:        make(map[string]*service),
 		processServices: make(map[scm.ProcessHandle]string),
 		nextPID:         1000,
+		groups:          make(map[string]map[string]bool),
 	}
+}
+
+func (m *Manager) AddAccountToGroup(account, group string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.groups[account] == nil {
+		m.groups[account] = make(map[string]bool)
+	}
+	m.groups[account][group] = true
+	m.membershipCalls = append(m.membershipCalls, "add "+account+" "+group)
+	return nil
+}
+
+func (m *Manager) RemoveAccountFromGroup(account, group string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if groups, ok := m.groups[account]; ok {
+		delete(groups, group)
+	}
+	m.membershipCalls = append(m.membershipCalls, "remove "+account+" "+group)
+	return nil
+}
+
+// InGroup reports whether account is a member of group.
+func (m *Manager) InGroup(account, group string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.groups[account][group]
+}
+
+// MembershipCalls returns the recorded membership operations in order.
+func (m *Manager) MembershipCalls() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.membershipCalls...)
 }
 
 func (m *Manager) CreateService(cfg scm.ServiceConfig, content unit.Content) error {
