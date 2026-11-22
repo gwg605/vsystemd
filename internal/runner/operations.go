@@ -17,6 +17,21 @@ const (
 	roleStop
 )
 
+func (r opRole) String() string {
+	switch r {
+	case rolePre:
+		return "pre"
+	case roleMain:
+		return "main"
+	case rolePost:
+		return "post"
+	case roleStop:
+		return "stop"
+	default:
+		return "unknown"
+	}
+}
+
 type cancelMode int
 
 const (

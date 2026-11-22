@@ -270,3 +270,18 @@ func TestRunnerReportsLoadedHash(t *testing.T) {
 		t.Errorf("LoadedHash = %q, want %q", last.LoadedHash, want)
 	}
 }
+
+func TestRunnerStartFailureDoesNotHang(t *testing.T) {
+	unitText := "[Service]\nExecStart=C:\\does-not-exist-vsystemd\\missing.exe\n"
+	runner, collector := newIntegratedRunner(t, "app.service", unitText)
+	changes, _, done := runControlHandler(t, runner.handler)
+
+	waitForStatus(t, changes, svc.Stopped)
+	waitForDone(t, done)
+
+	states := collectStates(collector)
+	last := states[len(states)-1]
+	if last.State != protocol.StateFailed {
+		t.Errorf("last state = %q, want failed", last.State)
+	}
+}
