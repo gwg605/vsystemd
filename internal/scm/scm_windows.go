@@ -5,7 +5,8 @@ package scm
 import (
 	"errors"
 	"fmt"
-	"strings"
+	"runtime"
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -14,12 +15,11 @@ import (
 	"golang.org/x/sys/windows/svc/mgr"
 
 	"github.com/gwg605/vsystemd/internal/unit"
+	"github.com/gwg605/vsystemd/internal/winacl"
 )
 
 const (
 	managedServiceGroup = "vsystemd"
-	// maxSIDSize is SECURITY_MAX_SID_SIZE.
-	maxSIDSize = 68
 	// snapshotValue is the registry value holding the applied unit content.
 	snapshotValue = "Unit"
 )
@@ -112,6 +112,49 @@ func (windowsManager) LoadUnitContent(name string) (unit.Content, error) {
 		return nil, fmt.Errorf("read unit content for %s: %w", name, err)
 	}
 	return unit.Content(value), nil
+}
+
+var (
+	modnetapi32                 = windows.NewLazySystemDLL("netapi32.dll")
+	procNetLocalGroupAddMembers = modnetapi32.NewProc("NetLocalGroupAddMembers")
+	procNetLocalGroupDelMembers = modnetapi32.NewProc("NetLocalGroupDelMembers")
+)
+
+// localgroupMembersInfo0 is LOCALGROUP_MEMBERS_INFO_0 (a single SID).
+type localgroupMembersInfo0 struct {
+	sid *windows.SID
+}
+
+func (windowsManager) AddAccountToGroup(account, group string) error {
+	return setLocalGroupMembership(procNetLocalGroupAddMembers, account, group)
+}
+
+func (windowsManager) RemoveAccountFromGroup(account, group string) error {
+	return setLocalGroupMembership(procNetLocalGroupDelMembers, account, group)
+}
+
+func setLocalGroupMembership(proc *windows.LazyProc, account, group string) error {
+	sid, err := winacl.SID(account)
+	if err != nil {
+		return fmt.Errorf("resolve account %q: %w", account, err)
+	}
+	groupName, err := windows.UTF16PtrFromString(group)
+	if err != nil {
+		return err
+	}
+
+	member := localgroupMembersInfo0{sid: sid}
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	pinner.Pin(sid)
+	pinner.Pin(&member)
+
+	ret, _, _ := proc.Call(0, uintptr(unsafe.Pointer(groupName)), 0, uintptr(unsafe.Pointer(&member)), 1)
+	errno := syscall.Errno(ret)
+	if errno == 0 || errno == windows.ERROR_MEMBER_IN_ALIAS || errno == windows.ERROR_NO_SUCH_MEMBER {
+		return nil
+	}
+	return fmt.Errorf("%s %q in %q: %w", proc.Name, account, group, errno)
 }
 
 func (windowsManager) SetStartType(name string, startType StartType) error {
@@ -455,7 +498,7 @@ func serviceNameByPID(pid uint32) (string, bool, error) {
 }
 
 func verifyAccount(process windows.Handle, startName string) error {
-	expected, err := accountSID(startName)
+	expected, err := winacl.SID(startName)
 	if err != nil {
 		return fmt.Errorf("resolve account %q: %w", startName, err)
 	}
@@ -511,27 +554,6 @@ func processImagePath(process windows.Handle) (string, error) {
 		}
 	}
 	return windows.UTF16ToString(buf[:size]), nil
-}
-
-func accountSID(name string) (*windows.SID, error) {
-	account := strings.TrimSpace(name)
-	if account == "" || strings.EqualFold(account, "LocalSystem") || strings.EqualFold(account, `NT AUTHORITY\SYSTEM`) {
-		return windows.CreateWellKnownSid(windows.WinLocalSystemSid)
-	}
-
-	accountPtr, err := windows.UTF16PtrFromString(account)
-	if err != nil {
-		return nil, err
-	}
-	sidBuf := make([]byte, maxSIDSize)
-	sidLen := uint32(len(sidBuf))
-	domainBuf := make([]uint16, 256)
-	domainLen := uint32(len(domainBuf))
-	var use uint32
-	if err := windows.LookupAccountName(nil, accountPtr, (*windows.SID)(unsafe.Pointer(&sidBuf[0])), &sidLen, &domainBuf[0], &domainLen, &use); err != nil {
-		return nil, err
-	}
-	return (*windows.SID)(unsafe.Pointer(&sidBuf[0])), nil
 }
 
 type fileIDInfo struct {

@@ -16,7 +16,7 @@ The project provides two binaries:
 - `ExecStart`, `ExecStartPre`, `ExecStartPost`, `ExecStop`;
 - `Restart=no|always|on-failure`, `RestartSec`, `StartLimitBurst`,
   `StartLimitIntervalSec`;
-- `WorkingDirectory`, `Environment`, `EnvironmentFile`, `User`;
+- `WorkingDirectory`, `Environment`, `EnvironmentFile`, `User`, `Group`;
 - `LogsDirectory`/`LogsDirectoryMode`, `RuntimeDirectory`/`RuntimeDirectoryMode`
   and systemd specifiers (`%L`, `%S`, `%C`, `%E`, `%t`, `%h`, `%n`, `%N`, `%%`)
   plus `${VAR}` in `Exec*`;
@@ -54,6 +54,7 @@ internal/
   transport/pipe/    named pipe transport
   unit/              unit file parser and models
   unitpath/          shared resolver of unit paths against the specifier context
+  winacl/            account SID resolution and directory ACL application
   tests/             end-to-end scenarios with fake SCM/storage/transport
 VERSION              current version (embedded into the binaries)
 examples/basic/      service/timer example and diagnostic monitor
@@ -280,14 +281,18 @@ C:\ProgramData\vsystemd\timers.json
 component, no `..`) at service start and exports `LOGS_DIRECTORY` to the service;
 several names are joined with `;` (e.g.
 `LogsDirectory=app access`). The directories are kept when the service stops.
-`LogsDirectoryMode=` is parsed and ignored (Windows uses ACLs, not Unix mode
-bits).
 
 `RuntimeDirectory=name [name2 ...]` works the same way but is rooted at
 `run_dir` and exported as `RUNTIME_DIRECTORY`. Unlike logs, these directories are
 recreated at service start (leftovers are wiped) and removed when the service
 finally stops or fails; an internal `Restart=` leaves them in place.
-`RuntimeDirectoryMode=` is parsed and ignored.
+
+`LogsDirectoryMode=`/`RuntimeDirectoryMode=` (octal, default `0755`) set the
+directory DACL, mapping the owner/group/other triplets to the service account
+(`User=`), `Group=` (or `User=`) and `Everyone`, plus `SYSTEM`/`Administrators`
+full control. `Group=` also adds the service account to that (local) group on
+`enable`; the membership is removed when the service is deleted. `Group=` does
+not change the process group and domain groups are not supported.
 
 systemd specifiers are expanded in `StandardOutput=`, `StandardError=`,
 `WorkingDirectory=` and in `Environment=` values: `%L` (logs), `%S` (state),
@@ -389,11 +394,14 @@ Remove-Item -Recurse -Force C:\ProgramData\vsystemd
 - `OnBootSec=` / `OnStartupSec=` are not implemented;
 - `OnCalendar=` timers run only while the daemon is running;
 - missed timer ticks are not replayed after a daemon restart;
-- `LogsDirectory=` maps under `logs_dir`, its directories are not removed on
-  stop, and `LogsDirectoryMode=` is parsed but ignored;
+- `LogsDirectory=` maps under `logs_dir` and its directories are not removed on
+  stop;
 - `RuntimeDirectory=` removes its directories only on final stop (not on an
-  internal `Restart=`), has no `RuntimeDirectoryPreserve=`, and
-  `RuntimeDirectoryMode=` is parsed but ignored;
+  internal `Restart=`) and has no `RuntimeDirectoryPreserve=`;
+- `…DirectoryMode=` maps to a Windows ACL (no Unix mode bits); directory
+  owner/group metadata is not changed;
+- `Group=` affects the directory ACL and local group membership, not the process
+  primary group, and domain groups are not supported;
 - a service runs the unit snapshot applied by `enable`; SCM configuration is not
   changed by `daemon-reload` (edits need `daemon-reload` + `enable` + restart).
 

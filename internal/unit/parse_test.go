@@ -29,6 +29,7 @@ Environment=EXTRA=value
 EnvironmentFile=C:\app\.env
 EnvironmentFile=-C:\app\.env.local
 User=NT AUTHORITY\LocalService
+Group=Users
 StandardOutput=file:C:\logs\out.log
 StandardError=file:C:\logs\err.log
 LogsDirectory=app-logs app-data
@@ -59,7 +60,7 @@ StartLimitIntervalSec=30s
 	if !reflect.DeepEqual(file.Wants, []string{"redis.service"}) {
 		t.Errorf("Wants = %v", file.Wants)
 	}
-	if !reflect.DeepEqual(file.Warnings, []string{"Wants= is ignored", "LogsDirectoryMode= is ignored", "RuntimeDirectoryMode= is ignored"}) {
+	if !reflect.DeepEqual(file.Warnings, []string{"Wants= is ignored"}) {
 		t.Errorf("Warnings = %v", file.Warnings)
 	}
 	if file.Timer != nil {
@@ -104,6 +105,9 @@ StartLimitIntervalSec=30s
 	if service.User != `NT AUTHORITY\LocalService` {
 		t.Errorf("User = %q", service.User)
 	}
+	if service.Group != "Users" {
+		t.Errorf("Group = %q", service.Group)
+	}
 	if service.StandardOutput != `file:C:\logs\out.log` {
 		t.Errorf("StandardOutput = %q", service.StandardOutput)
 	}
@@ -113,8 +117,14 @@ StartLimitIntervalSec=30s
 	if !reflect.DeepEqual(service.LogsDirectory, []string{"app-logs", "app-data"}) {
 		t.Errorf("LogsDirectory = %v", service.LogsDirectory)
 	}
+	if service.LogsDirectoryMode != 0o750 {
+		t.Errorf("LogsDirectoryMode = %v", service.LogsDirectoryMode)
+	}
 	if !reflect.DeepEqual(service.RuntimeDirectory, []string{"run-a", "run-b"}) {
 		t.Errorf("RuntimeDirectory = %v", service.RuntimeDirectory)
+	}
+	if service.RuntimeDirectoryMode != 0o755 {
+		t.Errorf("RuntimeDirectoryMode = %v", service.RuntimeDirectoryMode)
 	}
 	if service.StartLimitBurst != 3 {
 		t.Errorf("StartLimitBurst = %d", service.StartLimitBurst)
@@ -167,6 +177,16 @@ Persistent=true
 	}
 }
 
+func TestParseDefaultDirectoryMode(t *testing.T) {
+	file, err := Parse(ID{Name: "app", Type: TypeService}, []byte("[Service]\nExecStart=x\n"))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if file.Service.LogsDirectoryMode != 0o755 || file.Service.RuntimeDirectoryMode != 0o755 {
+		t.Errorf("default modes = %v/%v", file.Service.LogsDirectoryMode, file.Service.RuntimeDirectoryMode)
+	}
+}
+
 func TestParseErrors(t *testing.T) {
 	tests := []struct {
 		name string
@@ -192,6 +212,11 @@ func TestParseErrors(t *testing.T) {
 			name: "invalid timespan",
 			id:   ID{Name: "example", Type: TypeService},
 			data: "[Service]\nRestartSec=soon\n",
+		},
+		{
+			name: "invalid directory mode",
+			id:   ID{Name: "example", Type: TypeService},
+			data: "[Service]\nLogsDirectoryMode=99z\n",
 		},
 	}
 

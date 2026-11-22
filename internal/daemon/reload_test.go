@@ -205,3 +205,25 @@ func TestReloadContinuesAfterDeleteFailure(t *testing.T) {
 		t.Error("ok service was not removed")
 	}
 }
+
+func TestReloadRemovesGroupMembership(t *testing.T) {
+	store := storagefake.New()
+	manager := scmfake.New()
+	account := "NT SERVICE\\orphan"
+	content := unit.Content("[Service]\nExecStart=x\nGroup=Users\n")
+	if err := manager.CreateService(scm.ServiceConfig{Name: "orphan", StartType: scm.StartTypeDisabled, User: scm.Account(account)}, content); err != nil {
+		t.Fatalf("CreateService(orphan) error = %v", err)
+	}
+	if err := manager.AddAccountToGroup(account, "Users"); err != nil {
+		t.Fatalf("AddAccountToGroup() error = %v", err)
+	}
+
+	daemon, _ := newTestDaemon(t, manager, store)
+	if err := daemon.reload(); err != nil {
+		t.Fatalf("reload() error = %v", err)
+	}
+
+	if manager.InGroup(account, "Users") {
+		t.Errorf("membership was not removed; calls = %v", manager.MembershipCalls())
+	}
+}

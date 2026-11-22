@@ -159,6 +159,9 @@ type Manager interface {
     GetServiceByHandle(handle ProcessHandle) (ServiceConfig, error)
     // LoadUnitContent reads the applied unit snapshot from the service registry.
     LoadUnitContent(name string) (unit.Content, error)
+    // AddAccountToGroup / RemoveAccountFromGroup manage local group membership.
+    AddAccountToGroup(account, group string) error
+    RemoveAccountFromGroup(account, group string) error
 }
 ```
 
@@ -475,6 +478,7 @@ Key behaviors:
 
 - **Managed services** — vsystemd only touches services it created. Every managed service is tagged with `LoadOrderGroup = "vsystemd"`; `ListServices`, `QueryStatuses`, and every open-by-name check filter on this tag, and a service without it is reported as `ErrNotManaged`. Services owned by others are never modified.
 - **Registration** — each managed service is registered with the vsystemd binary and a per-service command line: `"<vsystemd.exe>" --mode=run --unit=<name> --snapshot=<hash>` (built by `svcconfig.FromUnit`). The snapshot hash binds the SCM record to the unit content written on `enable`. SCM therefore starts a runner as the service process.
+- **Group membership** — `AddAccountToGroup`/`RemoveAccountFromGroup` operate on **local** groups via `netapi32!NetLocalGroupAddMembers`/`NetLocalGroupDelMembers` (bound directly; not in `x/sys`), resolving the account with `internal/winacl`. Adding is idempotent (`ERROR_MEMBER_IN_ALIAS` is success); a domain group is an error. `enable` adds the service account on success and removes the previous one before an update; `daemon-reload` removes it before deleting the service.
 - **Accounts** — a service runs under the unit's `User=` or, by default, the per-service virtual account `NT SERVICE\<name>` (`scm.NewAccount`).
 - **Start type** — the daemon sets the Windows start type (`Automatic`/`Boot`/`System` are treated as enabled, `Manual`/`Disabled` as disabled); `StartTypeNoChange` leaves it unchanged on update.
 - **State** — SCM states map to `State` (`Stopped`, `StartPending`, `StopPending`, `Running`); other SCM states (pause/continue) fall through to the raw value.
@@ -584,10 +588,13 @@ type ServiceUnit struct {
     Environment           map[string]string
     EnvironmentFiles      []string
     User                  string
+    Group                 string
     StandardOutput        string
     StandardError         string
     LogsDirectory         []string
+    LogsDirectoryMode     os.FileMode
     RuntimeDirectory      []string
+    RuntimeDirectoryMode  os.FileMode
     StartLimitBurst       int
     StartLimitIntervalSec time.Duration
 }
@@ -603,14 +610,14 @@ type TimerUnit struct {
 Directives by section:
 
 - `[Unit]`: `Description`, `After`, `Requires`, `Wants` (other ordering directives are parsed but ignored with a warning).
-- `[Service]`: `ExecStart`, `ExecStartPre`, `ExecStartPost`, `ExecStop`, `Restart`, `RestartSec`, `TimeoutStopSec`, `WorkingDirectory`, `Environment`, `EnvironmentFile`, `User`, `StandardOutput`, `StandardError`, `LogsDirectory`, `LogsDirectoryMode`, `RuntimeDirectory`, `RuntimeDirectoryMode`, `StartLimitBurst`, `StartLimitIntervalSec`.
+- `[Service]`: `ExecStart`, `ExecStartPre`, `ExecStartPost`, `ExecStop`, `Restart`, `RestartSec`, `TimeoutStopSec`, `WorkingDirectory`, `Environment`, `EnvironmentFile`, `User`, `Group`, `StandardOutput`, `StandardError`, `LogsDirectory`, `LogsDirectoryMode`, `RuntimeDirectory`, `RuntimeDirectoryMode`, `StartLimitBurst`, `StartLimitIntervalSec`.
 - `[Timer]`: `OnCalendar`, `OnBootSec`, `OnStartupSec`, `Unit`.
 
 `UnitFile.Dependencies()` returns the service units referenced by `After=`/`Requires=`, de-duplicated in declaration order; the daemon maps them to SCM dependencies. `ResolveOutputs(stdout, stderr)` resolves raw `StandardOutput`/`StandardError` values into output targets (`null`, `file:<abs>`, `append:<abs>`, or a managed log file).
 
 #### 4.7.1 Logs directory and specifier resolution
 
-`LogsDirectory=` and `RuntimeDirectory=` populate `ServiceUnit.LogsDirectory`/`RuntimeDirectory`; the `…Mode=` directives are parsed but only warn. The runner resolves names with `internal/runner` `resolveDirectories` (single relative component, no `..`), creates logs with `ensureDirectories`, and resets runtime dirs with `resetDirectories` (wipe + create). It sets `LOGS_DIRECTORY`/`RUNTIME_DIRECTORY` (`;`-joined) and expands `${NAME}` references in `Exec*=` command lines. Runtime dirs are removed by `removeDirectories` on the final stop/failure.
+`LogsDirectory=` and `RuntimeDirectory=` populate `ServiceUnit.LogsDirectory`/`RuntimeDirectory`; `LogsDirectoryMode=`/`RuntimeDirectoryMode=` are parsed to `os.FileMode` (octal, default `0o755`, invalid value is a parse error). The runner resolves names with `internal/runner` `resolveDirectories` (single relative component, no `..`), creates logs with `ensureDirectories`, and resets runtime dirs with `resetDirectories` (wipe + create). It then applies the DACL with `internal/winacl` (`SID`, `SetDirectoryACL`), sets `LOGS_DIRECTORY`/`RUNTIME_DIRECTORY` (`;`-joined) and expands `${NAME}` references in `Exec*=` command lines. Runtime dirs are removed by `removeDirectories` on the final stop/failure.
 
 Specifier expansion is implemented in `internal/specifiers` (`Expand` over `Values`) and `internal/unitpath` (`NewValues`, `ResolveService`), and is shared by the runner, the daemon `status` log tail and `systemctl enable`. `%h` resolves to the home of the process performing the expansion, so it may differ between the running service (service account) and `status`/`enable`. The specifier set and the Windows mapping of each specifier are in ARCHITECTURE.md.
 
@@ -751,3 +758,11 @@ The path is fixed: `C:\ProgramData\vsystemd\config.json`. A missing file means d
 - `ipc` sets the transport connect and request timeouts (see `### 4.5 transport / pipe`).
 - `defaults` provides per-service defaults for `RestartSec=`, `TimeoutStopSec=`, `StartLimitBurst=`, and `StartLimitIntervalSec=` when a unit does not set them (see `### 4.2 runner`).
 - `environment` builds the clean environment for service processes: `inherit` lists variables taken from the runner's environment (defaults to a fixed list of standard Windows variables), `vars` adds extra variables (see `### 4.2 runner`).
+
+### 4.12 winacl
+
+`internal/winacl` (Windows) resolves accounts/groups and applies directory DACLs:
+
+- `SID(name string) (*windows.SID, error)` — `LookupAccountName` (with the `LocalSystem`/`SYSTEM`/empty special case); used by `scm` for the service start account and for group membership.
+- `RulesForMode(mode os.FileMode, owner, group, other *windows.SID) []Rule` — maps the owner/group/other triplets to allow ACEs: `r`=`GENERIC_READ`, `w`=`GENERIC_WRITE|FILE_DELETE_CHILD`, `x`=`GENERIC_EXECUTE`; zero-rights triplets are skipped.
+- `SetDirectoryACL(path string, mode os.FileMode, owner, group *windows.SID) error` — builds the ACL with `windows.ACLFromEntries` and installs it with `SetNamedSecurityInfo` using `DACL_SECURITY_INFORMATION|PROTECTED_DACL_SECURITY_INFORMATION` and inheritance to children. `SYSTEM` and `Administrators` get `GENERIC_ALL`; `group` defaults to `owner`; `Others` is `Everyone`. It sets the DACL only, not the owner/group metadata.

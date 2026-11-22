@@ -20,6 +20,7 @@ import (
 	"github.com/gwg605/vsystemd/internal/transport"
 	"github.com/gwg605/vsystemd/internal/unit"
 	"github.com/gwg605/vsystemd/internal/unitpath"
+	"github.com/gwg605/vsystemd/internal/winacl"
 )
 
 type Runner struct {
@@ -111,6 +112,10 @@ func NewRunner(name, snapshotHash string, contents scm.ContentReader, store stor
 		return nil, fmt.Errorf("create RuntimeDirectory for %s: %w", id, err)
 	}
 
+	if err := applyDirectoryACLs(parsed.Service, id, logsDirs, runtimeDirs); err != nil {
+		return nil, fmt.Errorf("apply directory ACLs for %s: %w", id, err)
+	}
+
 	if err := logwriter.Cleanup(logwriter.ServiceLogDir(cfg.LogsDir, id.Name), cfg.Logs.MaxAgeDays, startTime); err != nil {
 		slog.Debug("runner: cleanup service logs failed", "unit", id.String(), "error", err)
 	}
@@ -148,6 +153,34 @@ func NewRunner(name, snapshotHash string, contents scm.ContentReader, store stor
 	runner.handler.setReporter(runner.reporter)
 	slog.Info("runner: created", "unit", id.String())
 	return runner, nil
+}
+
+func applyDirectoryACLs(service *unit.ServiceUnit, id unit.ID, logsDirs, runtimeDirs []string) error {
+	if len(logsDirs) == 0 && len(runtimeDirs) == 0 {
+		return nil
+	}
+	owner, err := winacl.SID(string(scm.NewAccount(service.User, id.Name)))
+	if err != nil {
+		return fmt.Errorf("resolve user %q: %w", service.User, err)
+	}
+	group := owner
+	if service.Group != "" {
+		group, err = winacl.SID(service.Group)
+		if err != nil {
+			return fmt.Errorf("resolve group %q: %w", service.Group, err)
+		}
+	}
+	for _, dir := range logsDirs {
+		if err := winacl.SetDirectoryACL(dir, service.LogsDirectoryMode, owner, group); err != nil {
+			return err
+		}
+	}
+	for _, dir := range runtimeDirs {
+		if err := winacl.SetDirectoryACL(dir, service.RuntimeDirectoryMode, owner, group); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func parseServiceID(name string) (unit.ID, error) {

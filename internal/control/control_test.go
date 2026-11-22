@@ -78,6 +78,40 @@ func TestEnableCreatesService(t *testing.T) {
 	}
 }
 
+func TestEnableAddsToGroup(t *testing.T) {
+	ctrl, manager, store := newTestController(t)
+	store.WriteUnit("app.service", []byte("[Service]\nExecStart=x\nGroup=Users\n"))
+
+	id := unit.ID{Name: "app", Type: unit.TypeService}
+	if _, err := ctrl.Enable(id, `C:\vsystemd\vsystemd.exe`, "", "", false); err != nil {
+		t.Fatalf("Enable() error = %v", err)
+	}
+	if !manager.InGroup(`NT SERVICE\app`, "Users") {
+		t.Errorf("account not added to group; calls = %v", manager.MembershipCalls())
+	}
+}
+
+func TestEnableMovesGroupMembership(t *testing.T) {
+	ctrl, manager, store := newTestController(t)
+	store.WriteUnit("app.service", []byte("[Service]\nExecStart=x\nGroup=GroupA\n"))
+	id := unit.ID{Name: "app", Type: unit.TypeService}
+	if _, err := ctrl.Enable(id, `C:\vsystemd\vsystemd.exe`, "", "", false); err != nil {
+		t.Fatalf("Enable() error = %v", err)
+	}
+
+	store.WriteUnit("app.service", []byte("[Service]\nExecStart=x\nGroup=GroupB\n"))
+	if _, err := ctrl.Enable(id, `C:\vsystemd\vsystemd.exe`, "", "", false); err != nil {
+		t.Fatalf("Enable() error = %v", err)
+	}
+
+	if manager.InGroup(`NT SERVICE\app`, "GroupA") {
+		t.Error("account still in old group")
+	}
+	if !manager.InGroup(`NT SERVICE\app`, "GroupB") {
+		t.Error("account not in new group")
+	}
+}
+
 func TestEnableUpdatesExistingService(t *testing.T) {
 	ctrl, manager, store := newTestController(t)
 	store.WriteUnit("app.service", []byte("[Service]\nExecStart=x\n"))

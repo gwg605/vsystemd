@@ -1,6 +1,11 @@
 package unit
 
-import "time"
+import (
+	"os"
+	"time"
+)
+
+const defaultDirectoryMode os.FileMode = 0o755
 
 type RestartPolicy string
 
@@ -33,10 +38,13 @@ type ServiceUnit struct {
 	Environment           map[string]string
 	EnvironmentFiles      []string
 	User                  string
+	Group                 string
 	StandardOutput        string
 	StandardError         string
 	LogsDirectory         []string
+	LogsDirectoryMode     os.FileMode
 	RuntimeDirectory      []string
+	RuntimeDirectoryMode  os.FileMode
 	StartLimitBurst       int
 	StartLimitIntervalSec time.Duration
 }

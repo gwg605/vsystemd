@@ -60,8 +60,8 @@ func (d *Daemon) updateServices() error {
 			slog.Warn("daemon: keeping disabled service that is not stopped", "service", service.Name, "state", status.State)
 			continue
 		}
-
-		slog.Info("daemon: removing disabled service without unit file", "service", service.Name)
+slog.Info("daemon: removing disabled service without unit file", "service", service.Name)
+		d.removeGroupMembership(service)
 		if err := d.manager.DeleteService(service.Name); err != nil {
 			slog.Warn("daemon: delete service failed", "service", service.Name, "error", err)
 			continue
@@ -69,4 +69,21 @@ func (d *Daemon) updateServices() error {
 		d.forgetUnit(unit.ID{Name: service.Name, Type: unit.TypeService})
 	}
 	return nil
+}
+
+// removeGroupMembership removes the service account from the group recorded in
+// the unit's applied snapshot before the service is deleted. Failures are
+// logged, not fatal.
+func (d *Daemon) removeGroupMembership(service scm.ServiceConfig) {
+	content, err := d.manager.LoadUnitContent(service.Name)
+	if err != nil {
+		return
+	}
+	parsed, err := unit.Parse(unit.ID{Name: service.Name, Type: unit.TypeService}, content)
+	if err != nil || parsed.Service == nil || parsed.Service.Group == "" {
+		return
+	}
+	if err := d.manager.RemoveAccountFromGroup(string(service.User), parsed.Service.Group); err != nil {
+		slog.Warn("daemon: remove group membership failed", "service", service.Name, "group", parsed.Service.Group, "error", err)
+	}
 }

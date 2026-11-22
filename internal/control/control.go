@@ -3,6 +3,7 @@ package control
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/gwg605/vsystemd/internal/config"
@@ -65,10 +66,46 @@ func (c *Controller) Enable(id unit.ID, executable string, password, passwordFil
 	if err != nil {
 		return warnings, err
 	}
-	if !exists {
-		return warnings, c.manager.CreateService(cfg, data)
+
+	if exists {
+		c.removeGroupMembership(id.Name)
 	}
-	return warnings, c.manager.UpdateService(cfg, data)
+
+	if !exists {
+		if err := c.manager.CreateService(cfg, data); err != nil {
+			return warnings, err
+		}
+	} else if err := c.manager.UpdateService(cfg, data); err != nil {
+		return warnings, err
+	}
+
+	if parsed.Service.Group != "" {
+		if err := c.manager.AddAccountToGroup(string(cfg.User), parsed.Service.Group); err != nil {
+			return warnings, fmt.Errorf("add %s to group %s: %w", cfg.User, parsed.Service.Group, err)
+		}
+	}
+	return warnings, nil
+}
+
+// removeGroupMembership removes the account recorded in the unit's applied
+// snapshot from its group, so a changed User=/Group= does not leave stale
+// membership. Failures are logged, not fatal (a later enable retries).
+func (c *Controller) removeGroupMembership(name string) {
+	content, err := c.manager.LoadUnitContent(name)
+	if err != nil {
+		return
+	}
+	old, err := unit.Parse(unit.ID{Name: name, Type: unit.TypeService}, content)
+	if err != nil || old.Service == nil || old.Service.Group == "" {
+		return
+	}
+	cfg, err := c.manager.GetService(name)
+	if err != nil {
+		return
+	}
+	if err := c.manager.RemoveAccountFromGroup(string(cfg.User), old.Service.Group); err != nil {
+		slog.Warn("control: remove group membership failed", "service", name, "group", old.Service.Group, "error", err)
+	}
 }
 
 func (c *Controller) Disable(id unit.ID) error {

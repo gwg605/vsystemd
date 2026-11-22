@@ -5,6 +5,7 @@ package runner
 import (
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -24,6 +25,17 @@ import (
 type staticContent struct{ content unit.Content }
 
 func (s staticContent) LoadUnitContent(string) (unit.Content, error) { return s.content, nil }
+
+// currentUser returns the account the test process runs under, so directory
+// ACLs (owned by User=) do not lock the test itself out.
+func currentUser(t *testing.T) string {
+	t.Helper()
+	me, err := user.Current()
+	if err != nil {
+		t.Fatalf("user.Current: %v", err)
+	}
+	return me.Username
+}
 
 func newIntegratedRunner(t *testing.T, name, unitText string) (*Runner, *stateCollector) {
 	t.Helper()
@@ -180,8 +192,8 @@ func TestRunnerLogsDirectory(t *testing.T) {
 	logsRoot := t.TempDir()
 	envFile := filepath.Join(t.TempDir(), "env.txt")
 
-	unitText := fmt.Sprintf("[Service]\nLogsDirectory=app\nStandardOutput=append:%%L\\app\\out.log\nExecStart=%s\n",
-		helperCommand("recordenv", envFile, "LOGS_DIRECTORY"))
+	unitText := fmt.Sprintf("[Service]\nUser=%s\nLogsDirectory=app\nStandardOutput=append:%%L\\app\\out.log\nExecStart=%s\n",
+		currentUser(t), helperCommand("recordenv", envFile, "LOGS_DIRECTORY"))
 	runner, _ := newIntegratedRunnerConfig(t, "app.service", unitText, config.Config{LogsDir: logsRoot})
 	changes, _, done := runControlHandler(t, runner.handler)
 
@@ -209,8 +221,8 @@ func TestRunnerRuntimeDirectory(t *testing.T) {
 	runRoot := t.TempDir()
 	envFile := filepath.Join(t.TempDir(), "env.txt")
 
-	unitText := fmt.Sprintf("[Service]\nRuntimeDirectory=app\nExecStart=%s\n",
-		helperCommand("recordenv", envFile, "RUNTIME_DIRECTORY"))
+	unitText := fmt.Sprintf("[Service]\nUser=%s\nRuntimeDirectory=app\nExecStart=%s\n",
+		currentUser(t), helperCommand("recordenv", envFile, "RUNTIME_DIRECTORY"))
 	runner, _ := newIntegratedRunnerConfig(t, "app.service", unitText, config.Config{LogsDir: t.TempDir(), RunDir: runRoot})
 
 	dir := filepath.Join(runRoot, "app")
