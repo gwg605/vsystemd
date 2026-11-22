@@ -48,12 +48,23 @@ func (d *Daemon) updateServices() error {
 			slog.Warn("daemon: keeping service without unit file", "service", service.Name)
 			continue
 		}
-		slog.Info("daemon: removing disabled service without unit file", "service", service.Name)
-		if err := d.manager.StopService(service.Name); err != nil {
-			return fmt.Errorf("stop service %s: %w", service.Name, err)
+
+		// Only remove a disabled service once it has actually stopped; a disabled
+		// but running service is kept until it is stopped.
+		status, err := d.manager.QueryStatus(service.Name)
+		if err != nil {
+			slog.Warn("daemon: query service state failed", "service", service.Name, "error", err)
+			continue
 		}
+		if status.State != scm.StateStopped {
+			slog.Warn("daemon: keeping disabled service that is not stopped", "service", service.Name, "state", status.State)
+			continue
+		}
+
+		slog.Info("daemon: removing disabled service without unit file", "service", service.Name)
 		if err := d.manager.DeleteService(service.Name); err != nil {
-			return fmt.Errorf("delete service %s: %w", service.Name, err)
+			slog.Warn("daemon: delete service failed", "service", service.Name, "error", err)
+			continue
 		}
 		d.forgetUnit(unit.ID{Name: service.Name, Type: unit.TypeService})
 	}

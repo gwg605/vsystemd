@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/gwg605/vsystemd/internal/config"
@@ -146,5 +147,61 @@ func TestReloadDeletesDisabledMissingUnit(t *testing.T) {
 	}
 	if _, ok := daemon.State("orphan.service"); ok {
 		t.Error("orphan state was not cleared")
+	}
+}
+
+func TestReloadKeepsDisabledRunningUnit(t *testing.T) {
+	store := storagefake.New()
+	manager := scmfake.New()
+	if err := manager.CreateService(scm.ServiceConfig{Name: "busy", StartType: scm.StartTypeDisabled}, nil); err != nil {
+		t.Fatalf("CreateService(busy) error = %v", err)
+	}
+	if err := manager.StartService("busy"); err != nil {
+		t.Fatalf("StartService(busy) error = %v", err)
+	}
+
+	daemon, _ := newTestDaemon(t, manager, store)
+	if err := daemon.reload(); err != nil {
+		t.Fatalf("reload() error = %v", err)
+	}
+
+	if _, err := manager.QueryStatus("busy"); err != nil {
+		t.Errorf("disabled running service was removed: %v", err)
+	}
+}
+
+// deleteFailingManager fails DeleteService for one service to emulate a service
+// locked by SCM.
+type deleteFailingManager struct {
+	*scmfake.Manager
+	fail string
+}
+
+func (m *deleteFailingManager) DeleteService(name string) error {
+	if name == m.fail {
+		return errors.New("locked by SCM")
+	}
+	return m.Manager.DeleteService(name)
+}
+
+func TestReloadContinuesAfterDeleteFailure(t *testing.T) {
+	store := storagefake.New()
+	manager := scmfake.New()
+	for _, name := range []string{"locked", "ok"} {
+		if err := manager.CreateService(scm.ServiceConfig{Name: name, StartType: scm.StartTypeDisabled}, nil); err != nil {
+			t.Fatalf("CreateService(%s) error = %v", name, err)
+		}
+	}
+
+	daemon, _ := newTestDaemon(t, &deleteFailingManager{Manager: manager, fail: "locked"}, store)
+	if err := daemon.reload(); err != nil {
+		t.Fatalf("reload() error = %v", err)
+	}
+
+	if _, err := manager.QueryStatus("locked"); err != nil {
+		t.Errorf("locked service should remain: %v", err)
+	}
+	if _, err := manager.QueryStatus("ok"); err == nil {
+		t.Error("ok service was not removed")
 	}
 }
