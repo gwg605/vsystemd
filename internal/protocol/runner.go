@@ -23,4 +23,5 @@ type StateEvent struct {
 	RestartCount int       `json:"restart_count"`
 	Timestamp    time.Time `json:"timestamp"`
 	LastError    string    `json:"last_error"`
+	LoadedHash   string    `json:"loaded_hash,omitempty"`
 }

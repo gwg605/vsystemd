@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/gwg605/vsystemd/internal/unit"
 )
 
 type fileStorage struct {
@@ -44,12 +46,12 @@ func (s *fileStorage) ListUnits() ([]string, error) {
 	return units, nil
 }
 
-func (s *fileStorage) ReadUnit(name string) ([]byte, error) {
+func (s *fileStorage) ReadUnit(name string) (unit.Content, error) {
 	data, err := os.ReadFile(filepath.Join(s.paths.SystemDir, name))
 	if err != nil {
 		return nil, fmt.Errorf("read unit %s: %w", name, err)
 	}
-	return data, nil
+	return unit.Content(data), nil
 }
 
 func (s *fileStorage) ReadTimers() ([]byte, error) {

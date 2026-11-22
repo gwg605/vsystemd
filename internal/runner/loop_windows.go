@@ -84,10 +84,11 @@ type controlHandler struct {
 	logs          *logStreamer
 	logsDirectory string
 	runtimeDirs   []string
+	loadedHash    string
 	stopTimeout   time.Duration
 }
 
-func newControlHandler(service *unit.ServiceUnit, restart *restartController, defaults env.Defaults, logs *logStreamer, logsDirectory string, runtimeDirs []string) *controlHandler {
+func newControlHandler(service *unit.ServiceUnit, restart *restartController, defaults env.Defaults, logs *logStreamer, logsDirectory string, runtimeDirs []string, loadedHash string) *controlHandler {
 	return &controlHandler{
 		service:       service,
 		restart:       restart,
@@ -95,6 +96,7 @@ func newControlHandler(service *unit.ServiceUnit, restart *restartController, de
 		logs:          logs,
 		logsDirectory: logsDirectory,
 		runtimeDirs:   runtimeDirs,
+		loadedHash:    loadedHash,
 		stopTimeout:   resolveStopTimeout(service),
 	}
 }
@@ -464,6 +466,7 @@ func (s *handlerSession) report(state protocol.State, pid uint32, exitCode int, 
 		ExitCode:     exitCode,
 		RestartCount: s.h.restart.RestartCount(),
 		LastError:    lastError,
+		LoadedHash:   s.h.loadedHash,
 	}); err != nil {
 		slog.Warn("runner: report state failed", "state", state, "error", err)
 	}

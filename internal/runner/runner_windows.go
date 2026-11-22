@@ -15,6 +15,7 @@ import (
 	"github.com/gwg605/vsystemd/internal/config"
 	"github.com/gwg605/vsystemd/internal/env"
 	"github.com/gwg605/vsystemd/internal/logwriter"
+	"github.com/gwg605/vsystemd/internal/scm"
 	"github.com/gwg605/vsystemd/internal/storage"
 	"github.com/gwg605/vsystemd/internal/transport"
 	"github.com/gwg605/vsystemd/internal/unit"
@@ -30,12 +31,15 @@ type Runner struct {
 	transport transport.Transport
 }
 
-func NewRunner(name string, store storage.Factory, newTransport transport.Factory, cfg config.Config, startTime time.Time) (*Runner, error) {
+func NewRunner(name, snapshotHash string, contents scm.ContentReader, store storage.Factory, newTransport transport.Factory, cfg config.Config, startTime time.Time) (*Runner, error) {
 	if store == nil {
 		return nil, errors.New("storage factory is required")
 	}
 	if newTransport == nil {
 		return nil, errors.New("transport factory is required")
+	}
+	if contents == nil {
+		return nil, errors.New("content reader is required")
 	}
 
 	id, err := parseServiceID(name)
@@ -43,15 +47,25 @@ func NewRunner(name string, store storage.Factory, newTransport transport.Factor
 		return nil, err
 	}
 
+	if snapshotHash == "" {
+		slog.Error("runner: missing snapshot hash", "unit", id.String())
+		return nil, fmt.Errorf("missing snapshot hash for %s", id)
+	}
+
 	st, err := store()
 	if err != nil {
 		return nil, fmt.Errorf("open storage: %w", err)
 	}
-	data, err := st.ReadUnit(id.String())
+	content, err := contents.LoadUnitContent(id.Name)
 	if err != nil {
-		return nil, fmt.Errorf("read unit %s: %w", id, err)
+		slog.Error("runner: load unit snapshot failed", "unit", id.String(), "error", err)
+		return nil, fmt.Errorf("load unit snapshot %s: %w", id, err)
 	}
-	parsed, err := unit.Parse(id, data)
+	if got := content.Hash(); got != snapshotHash {
+		slog.Error("runner: unit snapshot hash mismatch", "unit", id.String(), "expected", snapshotHash, "actual", got)
+		return nil, fmt.Errorf("unit snapshot hash mismatch for %s: expected %s, got %s", id, snapshotHash, got)
+	}
+	parsed, err := unit.Parse(id, content)
 	if err != nil {
 		return nil, fmt.Errorf("parse unit %s: %w", id, err)
 	}
@@ -111,7 +125,7 @@ func NewRunner(name string, store storage.Factory, newTransport transport.Factor
 		Vars:    cfg.Environment.Vars,
 	}
 	restart := newRestartController(parsed.Service)
-	handler := newControlHandler(parsed.Service, restart, defaults, logs, logsDirectory, runtimeDirs)
+	handler := newControlHandler(parsed.Service, restart, defaults, logs, logsDirectory, runtimeDirs, snapshotHash)
 
 	tr, err := newTransport(transport.NewPeer(transport.PeerRunner, id.String(), false), nil)
 	if err != nil {

@@ -40,6 +40,7 @@ type ServiceState struct {
 	LastTransition time.Time
 	LastSeen       time.Time
 	LastError      string
+	LoadedHash     string
 }
 
 func (s ServiceState) Status(scmState scm.State) SystemdState {

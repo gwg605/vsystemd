@@ -41,6 +41,7 @@ type StatusResponse struct {
 	LoadError      string     `json:"load_error,omitempty"`
 	Enabled        *bool      `json:"enabled,omitempty"`
 	Running        *bool      `json:"running,omitempty"`
+	NeedsRestart   bool       `json:"needs_restart,omitempty"`
 	NextRun        *time.Time `json:"next_run,omitempty"`
 	LastRun        *time.Time `json:"last_run,omitempty"`
 	ActiveSince    *time.Time `json:"active_since,omitempty"`

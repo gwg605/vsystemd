@@ -58,7 +58,7 @@ func (c *Controller) Enable(id unit.ID, executable string, password, passwordFil
 	if err != nil {
 		return warnings, err
 	}
-	cfg := svcconfig.FromUnit(parsed, executable, scm.StartTypeAutomatic)
+	cfg := svcconfig.FromUnit(parsed, executable, scm.StartTypeAutomatic, data)
 	cfg.SetPassword(resolvedPassword)
 
 	exists, err := c.serviceExists(id.Name)
@@ -66,9 +66,9 @@ func (c *Controller) Enable(id unit.ID, executable string, password, passwordFil
 		return warnings, err
 	}
 	if !exists {
-		return warnings, c.manager.CreateService(cfg)
+		return warnings, c.manager.CreateService(cfg, data)
 	}
-	return warnings, c.manager.UpdateService(cfg)
+	return warnings, c.manager.UpdateService(cfg, data)
 }
 
 func (c *Controller) Disable(id unit.ID) error {

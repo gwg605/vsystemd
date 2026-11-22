@@ -186,9 +186,10 @@ The daemon must be running for `status`, `list-units`, `list-timers`,
 
 `enable` reads the unit file, asks the daemon to verify it against the daemon's
 unit list, then creates or updates the SCM service, sets its start type to
-automatic, and registers `vsystemd.exe --mode=run --unit=<unit>` as its binary.
-A valid unit file is required, and it must match the version known to the daemon,
-so run `daemon-reload` after editing a unit file:
+automatic, writes the applied unit **snapshot** into the service's registry key,
+and registers `vsystemd.exe --mode=run --unit=<unit> --snapshot=<hash>` as its
+binary. A valid unit file is required, and it must match the version known to the
+daemon, so run `daemon-reload` after editing a unit file:
 
 ```powershell
 systemctl.exe daemon-reload
@@ -196,12 +197,17 @@ systemctl.exe enable foo.service
 systemctl.exe start foo.service
 ```
 
+The runner loads the unit from that snapshot (not from `system\`), so a service
+always runs the configuration `enable` applied. `daemon-reload` only refreshes the
+daemon's in-memory list and removes deleted, disabled services; it does **not**
+change SCM configuration — `enable` is the only writer. Applying an edit therefore
+takes `daemon-reload` + `enable` + `systemctl restart`.
+
 `disable` sets the service start type to disabled; it does not stop or remove the
-service. `daemon-reload` updates existing managed services. A service whose unit
-file was deleted is removed from SCM only if it is disabled; otherwise it is kept
-and flagged as invalid until the unit file is restored or the service is
-disabled. `daemon-reload` does not create SCM entries for new units — run
-`enable` for those.
+service. A service whose unit file was deleted is removed from SCM only if it is
+disabled; otherwise it is kept and flagged as invalid until the unit file is
+restored or the service is disabled. `daemon-reload` does not create SCM entries
+for new units — run `enable` for those.
 
 The daemon keeps its own in-memory copy of the units and only refreshes it on
 `daemon-reload`, so edits to unit files are not visible to `status`, `list-units`
@@ -309,6 +315,11 @@ unit file for an enabled service), `status` reports it in the `Loaded:` line as
 `bad-setting`, `error`, or `not-found` with a `Reason:`. `list-units` prints
 `UNIT LOAD ACTIVE SUB DESCRIPTION` and marks failed or problem units with `●`.
 
+If the running service loaded a snapshot that differs from the current unit file
+(the file changed after `enable`), `status` adds a `Warning:` line and asks you to
+`systemctl restart` the service. It appears only while the service is starting,
+running, or stopping, and only once the runner has reported what it loaded.
+
 Log timestamps are written in UTC with a `Z` suffix. Timer `last_run`, `next_run`
 and `active_since` values in `timers.json` are also stored in UTC.
 
@@ -381,7 +392,9 @@ Remove-Item -Recurse -Force C:\ProgramData\vsystemd
   stop, and `LogsDirectoryMode=` is parsed but ignored;
 - `RuntimeDirectory=` removes its directories only on final stop (not on an
   internal `Restart=`), has no `RuntimeDirectoryPreserve=`, and
-  `RuntimeDirectoryMode=` is parsed but ignored.
+  `RuntimeDirectoryMode=` is parsed but ignored;
+- a service runs the unit snapshot applied by `enable`; SCM configuration is not
+  changed by `daemon-reload` (edits need `daemon-reload` + `enable` + restart).
 
 ## Documentation
 

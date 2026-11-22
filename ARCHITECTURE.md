@@ -11,8 +11,18 @@ Two binaries:
 
 - `vsystemd.exe` — dual-mode binary:
   - `--mode=daemon` — Windows Service (always running), manages state, reload, SCM registration, OnCalendar timer manager
-  - `--mode=run --unit=foo.service` — registered in SCM as the executable for each service; manages child process lifecycle
+  - `--mode=run --unit=foo.service --snapshot=<hash>` — registered in SCM as the executable for each service; loads the unit snapshot (see "Unit snapshot"), verifies its hash against `--snapshot`, and manages child process lifecycle
 - `systemctl.exe` — CLI compatible with systemctl commands
+
+### Unit snapshot
+
+The runner does **not** read the unit file: it reads the applied *snapshot* stored
+under the service's registry key (`...\Services\<name>\Parameters\Unit`), which is
+written by `systemctl enable`. The `BinaryPath` embeds the snapshot hash, and the
+runner fails to start if the snapshot is missing or its hash does not match (the
+SCM record and the snapshot are two stores, so `enable` is idempotent and fixes a
+partial write on retry). Edits to the unit file therefore take effect only after
+`daemon-reload` + `enable` + a service restart.
 
 ---
 
@@ -97,8 +107,12 @@ All other timer directives (`OnUnitActiveSec=`, `OnUnitInactiveSec=`, `Persisten
   daemon (`VerifyUnitFile`). A unit unknown to the daemon, with a load error, or
   differing from the daemon's copy is rejected — run `daemon-reload` first
 - On success: `CreateService()` (new) or `ChangeServiceConfig()` (existing) with
-  `START_TYPE = AUTO_START` and the unit's parameters
+  `START_TYPE = AUTO_START` and the unit's parameters, and the applied unit content
+  (the "snapshot") is written under the service's registry key
+  (`...\Services\<name>\Parameters\Unit`). The `BinaryPath` carries the snapshot
+  hash (`--snapshot=<sha256>`), which ties the SCM record to the snapshot
 - Password: taken from `--password`, `--password-file`, or `--password-stdin` (only one source). If none is given, an empty password is passed; there is no interactive prompt
+- `enable` is the only writer of the SCM service configuration; `daemon-reload` does not change it (so changing `User=` requires `enable`, which supplies the password)
 
 ### `systemctl disable foo.service`
 
@@ -116,12 +130,12 @@ All other timer directives (`OnUnitActiveSec=`, `OnUnitInactiveSec=`, `Persisten
   - file present but does not parse → `bad-setting` (last successful parse kept)
   - file missing, SCM entry exists (or timer `enabled`) → `not-found`
   - no file, no SCM entry, not an enabled timer → dropped
-- It then diffs the list against SCM:
-  - entry loaded, SCM entry exists → `ChangeServiceConfig()` (update)
+- It then reconciles the list against SCM (`systemctl enable` owns SCM config):
   - entry present but not loaded, SCM entry exists → kept
   - file missing, SCM entry exists and `START_TYPE = DISABLED` → `StopService()` + `DeleteService()`
   - file missing, SCM entry exists and enabled → kept with load state `not-found`
   - unit exists, SCM entry missing → no action (wait for `enable`)
+  - a loaded unit whose SCM entry exists is **not** updated; run `enable` to apply changes
 - A failure to read the `system\` directory or list SCM services aborts the reload
   with an error (the current list is kept); the daemon stays running
 - Daemon reloads OnCalendar schedules from the list
@@ -140,6 +154,10 @@ All other timer directives (`OnUnitActiveSec=`, `OnUnitInactiveSec=`, `Persisten
   comes from the service the timer activates
 - `Loaded:` shows the load state: `loaded` normally, or `bad-setting` / `error`
   / `not-found` (with `Reason: <message>`) when the unit file cannot be loaded
+- When the running service loaded a snapshot whose hash differs from the current
+  unit file (the file changed since `enable`), a `Warning:` line asks to restart
+  the service. It is shown only while the service is starting, running, or
+  stopping, and only once the runner has reported the hash it loaded
 
 ### `systemctl list-units`
 
@@ -176,7 +194,7 @@ Client-server over a single named pipe. The daemon owns the pipe and listens; ru
 
 Messages:
 ```
-runner → daemon:  StateEvent { unit, state, pid, exit_code, restart_count, timestamp, last_error }
+runner → daemon:  StateEvent { unit, state, pid, exit_code, restart_count, timestamp, last_error, loaded_hash }
 ```
 
 The runner keeps a persistent connection and sends a `StateEvent` on every state change and periodically as a heartbeat. The daemon never pushes and never sends a status request. The wire types (`StateEvent`, message type, state values) are defined in `internal/protocol`.
@@ -356,3 +374,5 @@ No path/binary validation at enable time in v1.
 | 10 | Missed `OnCalendar=` ticks are not caught up on daemon restart | Low |
 | 11 | `LogsDirectory=` maps under `logs_dir`, never removes directories, and `LogsDirectoryMode=` is ignored (ACLs) | Low |
 | 12 | `RuntimeDirectory=` removes directories only on final stop, not on internal auto-restart; no `RuntimeDirectoryPreserve=`; `RuntimeDirectoryMode=` is ignored (ACLs) | Low |
+| 13 | A running service uses the unit snapshot written by `enable`; file edits require `daemon-reload` + `enable` + restart | Low |
+| 14 | SCM service configuration is written only by `enable`, not by `daemon-reload` | Low |

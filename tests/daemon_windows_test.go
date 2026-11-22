@@ -4,7 +4,6 @@ package tests
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/gwg605/vsystemd/internal/protocol"
@@ -16,10 +15,10 @@ func TestDaemonReload(t *testing.T) {
 	env.store.WriteUnit("app.service", []byte("[Unit]\nDescription=App\n[Service]\nExecStart=app\n"))
 	env.store.WriteUnit("new.service", []byte("[Service]\nExecStart=new\n"))
 
-	if err := env.manager.CreateService(scm.ServiceConfig{Name: "app", BinaryPath: "old"}); err != nil {
+	if err := env.manager.CreateService(scm.ServiceConfig{Name: "app", BinaryPath: "old"}, nil); err != nil {
 		t.Fatalf("CreateService(app) error = %v", err)
 	}
-	if err := env.manager.CreateService(scm.ServiceConfig{Name: "removed", BinaryPath: "old", StartType: scm.StartTypeDisabled}); err != nil {
+	if err := env.manager.CreateService(scm.ServiceConfig{Name: "removed", BinaryPath: "old", StartType: scm.StartTypeDisabled}, nil); err != nil {
 		t.Fatalf("CreateService(removed) error = %v", err)
 	}
 
@@ -46,8 +45,8 @@ func TestDaemonReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Config(app) error = %v", err)
 	}
-	if !strings.Contains(config.BinaryPath, "--mode=run") {
-		t.Errorf("BinaryPath = %q", config.BinaryPath)
+	if config.BinaryPath != "old" {
+		t.Errorf("reload changed BinaryPath = %q", config.BinaryPath)
 	}
 	if _, err := env.manager.QueryStatus("removed"); err == nil {
 		t.Error("removed service still exists")

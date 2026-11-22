@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/gwg605/vsystemd/internal/storage"
+	"github.com/gwg605/vsystemd/internal/unit"
 )
 
 type Storage struct {
@@ -53,14 +54,14 @@ func (s *Storage) ListUnits() ([]string, error) {
 	return units, nil
 }
 
-func (s *Storage) ReadUnit(name string) ([]byte, error) {
+func (s *Storage) ReadUnit(name string) (unit.Content, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	data, ok := s.units[name]
 	if !ok {
 		return nil, fmt.Errorf("read unit %s: %w", name, os.ErrNotExist)
 	}
-	return append([]byte(nil), data...), nil
+	return unit.Content(append([]byte(nil), data...)), nil
 }
 
 func (s *Storage) ReadTimers() ([]byte, error) {

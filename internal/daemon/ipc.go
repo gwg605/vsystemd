@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -147,6 +146,7 @@ func (d *Daemon) updateFromEvent(event protocol.StateEvent) {
 		LastTransition: transition,
 		LastSeen:       time.Now().UTC(),
 		LastError:      event.LastError,
+		LoadedHash:     event.LoadedHash,
 	}
 	if had && previous.RunnerState == state.RunnerState {
 		state.LastTransition = previous.LastTransition
@@ -220,7 +220,7 @@ func (d *Daemon) verifyUnitFile(id unit.ID, content []byte) error {
 	if entry.loadState != LoadStateLoaded {
 		return fmt.Errorf("unit %s: %s", id, entry.loadError)
 	}
-	if sha256.Sum256(content) != entry.contentHash {
+	if unit.Content(content).Hash() != entry.contentHash {
 		return fmt.Errorf("unit %s changed since daemon-reload", id)
 	}
 	return nil
