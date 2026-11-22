@@ -36,6 +36,7 @@ type ServiceUnit struct {
 	StandardOutput        string
 	StandardError         string
 	LogsDirectory         []string
+	RuntimeDirectory      []string
 	StartLimitBurst       int
 	StartLimitIntervalSec time.Duration
 }

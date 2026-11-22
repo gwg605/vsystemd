@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/windows/svc"
@@ -82,16 +83,18 @@ type controlHandler struct {
 	defaults      env.Defaults
 	logs          *logStreamer
 	logsDirectory string
+	runtimeDirs   []string
 	stopTimeout   time.Duration
 }
 
-func newControlHandler(service *unit.ServiceUnit, restart *restartController, defaults env.Defaults, logs *logStreamer, logsDirectory string) *controlHandler {
+func newControlHandler(service *unit.ServiceUnit, restart *restartController, defaults env.Defaults, logs *logStreamer, logsDirectory string, runtimeDirs []string) *controlHandler {
 	return &controlHandler{
 		service:       service,
 		restart:       restart,
 		defaults:      defaults,
 		logs:          logs,
 		logsDirectory: logsDirectory,
+		runtimeDirs:   runtimeDirs,
 		stopTimeout:   resolveStopTimeout(service),
 	}
 }
@@ -362,6 +365,7 @@ func (s *handlerSession) enterAutoRestart() {
 
 func (s *handlerSession) finishStopped() {
 	s.stopTimers()
+	s.removeRuntimeDirs()
 	s.phase = phaseStopped
 	s.setStatus(svc.Status{State: svc.Stopped})
 	s.report(protocol.StateInactive, 0, s.exitCode, "")
@@ -369,10 +373,17 @@ func (s *handlerSession) finishStopped() {
 
 func (s *handlerSession) finishFailed(message string) {
 	s.stopTimers()
+	s.removeRuntimeDirs()
 	s.lastError = message
 	s.phase = phaseFailed
 	s.setStatus(svc.Status{State: svc.Stopped})
 	s.report(protocol.StateFailed, 0, s.exitCode, message)
+}
+
+func (s *handlerSession) removeRuntimeDirs() {
+	if err := removeDirectories(s.h.runtimeDirs); err != nil {
+		slog.Warn("runner: remove runtime directory failed", "error", err)
+	}
 }
 
 func (s *handlerSession) maybeResolve() {
@@ -533,6 +544,9 @@ func (h *controlHandler) environment() ([]string, error) {
 	}
 	if h.logsDirectory != "" {
 		env = setEnv(env, "LOGS_DIRECTORY", h.logsDirectory)
+	}
+	if len(h.runtimeDirs) > 0 {
+		env = setEnv(env, "RUNTIME_DIRECTORY", strings.Join(h.runtimeDirs, ";"))
 	}
 	return env, nil
 }

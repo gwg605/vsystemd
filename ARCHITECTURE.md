@@ -34,18 +34,24 @@ Supported unit types: `.service`, `.timer`
 - `Environment=`, `EnvironmentFile=`
 - `User=`
 - `StandardOutput=`, `StandardError=` (`null`, `file:<abs>`, `append:<abs>`; custom paths must be absolute, no `..`, parent directory must exist)
-- `LogsDirectory=`, `LogsDirectoryMode=` (see "Logs directory and specifiers")
+- `LogsDirectory=`, `LogsDirectoryMode=`, `RuntimeDirectory=`, `RuntimeDirectoryMode=` (see "Logs and runtime directories")
 - `After=`, `Requires=` (mapped to SCM dependencies)
 - `StartLimitBurst=`, `StartLimitIntervalSec=`
 
-### Logs directory and specifiers
+### Logs and runtime directories
 
 `LogsDirectory=` takes a space-separated list of directory names; each name is a
 single relative component without `..`. The runner creates `<logs_dir>\<name>`
 at service start and exports `LOGS_DIRECTORY` to the service (multiple paths
-joined with `;`). Unlike `RuntimeDirectory=`, the directories are never removed
-on stop. `LogsDirectoryMode=` is parsed but ignored with a warning (Windows uses
-ACLs, not Unix mode bits).
+joined with `;`). The directories are never removed. `LogsDirectoryMode=` is
+parsed but ignored with a warning (Windows uses ACLs, not Unix mode bits).
+
+`RuntimeDirectory=` has the same list form but is rooted at `run_dir` and
+exported as `RUNTIME_DIRECTORY`. The directories are recreated (wiped and
+created) at service start and removed when the service finally stops or fails;
+an internal `Restart=` (auto-restart inside the runner) leaves them in place.
+`RuntimeDirectoryMode=` is parsed but ignored with a warning. There is no
+`RuntimeDirectoryPreserve=`.
 
 systemd-style specifiers are expanded in `StandardOutput=`, `StandardError=`,
 `WorkingDirectory=` and in `Environment=` values (not in `EnvironmentFile=`):
@@ -349,3 +355,4 @@ No path/binary validation at enable time in v1.
 | 9 | `OnCalendar=` timers do not fire if daemon is stopped | Low — daemon is a system service |
 | 10 | Missed `OnCalendar=` ticks are not caught up on daemon restart | Low |
 | 11 | `LogsDirectory=` maps under `logs_dir`, never removes directories, and `LogsDirectoryMode=` is ignored (ACLs) | Low |
+| 12 | `RuntimeDirectory=` removes directories only on final stop, not on internal auto-restart; no `RuntimeDirectoryPreserve=`; `RuntimeDirectoryMode=` is ignored (ACLs) | Low |

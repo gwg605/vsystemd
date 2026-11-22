@@ -581,6 +581,7 @@ type ServiceUnit struct {
     StandardOutput        string
     StandardError         string
     LogsDirectory         []string
+    RuntimeDirectory      []string
     StartLimitBurst       int
     StartLimitIntervalSec time.Duration
 }
@@ -596,14 +597,14 @@ type TimerUnit struct {
 Directives by section:
 
 - `[Unit]`: `Description`, `After`, `Requires`, `Wants` (other ordering directives are parsed but ignored with a warning).
-- `[Service]`: `ExecStart`, `ExecStartPre`, `ExecStartPost`, `ExecStop`, `Restart`, `RestartSec`, `TimeoutStopSec`, `WorkingDirectory`, `Environment`, `EnvironmentFile`, `User`, `StandardOutput`, `StandardError`, `LogsDirectory`, `LogsDirectoryMode`, `StartLimitBurst`, `StartLimitIntervalSec`.
+- `[Service]`: `ExecStart`, `ExecStartPre`, `ExecStartPost`, `ExecStop`, `Restart`, `RestartSec`, `TimeoutStopSec`, `WorkingDirectory`, `Environment`, `EnvironmentFile`, `User`, `StandardOutput`, `StandardError`, `LogsDirectory`, `LogsDirectoryMode`, `RuntimeDirectory`, `RuntimeDirectoryMode`, `StartLimitBurst`, `StartLimitIntervalSec`.
 - `[Timer]`: `OnCalendar`, `OnBootSec`, `OnStartupSec`, `Unit`.
 
 `UnitFile.Dependencies()` returns the service units referenced by `After=`/`Requires=`, de-duplicated in declaration order; the daemon maps them to SCM dependencies. `ResolveOutputs(stdout, stderr)` resolves raw `StandardOutput`/`StandardError` values into output targets (`null`, `file:<abs>`, `append:<abs>`, or a managed log file).
 
 #### 4.7.1 Logs directory and specifier resolution
 
-`LogsDirectory=` populates `ServiceUnit.LogsDirectory`; `LogsDirectoryMode=` is parsed but only warns. The runner creates the directories (`internal/runner`: `resolveLogsDirectories`, `ensureDirectories`) and sets `LOGS_DIRECTORY`, and expands `${NAME}` references in `Exec*=` command lines.
+`LogsDirectory=` and `RuntimeDirectory=` populate `ServiceUnit.LogsDirectory`/`RuntimeDirectory`; the `…Mode=` directives are parsed but only warn. The runner resolves names with `internal/runner` `resolveDirectories` (single relative component, no `..`), creates logs with `ensureDirectories`, and resets runtime dirs with `resetDirectories` (wipe + create). It sets `LOGS_DIRECTORY`/`RUNTIME_DIRECTORY` (`;`-joined) and expands `${NAME}` references in `Exec*=` command lines. Runtime dirs are removed by `removeDirectories` on the final stop/failure.
 
 Specifier expansion is implemented in `internal/specifiers` (`Expand` over `Values`) and `internal/unitpath` (`NewValues`, `ResolveService`), and is shared by the runner, the daemon `status` log tail and `systemctl enable`. `%h` resolves to the home of the process performing the expansion, so it may differ between the running service (service account) and `status`/`enable`. The specifier set and the Windows mapping of each specifier are in ARCHITECTURE.md.
 
