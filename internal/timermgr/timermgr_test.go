@@ -178,7 +178,7 @@ func TestSetTimerReschedulesOnChange(t *testing.T) {
 	}
 	before, _ := m.QueryStatus("job.timer")
 
-	if err := m.SetTimer(TimerConfig{Name: "job.timer", OnCalendar: []string{"weekly"}}); err != nil {
+	if err := m.SetTimer(TimerConfig{Name: "job.timer", OnCalendar: []string{"*-*-* 12:00:00"}}); err != nil {
 		t.Fatalf("SetTimer(change) error = %v", err)
 	}
 	after, _ := m.QueryStatus("job.timer")
@@ -189,7 +189,7 @@ func TestSetTimerReschedulesOnChange(t *testing.T) {
 		t.Errorf("next run was not recomputed: %v", after.NextRun)
 	}
 	cfg, err := m.GetTimer("job.timer")
-	if err != nil || len(cfg.OnCalendar) != 1 || cfg.OnCalendar[0] != "weekly" {
+	if err != nil || len(cfg.OnCalendar) != 1 || cfg.OnCalendar[0] != "*-*-* 12:00:00" {
 		t.Errorf("GetTimer() = %+v, %v", cfg, err)
 	}
 }
