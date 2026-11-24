@@ -10,6 +10,7 @@ func TestParseService(t *testing.T) {
 	data := []byte(`# Example service
 [Unit]
 Description=Example service
+DisplayName=Example Display
 After=network.target
 Requires=db.service
 Wants=redis.service
@@ -50,6 +51,9 @@ StartLimitIntervalSec=30s
 	}
 	if file.Description != "Example service" {
 		t.Errorf("Description = %q", file.Description)
+	}
+	if file.DisplayName != "Example Display" {
+		t.Errorf("DisplayName = %q", file.DisplayName)
 	}
 	if !reflect.DeepEqual(file.After, []string{"network.target"}) {
 		t.Errorf("After = %v", file.After)

@@ -19,6 +19,7 @@ func FromUnit(file *unit.UnitFile, binaryPath string, startType scm.StartType, c
 		StartType:    startType,
 		Dependencies: file.Dependencies(),
 		User:         scm.NewAccount(file.Service.User, file.Name.Name),
+		DisplayName:  file.DisplayName,
 		Description:  file.Description,
 	}
 }

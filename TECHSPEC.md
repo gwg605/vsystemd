@@ -568,6 +568,7 @@ The production `Storage` implementation is file-backed under a fixed root (`C:\P
 type UnitFile struct {
     Name        ID
     Description string
+    DisplayName string
     After       []string
     Requires    []string
     Wants       []string
@@ -609,7 +610,7 @@ type TimerUnit struct {
 
 Directives by section:
 
-- `[Unit]`: `Description`, `After`, `Requires`, `Wants` (other ordering directives are parsed but ignored with a warning).
+- `[Unit]`: `Description`, `DisplayName`, `After`, `Requires`, `Wants` (other ordering directives are parsed but ignored with a warning).
 - `[Service]`: `ExecStart`, `ExecStartPre`, `ExecStartPost`, `ExecStop`, `Restart`, `RestartSec`, `TimeoutStopSec`, `WorkingDirectory`, `Environment`, `EnvironmentFile`, `User`, `Group`, `StandardOutput`, `StandardError`, `LogsDirectory`, `LogsDirectoryMode`, `RuntimeDirectory`, `RuntimeDirectoryMode`, `StartLimitBurst`, `StartLimitIntervalSec`.
 - `[Timer]`: `OnCalendar`, `OnBootSec`, `OnStartupSec`, `Unit`.
 

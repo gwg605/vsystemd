@@ -1,5 +1,6 @@
 [Unit]
 Description=Diagnostic monitor (process/console info and ticks to file1)
+DisplayName=Diagnostic Monitor
 
 [Service]
 ExecStart=C:\vsystemd-example\monitor\build\bin\monitor.exe

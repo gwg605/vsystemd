@@ -105,6 +105,7 @@ All other timer directives (`OnUnitActiveSec=`, `OnUnitInactiveSec=`, `Persisten
 ### [Unit] directives (v1)
 
 - `Description=`
+- `DisplayName=` (Windows SCM display name; defaults to the service name)
 - `After=`, `Requires=`, `Wants=`
 
 ---
