@@ -356,7 +356,7 @@ non-elevated processes, and `enable`/`start`/`stop` use SCM directly. The
 `systemctl --version` prints the version and compiled feature flags:
 
 ```
-systemctl 0.2.0
+systemctl 0.2.1
 +WIN32 +SCM +PIPE +TIMERS +LOGROTATE
 ```
 
