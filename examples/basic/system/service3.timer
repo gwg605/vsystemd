@@ -1,5 +1,6 @@
 [Unit]
 Description=Run service3 every 7 seconds
+DisplayName=Example Timer 3
 
 [Timer]
 OnCalendar=*:*:00/7

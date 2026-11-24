@@ -18,6 +18,7 @@ const (
 type UnitFile struct {
 	Name        ID
 	Description string
+	DisplayName string
 	After       []string
 	Requires    []string
 	Wants       []string

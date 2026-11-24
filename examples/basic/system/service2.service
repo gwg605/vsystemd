@@ -1,5 +1,6 @@
 [Unit]
 Description=Basic example service 2 (writes time to file2 every 15 seconds)
+DisplayName=Example Service 2
 Requires=service1.service
 After=service1.service
 

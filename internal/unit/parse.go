@@ -99,6 +99,8 @@ func (u *UnitFile) applyUnit(key, value string) {
 	switch key {
 	case "Description":
 		u.Description = value
+	case "DisplayName":
+		u.DisplayName = value
 	case "After":
 		u.After = append(u.After, strings.Fields(value)...)
 	case "Requires":

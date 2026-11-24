@@ -11,6 +11,7 @@ func TestFromUnit(t *testing.T) {
 	file := &unit.UnitFile{
 		Name:        unit.ID{Name: "app", Type: unit.TypeService},
 		Description: "App",
+		DisplayName: "App Service",
 		Requires:    []string{"db.service"},
 		Service:     &unit.ServiceUnit{},
 	}
@@ -34,5 +35,8 @@ func TestFromUnit(t *testing.T) {
 	}
 	if cfg.Description != "App" {
 		t.Errorf("Description = %q", cfg.Description)
+	}
+	if cfg.DisplayName != "App Service" {
+		t.Errorf("DisplayName = %q", cfg.DisplayName)
 	}
 }
